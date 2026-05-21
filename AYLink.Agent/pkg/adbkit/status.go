@@ -1,0 +1,9 @@
+﻿package adbkit
+
+const (
+	StatusOkay     = "OKAY"
+	StatusFail     = "FAIL"
+	StatusSyncData = "DATA"
+	StatusSyncDone = "DONE"
+	StatusNone     = ""
+)

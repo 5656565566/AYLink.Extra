@@ -1,0 +1,270 @@
+:root,
+:root[data-theme="dark"] {
+  /* Fluent Design Tokens - Dark Mode (Perfect matching Avalonia) */
+  --fluent-bg-base: #202020;
+  --fluent-bg-layer: #272727;
+  --fluent-bg-solid: #2d2d2d;
+
+  /* Control Backgrounds */
+  --fluent-control-fill-default: rgba(255, 255, 255, 0.06);
+  --fluent-control-fill-secondary: rgba(255, 255, 255, 0.08);
+  --fluent-control-fill-tertiary: rgba(255, 255, 255, 0.04);
+  --fluent-control-fill-disabled: rgba(255, 255, 255, 0.02);
+  --fluent-control-fill-transparent: transparent;
+  --fluent-control-fill-accent-default: #8A2BE2;
+  --fluent-control-fill-accent-hover: #7C27CB;
+  --fluent-control-fill-accent-active: #7124B9;
+
+  /* Text Colors */
+  --fluent-text-primary: #ffffff;
+  --fluent-text-secondary: rgba(255, 255, 255, 0.78);
+  --fluent-text-tertiary: rgba(255, 255, 255, 0.54);
+  --fluent-text-disabled: rgba(255, 255, 255, 0.36);
+  --fluent-text-on-accent: #000000;
+
+  /* Borders */
+  --fluent-stroke-default: rgba(255, 255, 255, 0.08);
+  --fluent-stroke-secondary: rgba(255, 255, 255, 0.1);
+  --fluent-stroke-focus: #ffffff;
+  --fluent-scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --fluent-scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  
+  /* Accent */
+  --fluent-accent-default: #8A2BE2;
+
+  /* Typography */
+  --fluent-font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+}
+
+:root[data-theme="light"] {
+  --fluent-bg-base: #f3f3f3;
+  --fluent-bg-layer: #ffffff;
+  --fluent-bg-solid: #ffffff;
+
+  --fluent-control-fill-default: rgba(255, 255, 255, 0.7);
+  --fluent-control-fill-secondary: rgba(0, 0, 0, 0.04);
+  --fluent-control-fill-tertiary: rgba(0, 0, 0, 0.02);
+  --fluent-control-fill-disabled: rgba(0, 0, 0, 0.02);
+  --fluent-control-fill-transparent: transparent;
+  --fluent-control-fill-accent-default: #8A2BE2;
+  --fluent-control-fill-accent-hover: #7C27CB;
+  --fluent-control-fill-accent-active: #7124B9;
+
+  --fluent-text-primary: rgba(0, 0, 0, 0.9);
+  --fluent-text-secondary: rgba(0, 0, 0, 0.62);
+  --fluent-text-tertiary: rgba(0, 0, 0, 0.45);
+  --fluent-text-disabled: rgba(0, 0, 0, 0.36);
+  --fluent-text-on-accent: #ffffff;
+
+  --fluent-stroke-default: rgba(0, 0, 0, 0.08);
+  --fluent-stroke-secondary: rgba(0, 0, 0, 0.12);
+  --fluent-stroke-focus: #000000;
+  --fluent-scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --fluent-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
+
+  --fluent-accent-default: #8A2BE2;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color-scheme: dark light;
+  margin: 0;
+  font-family: var(--fluent-font-family);
+  background-color: var(--fluent-bg-base);
+  color: var(--fluent-text-primary);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+  display: flex;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-resizer {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-clip: padding-box;
+  border: 4px solid transparent;
+  border-radius: 9999px;
+  background-color: var(--fluent-scrollbar-thumb, rgba(255, 255, 255, 0.2));
+}
+
+::-webkit-scrollbar-thumb:hover {
+  border: 3px solid transparent;
+  background-color: var(--fluent-scrollbar-thumb-hover, rgba(255, 255, 255, 0.3));
+}
+
+/* Global Transitions */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+/* Base Interactive Elements */
+button {
+  font-family: inherit;
+  border: 1px solid var(--fluent-stroke-default);
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.1s, border-color 0.1s, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+button:active {
+  background: var(--fluent-control-fill-tertiary);
+  color: var(--fluent-text-secondary);
+  transform: scale(0.96);
+}
+
+button.primary {
+  background: var(--fluent-accent-default);
+  color: var(--fluent-text-on-accent);
+  border: 1px solid transparent;
+}
+
+button.primary:hover {
+  background: var(--fluent-control-fill-accent-hover);
+}
+
+button.primary:active {
+  background: var(--fluent-control-fill-accent-active);
+}
+
+button.transparent {
+  background: transparent;
+  border-color: transparent;
+}
+
+button.transparent:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+button.transparent:active {
+  background: var(--fluent-control-fill-tertiary);
+}
+
+input[type="text"], input[type="password"], input[type="number"], select {
+  font-family: inherit;
+  background: var(--fluent-control-fill-default);
+  border: 1px solid var(--fluent-stroke-default);
+  border-bottom: 1px solid var(--fluent-text-secondary);
+  color: var(--fluent-text-primary);
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+input[type="text"]:hover, input[type="password"]:hover, input[type="number"]:hover, select:hover {
+  background-color: var(--fluent-control-fill-secondary);
+}
+
+input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus, select:focus {
+  background-color: var(--fluent-bg-solid);
+  border-bottom-color: var(--fluent-accent-default);
+  box-shadow: inset 0 -1px 0 0 var(--fluent-accent-default);
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  appearance: textfield;
+}
+
+select {
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' opacity='0.7'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  cursor: pointer;
+}
+
+[data-theme="light"] select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' opacity='0.6'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+}
+
+select option {
+  background-color: var(--fluent-bg-layer);
+  color: var(--fluent-text-primary);
+  padding: 8px 12px;
+}
+
+:root[data-theme="dark"] 
+
+:root[data-theme="light"] 
+
+
+
+
+body.has-background-image .layout,
+body.has-background-image .full-screen-layout {
+  backdrop-filter: blur(25px) saturate(150%);
+  -webkit-backdrop-filter: blur(25px) saturate(150%);
+}
+
+:root[data-theme="dark"] body.has-background-image {
+  --fluent-bg-base: rgba(32, 32, 32, 0.35);
+  --fluent-bg-layer: rgba(39, 39, 39, 0.45);
+  --fluent-bg-solid: rgba(45, 45, 45, 0.6);
+}
+
+:root[data-theme="light"] body.has-background-image {
+  --fluent-bg-base: rgba(243, 243, 243, 0.35);
+  --fluent-bg-layer: rgba(255, 255, 255, 0.45);
+  --fluent-bg-solid: rgba(255, 255, 255, 0.6);
+}

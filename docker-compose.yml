@@ -1,0 +1,20 @@
+services:
+  aylink:
+    image: 5656565566/aylink.agent:latest
+    container_name: aylink
+    restart: unless-stopped
+    ports:
+      - "5501:5501"    # Agent HTTP 端口
+    volumes:
+      - ./data:/app/data   # 将数据库等持久化数据挂载到宿主机的 ./data 目录
+      # 如果需要自定义配置 JSON，可以挂载：
+      # - ./config.json:/app/config.json
+    environment:
+      - TZ=Asia/Shanghai   # 设置时区
+      # 环境变量配置 (优先级高于 config.json)
+      - AYLINK_DB_PATH=/app/data/aylink.db
+      - AYLINK_HTTP_LISTENADDR=:5501
+      - AYLINK_ADB_PATH=/usr/bin/adb        # Docker 镜像已内置 android-tools，直接指向系统 adb
+      # - AYLINK_ADB_SERVERHOST=127.0.0.1
+      # - AYLINK_ADB_SERVERPORT=5037
+    # network_mode: host   # 如果你的 adb/webrtc 有特殊网络需求，可以考虑使用 host 网络模式

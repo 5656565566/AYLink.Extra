@@ -1,0 +1,174 @@
+name: Build and Release AYLink
+
+on:
+  push:
+    tags:
+      - '*'
+  pull_request:
+    branches: [ main ]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  SCRCPY_SERVER_VERSION: '4.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25.1'
+        cache: true
+        cache-dependency-path: AYLink.Agent/go.sum
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: './AYLink.Web/package-lock.json'
+
+    - name: Download scrcpy-server
+      run: |
+        chmod +x ./scripts/download-scrcpy-server.sh
+        ./scripts/download-scrcpy-server.sh ./AYLink.Agent/Scrcpy
+      shell: bash
+
+    - name: Build with Makefile
+      # 直接使用 Makefile 构建所有平台
+      run: make agent
+      
+    - name: Package artifacts
+      run: |
+        rm -rf release-packages
+        mkdir -p release-packages
+
+        package_release() {
+          platform_name="$1"
+          binary_name="$2"
+          archive_ext="$3"
+          staging_dir="release-packages/${platform_name}"
+
+          mkdir -p "${staging_dir}/Scrcpy"
+          cp "bin/${binary_name}" "${staging_dir}/"
+          cp "AYLink.Agent/Scrcpy/scrcpy-server" "${staging_dir}/Scrcpy/scrcpy-server"
+
+          if [ "${archive_ext}" = "zip" ]; then
+            (
+              cd "${staging_dir}"
+              zip -r "../../bin/AYLink.Agent-${{ github.ref_name }}-${platform_name}.zip" .
+            )
+          else
+            tar czvf "bin/AYLink.Agent-${{ github.ref_name }}-${platform_name}.tar.gz" -C "${staging_dir}" .
+          fi
+        }
+
+        package_release "windows-amd64" "AYLink-Agent-windows-amd64.exe" "zip"
+        package_release "windows-arm64" "AYLink-Agent-windows-arm64.exe" "zip"
+        package_release "linux-amd64" "AYLink-Agent-linux-amd64" "tar.gz"
+        package_release "linux-arm64" "AYLink-Agent-linux-arm64" "tar.gz"
+        package_release "macos-amd64" "AYLink-Agent-darwin-amd64" "tar.gz"
+        package_release "macos-arm64" "AYLink-Agent-darwin-arm64" "tar.gz"
+      shell: bash
+
+    - name: Upload binaries
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-artifact@v6
+      with:
+        name: aylink-binaries
+        path: |
+          bin/*.zip
+          bin/*.tar.gz
+
+  docker-build:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_HUB_USERNAME }}
+        password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+    - name: Build and push Docker image
+      run: |
+        export VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
+      
+        docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --build-arg SCRCPY_SERVER_VERSION=${SCRCPY_SERVER_VERSION} \
+        --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:$VERSION \
+        --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest \
+        --push \
+        .
+
+        docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --build-arg SCRCPY_SERVER_VERSION=${SCRCPY_SERVER_VERSION} \
+        --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:$VERSION \
+        --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest \
+        --output type=oci \
+        . > AYLink.Agent-docker.tar
+      
+        mkdir -p docker-release
+        mv AYLink.Agent-docker.tar docker-release/AYLink.Agent-docker-oci-$VERSION.tar
+        gzip docker-release/AYLink.Agent-docker-oci-$VERSION.tar
+
+    - name: Upload Docker artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: AYLink.Agent-docker-image
+        path: docker-release/*.tar.gz
+
+  release:
+    needs: [build, docker-build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v6
+      with:
+        path: artifacts
+        merge-multiple: true
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: AYLink ${{ github.ref_name }}
+        body: |
+          Built for multiple platforms including Linux, macOS and Windows.
+          
+          - Multi-platform support (amd64, arm64)
+          - Docker images available on Docker Hub
+
+          - Docker 离线镜像为 OCI 标准 无法在老版本的 docker (20.10 之前) 中使用
+          - 推荐直接使用 \`docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest\` 获取最新镜像
+          - 也可以 直接使用 docker-compose.yml 快速部署
+        files: |
+          artifacts/AYLink.Agent-${{ github.ref_name }}-*.tar.gz
+          artifacts/AYLink.Agent-${{ github.ref_name }}-*.zip
+          artifacts/AYLink.Agent-docker-oci-*.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

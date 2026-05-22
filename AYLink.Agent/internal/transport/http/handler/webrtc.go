@@ -31,14 +31,15 @@ type WebRTCHandler struct {
 }
 
 type managedRuntime struct {
-	deviceID   string
-	signature  string
-	runtime    domainscrcpy.Runtime
-	refCount   int
-	starting   bool
-	ready      chan struct{}
-	startErr   error
-	lastUsedAt time.Time
+	deviceID    string
+	signature   string
+	sessionRefs map[string]int
+	runtime     domainscrcpy.Runtime
+	refCount    int
+	starting    bool
+	ready       chan struct{}
+	startErr    error
+	lastUsedAt  time.Time
 }
 
 func NewWebRTCHandler(service *webrtcservice.Service, settings *settingsservice.Service, scrcpy *scrcpyservice.Service) *WebRTCHandler {
@@ -99,7 +100,8 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 	}
 
 	var payload struct {
-		DeviceID string `json:"deviceId"`
+		DeviceID  string `json:"deviceId"`
+		SessionID string `json:"sessionId"`
 	}
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
@@ -107,9 +109,14 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 	}
 
 	payload.DeviceID = strings.TrimSpace(payload.DeviceID)
+	payload.SessionID = strings.TrimSpace(payload.SessionID)
 	if heartbeat {
-		success, err := h.service.TouchSession(r.Context(), payload.DeviceID)
+		success, err := h.service.TouchSession(r.Context(), payload.DeviceID, payload.SessionID)
 		if err != nil {
+			if errors.Is(err, webrtcservice.ErrSessionIDRequired) {
+				WriteError(w, http.StatusBadRequest, "SESSION_ID_REQUIRED", "WebRTC.SessionIdRequired", "sessionId 不能为空")
+				return
+			}
 			WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
 			return
 		}
@@ -117,9 +124,16 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.service.ReleaseSession(r.Context(), payload.DeviceID); err != nil {
+	if err := h.service.ReleaseSession(r.Context(), payload.DeviceID, payload.SessionID); err != nil {
+		if errors.Is(err, webrtcservice.ErrSessionIDRequired) {
+			WriteError(w, http.StatusBadRequest, "SESSION_ID_REQUIRED", "WebRTC.SessionIdRequired", "sessionId 不能为空")
+			return
+		}
 		WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
 		return
+	}
+	if !h.service.HasActiveSessionLease(payload.DeviceID) {
+		h.forceCloseRuntime(payload.DeviceID)
 	}
 	h.cleanupIdleRuntimes()
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -148,7 +162,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	h.service.MarkSessionStarted(ticket.DeviceID)
+	h.service.MarkSessionStarted(ticket.DeviceID, ticket.SessionID)
 	deviceID, err := strconv.Atoi(ticket.DeviceID)
 	if err != nil {
 		_ = conn.WriteJSON(map[string]any{
@@ -165,7 +179,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		AppName:    ticket.AppName,
 		NewDisplay: ticket.NewDisplay,
 	}
-	runtime, created, err := h.acquireRuntime(r.Context(), ticket.DeviceID, deviceID, options)
+	runtime, created, err := h.acquireRuntime(r.Context(), ticket.DeviceID, ticket.SessionID, deviceID, options)
 	if err != nil {
 		_ = conn.WriteJSON(map[string]any{
 			"type":    "error",
@@ -176,7 +190,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() {
-		h.releaseRuntime(ticket.DeviceID)
+		h.releaseRuntime(ticket.DeviceID, ticket.SessionID)
 		h.cleanupIdleRuntimes()
 	}()
 
@@ -194,7 +208,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.service.HandleSignalWebSocket(context.Background(), conn, h.settings, runtime); err != nil {
+	if err := h.service.HandleSignalWebSocket(context.Background(), ticket.DeviceID, conn, h.settings, runtime); err != nil {
 		_ = conn.WriteJSON(map[string]any{
 			"type":    "error",
 			"message": "WebRTC 信令处理失败",
@@ -206,6 +220,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 func (h *WebRTCHandler) acquireRuntime(
 	ctx context.Context,
 	deviceKey string,
+	sessionID string,
 	deviceID int,
 	options scrcpyservice.WebRTCRuntimeOptions,
 ) (domainscrcpy.Runtime, bool, error) {
@@ -224,6 +239,12 @@ func (h *WebRTCHandler) acquireRuntime(
 
 			if entry.runtime != nil && entry.signature == signature {
 				entry.refCount++
+				if sessionID != "" {
+					if entry.sessionRefs == nil {
+						entry.sessionRefs = make(map[string]int)
+					}
+					entry.sessionRefs[sessionID]++
+				}
 				entry.lastUsedAt = time.Now().UTC()
 				h.runtimeMu.Unlock()
 				return entry.runtime, false, nil
@@ -244,12 +265,16 @@ func (h *WebRTCHandler) acquireRuntime(
 		}
 
 		entry = &managedRuntime{
-			deviceID:   deviceKey,
-			signature:  signature,
-			refCount:   1,
-			starting:   true,
-			ready:      make(chan struct{}),
-			lastUsedAt: time.Now().UTC(),
+			deviceID:    deviceKey,
+			signature:   signature,
+			sessionRefs: map[string]int{},
+			refCount:    1,
+			starting:    true,
+			ready:       make(chan struct{}),
+			lastUsedAt:  time.Now().UTC(),
+		}
+		if sessionID != "" {
+			entry.sessionRefs[sessionID] = 1
 		}
 		h.runtimes[deviceKey] = entry
 		h.runtimeMu.Unlock()
@@ -275,7 +300,7 @@ func (h *WebRTCHandler) acquireRuntime(
 	}
 }
 
-func (h *WebRTCHandler) releaseRuntime(deviceID string) {
+func (h *WebRTCHandler) releaseRuntime(deviceID string, sessionID string) {
 	if deviceID == "" {
 		return
 	}
@@ -287,8 +312,20 @@ func (h *WebRTCHandler) releaseRuntime(deviceID string) {
 	if entry == nil {
 		return
 	}
+	if sessionID != "" {
+		if entry.sessionRefs == nil || entry.sessionRefs[sessionID] == 0 {
+			return
+		}
+		entry.sessionRefs[sessionID]--
+		if entry.sessionRefs[sessionID] <= 0 {
+			delete(entry.sessionRefs, sessionID)
+		}
+	}
 	if entry.refCount > 0 {
 		entry.refCount--
+	}
+	if entry.refCount == 0 {
+		entry.sessionRefs = make(map[string]int)
 	}
 	entry.lastUsedAt = time.Now().UTC()
 }
@@ -320,6 +357,23 @@ func (h *WebRTCHandler) cleanupIdleRuntimes() {
 	h.runtimeMu.Unlock()
 
 	for _, entry := range stale {
+		_ = entry.runtime.Close()
+	}
+}
+
+func (h *WebRTCHandler) forceCloseRuntime(deviceID string) {
+	if deviceID == "" {
+		return
+	}
+
+	h.runtimeMu.Lock()
+	entry := h.runtimes[deviceID]
+	if entry != nil {
+		delete(h.runtimes, deviceID)
+	}
+	h.runtimeMu.Unlock()
+
+	if entry != nil && entry.runtime != nil {
 		_ = entry.runtime.Close()
 	}
 }

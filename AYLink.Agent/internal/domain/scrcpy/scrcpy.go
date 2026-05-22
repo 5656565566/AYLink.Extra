@@ -96,9 +96,9 @@ type AudioPacket struct {
 }
 
 type Runtime interface {
-	VideoPackets() <-chan VideoPacket
-	AudioPackets() <-chan AudioPacket
-	Errors() <-chan error
+	SubscribeVideoPackets() (<-chan VideoPacket, func())
+	SubscribeAudioPackets() (<-chan AudioPacket, func())
+	SubscribeErrors() (<-chan error, func())
 	SendControl([]byte) error
 	Close() error
 }

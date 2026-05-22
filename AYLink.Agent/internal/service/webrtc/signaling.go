@@ -23,7 +23,7 @@ type SettingsProvider interface {
 
 const signalingDisconnectGracePeriod = 20 * time.Second
 
-func (s *Service) HandleSignalWebSocket(ctx context.Context, conn *websocket.Conn, settings SettingsProvider, runtime domainscrcpy.Runtime) error {
+func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, conn *websocket.Conn, settings SettingsProvider, runtime domainscrcpy.Runtime) error {
 	debugWebRTC := s.debugWebRTC
 	api, config, rewriteCandidates, err := s.buildPeerConfiguration(ctx, settings)
 	if err != nil {
@@ -138,7 +138,7 @@ func (s *Service) HandleSignalWebSocket(ctx context.Context, conn *websocket.Con
 					"err", err,
 				)
 			}
-			if s.waitForPeerConnectionAfterSignalDetach(ctx, peerConnection, &stateMu, &currentPeerState, peerStateChanged) {
+			if s.waitForPeerConnectionAfterSignalDetach(ctx, deviceID, peerConnection, &stateMu, &currentPeerState, peerStateChanged) {
 				return nil
 			}
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
@@ -173,6 +173,7 @@ func (s *Service) HandleSignalWebSocket(ctx context.Context, conn *websocket.Con
 
 func (s *Service) waitForPeerConnectionAfterSignalDetach(
 	ctx context.Context,
+	deviceID string,
 	peerConnection *pion.PeerConnection,
 	stateMu *sync.RWMutex,
 	currentPeerState *pion.PeerConnectionState,
@@ -194,6 +195,11 @@ func (s *Service) waitForPeerConnectionAfterSignalDetach(
 	defer stopDisconnectTimer()
 
 	for {
+		if !s.HasActiveSessionLease(deviceID) {
+			_ = peerConnection.Close()
+			return true
+		}
+
 		stateMu.RLock()
 		state := *currentPeerState
 		stateMu.RUnlock()

@@ -16,6 +16,7 @@ import (
 
 var (
 	ErrDeviceIDRequired = errors.New("device id required")
+	ErrSessionIDRequired = errors.New("session id required")
 	ErrTicketNotFound   = errors.New("ticket not found")
 )
 
@@ -40,6 +41,7 @@ type CreateTicketInput struct {
 
 type CreateTicketResult struct {
 	Ticket           string `json:"ticket"`
+	SessionID        string `json:"sessionId"`
 	ExpiresInSeconds int    `json:"expiresInSeconds"`
 }
 
@@ -72,6 +74,7 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 
 	ticket := domainwebrtc.Ticket{
 		Value:      value,
+		SessionID:  value,
 		DeviceID:   input.DeviceID,
 		AppPackage: input.AppPackage,
 		AppName:    input.AppName,
@@ -82,6 +85,7 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 
 	return CreateTicketResult{
 		Ticket:           value,
+		SessionID:        value,
 		ExpiresInSeconds: int(s.ticketTTL.Seconds()),
 	}, nil
 }
@@ -99,9 +103,12 @@ func (s *Service) ConsumeTicket(_ context.Context, value string) (domainwebrtc.T
 	return ticket, nil
 }
 
-func (s *Service) TouchSession(_ context.Context, deviceID string) (bool, error) {
+func (s *Service) TouchSession(_ context.Context, deviceID string, sessionID string) (bool, error) {
 	if deviceID == "" {
 		return false, ErrDeviceIDRequired
+	}
+	if sessionID == "" {
+		return false, ErrSessionIDRequired
 	}
 
 	s.mu.Lock()
@@ -109,36 +116,43 @@ func (s *Service) TouchSession(_ context.Context, deviceID string) (bool, error)
 
 	s.cleanupLocked()
 	now := s.now()
-	lease, ok := s.sessionLeases[deviceID]
-	if !ok {
+	lease, ok := s.sessionLeases[sessionID]
+	if !ok || lease.DeviceID != deviceID {
 		return false, nil
 	}
 	lease.UpdatedAt = now
 	lease.ExpiresAt = now.Add(s.leaseTTL)
-	s.sessionLeases[deviceID] = lease
+	s.sessionLeases[sessionID] = lease
 	return true, nil
 }
 
-func (s *Service) ReleaseSession(_ context.Context, deviceID string) error {
+func (s *Service) ReleaseSession(_ context.Context, deviceID string, sessionID string) error {
 	if deviceID == "" {
 		return ErrDeviceIDRequired
+	}
+	if sessionID == "" {
+		return ErrSessionIDRequired
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.sessionLeases, deviceID)
+	lease, ok := s.sessionLeases[sessionID]
+	if ok && lease.DeviceID == deviceID {
+		delete(s.sessionLeases, sessionID)
+	}
 	return nil
 }
 
-func (s *Service) MarkSessionStarted(deviceID string) {
-	if deviceID == "" {
+func (s *Service) MarkSessionStarted(deviceID string, sessionID string) {
+	if deviceID == "" || sessionID == "" {
 		return
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	s.sessionLeases[deviceID] = domainwebrtc.SessionLease{
+	s.sessionLeases[sessionID] = domainwebrtc.SessionLease{
+		SessionID: sessionID,
 		DeviceID:  deviceID,
 		UpdatedAt: now,
 		ExpiresAt: now.Add(s.leaseTTL),
@@ -154,8 +168,12 @@ func (s *Service) HasActiveSessionLease(deviceID string) bool {
 	defer s.mu.Unlock()
 
 	s.cleanupLocked()
-	lease, ok := s.sessionLeases[deviceID]
-	return ok && lease.ExpiresAt.After(s.now())
+	for _, lease := range s.sessionLeases {
+		if lease.DeviceID == deviceID && lease.ExpiresAt.After(s.now()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) cleanupLocked() {

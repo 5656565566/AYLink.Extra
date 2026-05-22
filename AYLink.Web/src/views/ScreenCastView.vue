@@ -311,6 +311,7 @@ let isStartConnectionInFlight = false;
 let activeConnectionTargetKey = '';
 let detachedSignalingConnectionId = 0;
 let expectedSignalingCloseConnectionId = 0;
+let currentScrcpySessionId = '';
 
 interface PendingPointerMove {
   pointerId: number;
@@ -338,6 +339,7 @@ interface PersistedCastConnection {
   appPackageName: string;
   appDisplayName: string;
   newDisplay: boolean;
+  sessionId: string;
   persistedAt: number;
   peerConnection: RTCPeerConnection;
   ws: WebSocket | null;
@@ -522,14 +524,14 @@ const stopScrcpySessionHeartbeat = () => {
   }
 };
 
-const startScrcpySessionHeartbeat = (targetDeviceId: string) => {
+const startScrcpySessionHeartbeat = (targetDeviceId: string, sessionId: string) => {
   stopScrcpySessionHeartbeat();
-  if (!targetDeviceId) {
+  if (!targetDeviceId || !sessionId) {
     return;
   }
 
   const tick = () => {
-    void postScrcpySessionAction('heartbeat', targetDeviceId);
+    void postScrcpySessionAction('heartbeat', targetDeviceId, sessionId);
   };
 
   tick();
@@ -652,17 +654,17 @@ const schedulePersistTabs = () => {
   pendingPersistTabsTimer = window.setTimeout(flushPersistTabs, 0);
 };
 
-const postScrcpySessionAction = async (action: 'heartbeat' | 'release', targetDeviceId: string) => {
-  if (!targetDeviceId) {
+const postScrcpySessionAction = async (action: 'heartbeat' | 'release', targetDeviceId: string, sessionId: string) => {
+  if (!targetDeviceId || !sessionId) {
     return;
   }
 
   try {
-    console.debug('[WebRTC] Session action ->', action, { deviceId: targetDeviceId });
+    console.debug('[WebRTC] Session action ->', action, { deviceId: targetDeviceId, sessionId });
     await apiFetch(`/api/scrcpy-sessions/${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId: targetDeviceId })
+      body: JSON.stringify({ deviceId: targetDeviceId, sessionId })
     });
   } catch (error) {
     console.warn(`Failed to ${action} scrcpy session:`, error);
@@ -685,6 +687,7 @@ const persistCurrentConnection = (tabKey = activeTabKey.value) => {
     appPackageName: appPackageName.value,
     appDisplayName: appDisplayName.value,
     newDisplay: isNewDisplayMode.value,
+    sessionId: currentScrcpySessionId,
     persistedAt: Date.now(),
     peerConnection,
     ws,
@@ -801,6 +804,7 @@ const restorePersistedConnection = (tabKey = activeTabKey.value) => {
   isStartConnectionInFlight = false;
   activeConnectionTargetKey = tabKey;
   resetSignalingDetachState();
+  currentScrcpySessionId = persisted.sessionId ?? '';
   peerConnection = persisted.peerConnection;
   ws = persisted.ws;
   dataChannel = persisted.dataChannel;
@@ -2446,7 +2450,7 @@ const wirePeerConnectionEventHandlers = (connectionId: number, targetPeerConnect
       clearPendingIceRestartFallback();
       isIceRestartInFlight = false;
       reconnectAttempt = 0;
-      startScrcpySessionHeartbeat(deviceId.value);
+      startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
       scheduleDisplayResize(150);
       scheduleSignalingDetach(connectionId);
       if (!remoteTracks.has('video')) {
@@ -2606,7 +2610,12 @@ const startConnection = async (bypassStartGuard = false) => {
     return;
   }
 
+  const previousDeviceId = deviceId.value;
+  const previousSessionId = currentScrcpySessionId;
   stopScrcpySessionHeartbeat();
+  if (previousSessionId) {
+    void postScrcpySessionAction('release', previousDeviceId, previousSessionId);
+  }
   disposeAllPersistedConnections();
   stopConnection();
   enableAutoReconnect();
@@ -2641,6 +2650,7 @@ const startConnection = async (bypassStartGuard = false) => {
       return;
     }
     const ticketPayload = await ticketResponse.json();
+    currentScrcpySessionId = String(ticketPayload.sessionId ?? '');
     wsUrl += `?ticket=${encodeURIComponent(ticketPayload.ticket)}`;
 
     ws = new WebSocket(wsUrl);
@@ -2652,7 +2662,7 @@ const startConnection = async (bypassStartGuard = false) => {
       }
       clearStartConnectionState();
       status.value = '正在创建 WebRTC 会话...';
-      startScrcpySessionHeartbeat(deviceId.value);
+      startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
 
       try {
         const rtcConfiguration = await loadRtcConfiguration();
@@ -2697,6 +2707,7 @@ const detachActiveConnectionFromView = () => {
   activePointers.clear();
   pointerGenerations.clear();
   scrcpyPointerIds.clear();
+  currentScrcpySessionId = '';
   pendingPointerReleases.clear();
   queuedPointerReleases.clear();
   pendingPointerMoves.clear();
@@ -2744,6 +2755,7 @@ const stopConnection = (preserveForBackground = false, preserveTabKey = activeTa
   activePointers.clear();
   pointerGenerations.clear();
   scrcpyPointerIds.clear();
+  currentScrcpySessionId = '';
   nextScrcpyPointerId = 0n;
   pendingPointerReleases.clear();
   queuedPointerReleases.clear();
@@ -2842,18 +2854,23 @@ const closeTab = async (tabKey: string) => {
   }
 
   const closingTab = castTabs.value[closingIndex];
+  const closingPersistedConnection = getPersistedConnection(tabKey);
+  const closingSessionId = closingActive
+    ? currentScrcpySessionId
+    : (closingPersistedConnection?.sessionId ?? '');
   castTabs.value.splice(closingIndex, 1);
 
   if (!closingActive) {
-    void postScrcpySessionAction('release', closingTab?.deviceId ?? '');
+    void postScrcpySessionAction('release', closingTab?.deviceId ?? '', closingSessionId);
     persistTabs();
     return;
   }
 
   disableAutoReconnect();
+  const activeSessionId = currentScrcpySessionId;
   stopConnection();
   clearPersistedConnection(tabKey);
-  void postScrcpySessionAction('release', deviceId.value);
+  void postScrcpySessionAction('release', deviceId.value, activeSessionId);
 
   const nextTab = castTabs.value[closingIndex] ?? castTabs.value[closingIndex - 1] ?? null;
   activeTabKey.value = nextTab?.key ?? '';
@@ -3833,7 +3850,7 @@ onUnmounted(() => {
   void releaseMouseLock();
   releaseAllPointers('cancel');
   stopScrcpySessionHeartbeat();
-  void postScrcpySessionAction('release', deviceId.value);
+  void postScrcpySessionAction('release', deviceId.value, currentScrcpySessionId);
   stopConnection();
 });
 </script>

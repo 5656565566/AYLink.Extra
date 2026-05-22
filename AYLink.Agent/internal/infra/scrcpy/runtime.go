@@ -46,10 +46,21 @@ type runtime struct {
 	closeOnce     sync.Once
 	controlWrites chan []byte
 
-	videoPackets chan domainscrcpy.VideoPacket
-	audioPackets chan domainscrcpy.AudioPacket
-	errors       chan error
-	done         chan struct{}
+	videoMu             sync.Mutex
+	videoSubscribers    map[int]chan domainscrcpy.VideoPacket
+	nextVideoSubID      int
+	latestVideoConfig   domainscrcpy.VideoPacket
+	latestVideoKeyFrame domainscrcpy.VideoPacket
+
+	audioMu          sync.Mutex
+	audioSubscribers map[int]chan domainscrcpy.AudioPacket
+	nextAudioSubID   int
+
+	errorMu          sync.Mutex
+	errorSubscribers map[int]chan error
+	nextErrorSubID   int
+
+	done chan struct{}
 }
 
 func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session) (domainscrcpy.Runtime, error) {
@@ -67,13 +78,13 @@ func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session
 	}
 
 	rt := &runtime{
-		logger:        s.logger,
-		videoConn:     videoConn,
-		videoPackets:  make(chan domainscrcpy.VideoPacket, videoPacketQueueSize),
-		audioPackets:  make(chan domainscrcpy.AudioPacket, audioPacketQueueSize),
-		errors:        make(chan error, 4),
-		done:          make(chan struct{}),
-		controlWrites: make(chan []byte, controlQueueSize),
+		logger:           s.logger,
+		videoConn:        videoConn,
+		videoSubscribers: make(map[int]chan domainscrcpy.VideoPacket),
+		audioSubscribers: make(map[int]chan domainscrcpy.AudioPacket),
+		errorSubscribers: make(map[int]chan error),
+		done:             make(chan struct{}),
+		controlWrites:    make(chan []byte, controlQueueSize),
 	}
 	go rt.readVideoLoop()
 
@@ -104,16 +115,102 @@ func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session
 	return rt, nil
 }
 
-func (r *runtime) VideoPackets() <-chan domainscrcpy.VideoPacket {
-	return r.videoPackets
+func (r *runtime) SubscribeVideoPackets() (<-chan domainscrcpy.VideoPacket, func()) {
+	ch := make(chan domainscrcpy.VideoPacket, videoPacketQueueSize)
+
+	r.videoMu.Lock()
+	select {
+	case <-r.done:
+		r.videoMu.Unlock()
+		close(ch)
+		return ch, func() {}
+	default:
+	}
+
+	id := r.nextVideoSubID
+	r.nextVideoSubID++
+	r.videoSubscribers[id] = ch
+	if packet := cloneVideoPacketForCache(r.latestVideoConfig); len(packet.Data) > 0 {
+		ch <- packet
+	}
+	if packet := cloneVideoPacketForCache(r.latestVideoKeyFrame); len(packet.Data) > 0 {
+		ch <- packet
+	}
+	r.videoMu.Unlock()
+
+	return ch, func() {
+		r.videoMu.Lock()
+		sub, ok := r.videoSubscribers[id]
+		if ok {
+			delete(r.videoSubscribers, id)
+		}
+		r.videoMu.Unlock()
+		if ok {
+			close(sub)
+			releaseQueuedVideoPackets(sub)
+		}
+	}
 }
 
-func (r *runtime) AudioPackets() <-chan domainscrcpy.AudioPacket {
-	return r.audioPackets
+func (r *runtime) SubscribeAudioPackets() (<-chan domainscrcpy.AudioPacket, func()) {
+	ch := make(chan domainscrcpy.AudioPacket, audioPacketQueueSize)
+
+	r.audioMu.Lock()
+	select {
+	case <-r.done:
+		r.audioMu.Unlock()
+		close(ch)
+		return ch, func() {}
+	default:
+	}
+
+	id := r.nextAudioSubID
+	r.nextAudioSubID++
+	r.audioSubscribers[id] = ch
+	r.audioMu.Unlock()
+
+	return ch, func() {
+		r.audioMu.Lock()
+		sub, ok := r.audioSubscribers[id]
+		if ok {
+			delete(r.audioSubscribers, id)
+		}
+		r.audioMu.Unlock()
+		if ok {
+			close(sub)
+			releaseQueuedAudioPackets(sub)
+		}
+	}
 }
 
-func (r *runtime) Errors() <-chan error {
-	return r.errors
+func (r *runtime) SubscribeErrors() (<-chan error, func()) {
+	ch := make(chan error, 4)
+
+	r.errorMu.Lock()
+	select {
+	case <-r.done:
+		r.errorMu.Unlock()
+		close(ch)
+		return ch, func() {}
+	default:
+	}
+
+	id := r.nextErrorSubID
+	r.nextErrorSubID++
+	r.errorSubscribers[id] = ch
+	r.errorMu.Unlock()
+
+	return ch, func() {
+		r.errorMu.Lock()
+		sub, ok := r.errorSubscribers[id]
+		if ok {
+			delete(r.errorSubscribers, id)
+		}
+		r.errorMu.Unlock()
+		if ok {
+			close(sub)
+		}
+	}
 }
 
 func (r *runtime) SendControl(payload []byte) error {
@@ -153,6 +250,7 @@ func (r *runtime) Close() error {
 	var closeErr error
 	r.closeOnce.Do(func() {
 		close(r.done)
+		r.closeAllSubscribers()
 		if r.videoConn != nil {
 			if err := r.videoConn.Close(); err != nil && closeErr == nil {
 				closeErr = err
@@ -173,7 +271,6 @@ func (r *runtime) Close() error {
 }
 
 func (r *runtime) readVideoLoop() {
-	defer close(r.videoPackets)
 	defer r.Close()
 
 	deviceHeader := make([]byte, deviceMetaLengthWithDummyByte)
@@ -289,7 +386,6 @@ func containsAnnexBIDRPacket(sample []byte) bool {
 }
 
 func (r *runtime) readAudioLoop() {
-	defer close(r.audioPackets)
 	defer r.Close()
 
 	codecHeader := make([]byte, 4)
@@ -364,14 +460,7 @@ func (r *runtime) readAudioLoop() {
 				IsConfig:              (ptsAndFlags & configPacketFlag) != 0,
 				Codec:                 codec,
 			}
-			select {
-			case <-r.done:
-				if packet.Release != nil {
-					packet.Release()
-				}
-				return
-			case r.audioPackets <- packet:
-			}
+			r.offerLatestAudioPacket(packet)
 		} else if codec == domainscrcpy.AudioCodecRaw && encoder != nil {
 			// 累加 PCM 载荷
 			sampleCount := len(payload) / 2
@@ -474,28 +563,139 @@ func (r *runtime) writeControlLoop() {
 }
 
 func (r *runtime) emitError(err error) {
+	r.errorMu.Lock()
+	defer r.errorMu.Unlock()
+
 	select {
 	case <-r.done:
 		return
-	case r.errors <- err:
 	default:
+	}
+
+	for _, sub := range r.errorSubscribers {
+		select {
+		case sub <- err:
+		default:
+			select {
+			case <-sub:
+			default:
+			}
+			select {
+			case sub <- err:
+			default:
+			}
+		}
 	}
 }
 
 func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
+	r.videoMu.Lock()
+	defer r.videoMu.Unlock()
+
 	select {
 	case <-r.done:
 		if packet.Release != nil {
 			packet.Release()
 		}
 		return
-	case r.videoPackets <- packet:
+	default:
+	}
+
+	if packet.IsConfig {
+		r.latestVideoConfig = cloneVideoPacketForCache(packet)
+	} else if packet.IsKeyFrame || packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data) {
+		r.latestVideoKeyFrame = cloneVideoPacketForCache(packet)
+	}
+
+	count := len(r.videoSubscribers)
+	if count == 0 {
+		if packet.Release != nil {
+			packet.Release()
+		}
+		return
+	}
+
+	releases := sharedReleaseFuncs(count, packet.Release)
+	index := 0
+	for _, sub := range r.videoSubscribers {
+		sharedPacket := packet
+		sharedPacket.Release = releases[index]
+		index++
+		offerLatestVideoPacketToSubscriber(sub, sharedPacket)
+	}
+}
+
+func (r *runtime) offerLatestAudioPacket(packet domainscrcpy.AudioPacket) {
+	r.audioMu.Lock()
+	defer r.audioMu.Unlock()
+
+	select {
+	case <-r.done:
+		if packet.Release != nil {
+			packet.Release()
+		}
+		return
+	default:
+	}
+
+	count := len(r.audioSubscribers)
+	if count == 0 {
+		if packet.Release != nil {
+			packet.Release()
+		}
+		return
+	}
+
+	releases := sharedReleaseFuncs(count, packet.Release)
+	index := 0
+	for _, sub := range r.audioSubscribers {
+		sharedPacket := packet
+		sharedPacket.Release = releases[index]
+		index++
+		offerLatestAudioPacketToSubscriber(sub, sharedPacket)
+	}
+}
+
+func (r *runtime) closeAllSubscribers() {
+	r.videoMu.Lock()
+	videoSubscribers := r.videoSubscribers
+	r.videoSubscribers = make(map[int]chan domainscrcpy.VideoPacket)
+	r.videoMu.Unlock()
+
+	for _, sub := range videoSubscribers {
+		close(sub)
+		releaseQueuedVideoPackets(sub)
+	}
+
+	r.audioMu.Lock()
+	audioSubscribers := r.audioSubscribers
+	r.audioSubscribers = make(map[int]chan domainscrcpy.AudioPacket)
+	r.audioMu.Unlock()
+
+	for _, sub := range audioSubscribers {
+		close(sub)
+		releaseQueuedAudioPackets(sub)
+	}
+
+	r.errorMu.Lock()
+	errorSubscribers := r.errorSubscribers
+	r.errorSubscribers = make(map[int]chan error)
+	r.errorMu.Unlock()
+
+	for _, sub := range errorSubscribers {
+		close(sub)
+	}
+}
+
+func offerLatestVideoPacketToSubscriber(sub chan domainscrcpy.VideoPacket, packet domainscrcpy.VideoPacket) {
+	select {
+	case sub <- packet:
 		return
 	default:
 	}
 
 	select {
-	case dropped := <-r.videoPackets:
+	case dropped := <-sub:
 		if dropped.Release != nil {
 			dropped.Release()
 		}
@@ -503,11 +703,7 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 	}
 
 	select {
-	case <-r.done:
-		if packet.Release != nil {
-			packet.Release()
-		}
-	case r.videoPackets <- packet:
+	case sub <- packet:
 	default:
 		if packet.Release != nil {
 			packet.Release()
@@ -515,20 +711,15 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 	}
 }
 
-func (r *runtime) offerLatestAudioPacket(packet domainscrcpy.AudioPacket) {
+func offerLatestAudioPacketToSubscriber(sub chan domainscrcpy.AudioPacket, packet domainscrcpy.AudioPacket) {
 	select {
-	case <-r.done:
-		if packet.Release != nil {
-			packet.Release()
-		}
-		return
-	case r.audioPackets <- packet:
+	case sub <- packet:
 		return
 	default:
 	}
 
 	select {
-	case dropped := <-r.audioPackets:
+	case dropped := <-sub:
 		if dropped.Release != nil {
 			dropped.Release()
 		}
@@ -536,16 +727,100 @@ func (r *runtime) offerLatestAudioPacket(packet domainscrcpy.AudioPacket) {
 	}
 
 	select {
-	case <-r.done:
-		if packet.Release != nil {
-			packet.Release()
-		}
-	case r.audioPackets <- packet:
+	case sub <- packet:
 	default:
 		if packet.Release != nil {
 			packet.Release()
 		}
 	}
+}
+
+func releaseQueuedVideoPackets(ch <-chan domainscrcpy.VideoPacket) {
+	for {
+		select {
+		case packet, ok := <-ch:
+			if !ok {
+				return
+			}
+			if packet.Release != nil {
+				packet.Release()
+			}
+		default:
+			return
+		}
+	}
+}
+
+func releaseQueuedAudioPackets(ch <-chan domainscrcpy.AudioPacket) {
+	for {
+		select {
+		case packet, ok := <-ch:
+			if !ok {
+				return
+			}
+			if packet.Release != nil {
+				packet.Release()
+			}
+		default:
+			return
+		}
+	}
+}
+
+func cloneVideoPacketForCache(packet domainscrcpy.VideoPacket) domainscrcpy.VideoPacket {
+	if len(packet.Data) == 0 {
+		return domainscrcpy.VideoPacket{}
+	}
+	cloned := packet
+	cloned.Data = append([]byte(nil), packet.Data...)
+	cloned.Buffer = nil
+	cloned.Release = nil
+	return cloned
+}
+
+func sharedReleaseFuncs(count int, release func()) []func() {
+	if count <= 0 {
+		return nil
+	}
+	if release == nil {
+		releases := make([]func(), count)
+		for i := range releases {
+			releases[i] = func() {}
+		}
+		return releases
+	}
+
+	type sharedReleaseState struct {
+		mu        sync.Mutex
+		remaining int
+		release   func()
+	}
+
+	state := &sharedReleaseState{
+		remaining: count,
+		release:   release,
+	}
+
+	releases := make([]func(), count)
+	for i := range releases {
+		releases[i] = func() {
+			state.mu.Lock()
+			if state.remaining <= 0 {
+				state.mu.Unlock()
+				return
+			}
+			state.remaining--
+			if state.remaining == 0 && state.release != nil {
+				release := state.release
+				state.release = nil
+				state.mu.Unlock()
+				release()
+				return
+			}
+			state.mu.Unlock()
+		}
+	}
+	return releases
 }
 
 func acquireMediaPacketBuffer(size int) []byte {

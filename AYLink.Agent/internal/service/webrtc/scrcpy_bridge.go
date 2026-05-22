@@ -106,10 +106,10 @@ type scrcpyAudioBridge struct {
 }
 
 func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
-	audioPackets := b.runtime.AudioPackets()
-	if audioPackets == nil {
-		return
-	}
+	audioPackets, unsubscribeAudio := b.runtime.SubscribeAudioPackets()
+	defer unsubscribeAudio()
+	errorsCh, unsubscribeErrors := b.runtime.SubscribeErrors()
+	defer unsubscribeErrors()
 
 	for {
 		select {
@@ -135,7 +135,7 @@ func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
 			if packet.Release != nil {
 				packet.Release()
 			}
-		case err, ok := <-b.runtime.Errors():
+		case err, ok := <-errorsCh:
 			if ok && err != nil && !errors.Is(err, io.EOF) {
 				_ = peerConnection.Close()
 			}
@@ -166,10 +166,14 @@ type scrcpyVideoBridge struct {
 func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 	videoReady := time.NewTimer(videoReadyTimeout)
 	defer videoReady.Stop()
+	videoPackets, unsubscribeVideo := b.runtime.SubscribeVideoPackets()
+	defer unsubscribeVideo()
+	errorsCh, unsubscribeErrors := b.runtime.SubscribeErrors()
+	defer unsubscribeErrors()
 
 	for {
 		select {
-		case packet, ok := <-b.runtime.VideoPackets():
+		case packet, ok := <-videoPackets:
 			if !ok {
 				return
 			}
@@ -183,7 +187,7 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 				default:
 				}
 			}
-		case err, ok := <-b.runtime.Errors():
+		case err, ok := <-errorsCh:
 			if ok && err != nil && !errors.Is(err, io.EOF) {
 				_ = peerConnection.Close()
 			}

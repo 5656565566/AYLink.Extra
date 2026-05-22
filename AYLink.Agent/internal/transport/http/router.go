@@ -198,6 +198,9 @@ func NewRouter(deps Dependencies) http.Handler {
 				handler.WriteMethodNotAllowed(w, http.MethodGet+", "+http.MethodPut+", "+http.MethodDelete)
 			}
 			return
+		case strings.HasSuffix(r.URL.Path, "/rename"):
+			requireDevicesManage(http.HandlerFunc(deviceHandler.Rename)).ServeHTTP(w, r)
+			return
 		case strings.HasSuffix(r.URL.Path, "/encoders"):
 			requireDevicesControl(http.HandlerFunc(deviceHandler.ListEncoders)).ServeHTTP(w, r)
 			return

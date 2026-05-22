@@ -58,17 +58,11 @@ func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	device, err := h.service.Create(r.Context(), payload)
 	if err != nil {
 		if errors.Is(err, deviceservice.ErrDeviceSerialEmpty) {
-			WriteJSON(w, http.StatusBadRequest, map[string]any{
-				"error":      "device serial is required",
-				"messageKey": "Devices.SerialRequired",
-			})
+			WriteError(w, http.StatusBadRequest, "DEVICE_SERIAL_REQUIRED", "Devices.SerialRequired", "device serial is required")
 			return
 		}
 		if errors.Is(err, deviceservice.ErrDeviceMustBeOnline) {
-			WriteJSON(w, http.StatusBadRequest, map[string]any{
-				"error":      "device must be online before it can be added",
-				"messageKey": "Devices.MustBeOnline",
-			})
+			WriteError(w, http.StatusBadRequest, "DEVICE_MUST_BE_ONLINE", "Devices.MustBeOnline", "device must be online before it can be added")
 			return
 		}
 		WriteError(w, http.StatusInternalServerError, "DEVICE_CREATE_FAILED", "Errors.DeviceCreateFailed", "添加设备失败")
@@ -89,10 +83,7 @@ func (h *DeviceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.service.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, deviceservice.ErrDeviceNotFound) {
-			WriteJSON(w, http.StatusNotFound, map[string]any{
-				"error":      "Device not found",
-				"messageKey": "Devices.NotFound",
-			})
+			WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "Device not found")
 			return
 		}
 		WriteError(w, http.StatusInternalServerError, "DEVICE_DELETE_FAILED", "Errors.DeviceDeleteFailed", "删除设备失败")
@@ -118,20 +109,56 @@ func (h *DeviceHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	device, err := h.service.Connect(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, deviceservice.ErrDeviceNotFound) {
-			WriteJSON(w, http.StatusNotFound, map[string]any{
-				"error": "Device not found",
-			})
+			WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "Device not found")
 			return
 		}
 		if errors.Is(err, deviceservice.ErrDeviceInvalidIPPort) {
-			WriteJSON(w, http.StatusBadRequest, map[string]any{
-				"error": "Device does not have a valid IP and Port for network connection",
-			})
+			WriteError(
+				w,
+				http.StatusBadRequest,
+				"DEVICE_INVALID_IP_PORT",
+				"Devices.InvalidIpPort",
+				"Device does not have a valid IP and Port for network connection",
+			)
 			return
 		}
-		WriteJSON(w, http.StatusBadRequest, map[string]any{
-			"error": err.Error(),
-		})
+		WriteError(w, http.StatusBadRequest, "DEVICE_CONNECT_FAILED", "Errors.DeviceConnectFailed", err.Error())
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, device)
+}
+
+func (h *DeviceHandler) Rename(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		WriteMethodNotAllowed(w, http.MethodPut)
+		return
+	}
+
+	id, err := deviceIDFromPath(strings.TrimSuffix(r.URL.Path, "/rename"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+
+	var payload struct {
+		Name string `json:"Name"`
+	}
+	if err := decodeJSONBody(r, &payload); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
+
+	device, err := h.service.Rename(r.Context(), id, payload.Name)
+	if err != nil {
+		switch {
+		case errors.Is(err, deviceservice.ErrDeviceNameEmpty):
+			WriteError(w, http.StatusBadRequest, "DEVICE_NAME_REQUIRED", "Devices.NameRequired", "设备名称不能为空")
+		case errors.Is(err, deviceservice.ErrDeviceNotFound):
+			WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "Device not found")
+		default:
+			WriteError(w, http.StatusInternalServerError, "DEVICE_RENAME_FAILED", "Errors.DeviceUpdateFailed", "重命名设备失败")
+		}
 		return
 	}
 

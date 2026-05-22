@@ -54,13 +54,13 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid refresh token"})
+		WriteError(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "Errors.InvalidRefreshToken", "Invalid refresh token")
 		return
 	}
 
 	result, err := h.service.Refresh(r.Context(), payload.RefreshToken)
 	if err != nil {
-		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid refresh token"})
+		WriteError(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "Errors.InvalidRefreshToken", "Invalid refresh token")
 		return
 	}
 

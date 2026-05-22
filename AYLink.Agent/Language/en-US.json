@@ -120,8 +120,19 @@
     "Success": "成功"
   },
   "Devices": {
+    "InvalidIpPort": "The device does not have a valid IP address and port for network connection.",
+    "MustBeOnline": "The device must be online before it can be added.",
+    "NotFound": "Device not found",
     "OfflineMessage": "该设备当前离线，系统正在尝试自动重连，请稍后再试。",
-    "OfflineTitle": "设备已断开"
+    "OfflineTitle": "设备已断开",
+    "SerialRequired": "Device serial is required"
+  },
+  "Errors": {
+    "DeviceConnectFailed": "Failed to connect device",
+    "InvalidRefreshToken": "Invalid refresh token",
+    "MethodNotAllowed": "Method not allowed",
+    "PermissionDenied": "Permission denied",
+    "Unauthorized": "Unauthorized"
   },
   "FilePage": {
     "ActionCopyPath": "Copy path",

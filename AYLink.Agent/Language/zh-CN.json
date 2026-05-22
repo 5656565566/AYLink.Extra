@@ -120,8 +120,19 @@
     "Success": "成功"
   },
   "Devices": {
+    "InvalidIpPort": "该设备缺少有效的 IP 地址或端口，无法通过网络连接。",
+    "MustBeOnline": "设备必须在线后才能添加。",
+    "NotFound": "未找到设备",
     "OfflineMessage": "该设备当前离线，系统正在尝试自动重连，请稍后再试。",
-    "OfflineTitle": "设备已断开"
+    "OfflineTitle": "设备已断开",
+    "SerialRequired": "设备序列号不能为空"
+  },
+  "Errors": {
+    "DeviceConnectFailed": "连接设备失败",
+    "InvalidRefreshToken": "刷新令牌无效",
+    "MethodNotAllowed": "请求方法不被允许",
+    "PermissionDenied": "权限不足",
+    "Unauthorized": "未授权"
   },
   "FilePage": {
     "ActionCopyPath": "复制路径",

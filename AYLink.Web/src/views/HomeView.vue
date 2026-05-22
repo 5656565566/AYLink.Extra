@@ -117,6 +117,7 @@
                 <button v-if="canControlDevices" class="dropdown-item" @click.stop="openNewDisplayScreencast(device)">新建显示</button>
                 <button v-if="canAccessTerminal" class="dropdown-item" @click.stop="openTerminal(device)">打开终端</button>
                 <button v-if="canManageDevices" class="dropdown-item" @click.stop="openDeviceSettings(device)">设备设置</button>
+                <button v-if="canManageDevices" class="dropdown-item" @click.stop="openRenameDialog(device)">重命名设备</button>
                 <button v-if="canControlDevices" class="dropdown-item" @click.stop="showEncoderList(device)">编码器列表</button>
                 <div v-if="canManageDevices" class="dropdown-divider"></div>
                 <button v-if="canManageDevices" class="dropdown-item danger" @click.stop="deleteDevice(device.Id)">
@@ -163,6 +164,9 @@
         <div class="dialog-content">
           <p class="dialog-subtitle">通过网络调试 (Wi-Fi) 连接设备</p>
           <div class="form-group">
+            <input type="text" v-model="newDeviceName" placeholder="设备名称 (可选)" />
+          </div>
+          <div class="form-group">
             <input type="text" v-model="newDeviceIp" placeholder="IP 地址 (例如: 127.0.0.1)" autofocus />
           </div>
           <div class="form-group">
@@ -181,6 +185,27 @@
             {{ adding ? '连接中...' : '连接' }}
           </button>
           <button class="transparent" @click="showAddDialog = false">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showRenameDialog" class="dialog-overlay" @click.self="closeRenameDialog">
+      <div class="dialog">
+        <div class="dialog-header">
+          <h3 class="dialog-title">重命名设备</h3>
+        </div>
+        <div class="dialog-content">
+          <p class="dialog-subtitle">为设备设置一个更容易识别的名称</p>
+          <div class="form-group">
+            <input type="text" v-model="renameDeviceName" placeholder="请输入设备名称" @keyup.enter="submitRenameDevice" />
+          </div>
+          <div v-if="renameError" class="error-msg">{{ renameError }}</div>
+        </div>
+        <div class="dialog-footer-grid">
+          <button class="primary" @click="submitRenameDevice" :disabled="renaming">
+            {{ renaming ? '保存中...' : '保存' }}
+          </button>
+          <button class="transparent" @click="closeRenameDialog">取消</button>
         </div>
       </div>
     </div>
@@ -206,11 +231,17 @@ const showMoreActionsMenu = ref(false);
 const isMultiSelectMode = ref(false);
 const adding = ref(false);
 const addError = ref('');
+const renaming = ref(false);
+const renameError = ref('');
 
+const newDeviceName = ref('');
 const newDeviceIp = ref('');
 const newDevicePort = ref<string>('');
 const newDevicePairingPort = ref<string>('');
 const newDevicePairingCode = ref('');
+const showRenameDialog = ref(false);
+const renameDeviceId = ref<number | null>(null);
+const renameDeviceName = ref('');
 
 const showEncodersDialog = ref(false);
 const fetchingEncoders = ref(false);
@@ -285,6 +316,9 @@ const addDevice = async () => {
   const serial = `${newDeviceIp.value.trim()}:${port}`;
   
   const payload: any = { Serial: serial };
+  if (newDeviceName.value.trim()) {
+    payload.Name = newDeviceName.value.trim();
+  }
   const pairingPortVal = parseInt(newDevicePairingPort.value.trim(), 10);
   if (!isNaN(pairingPortVal) && newDevicePairingCode.value.trim()) {
     payload.PairingPort = pairingPortVal;
@@ -303,6 +337,7 @@ const addDevice = async () => {
       addError.value = data.error || '添加失败';
     } else {
       showAddDialog.value = false;
+      newDeviceName.value = '';
       newDeviceIp.value = '';
       newDevicePort.value = '';
       newDevicePairingPort.value = '';
@@ -327,6 +362,57 @@ const deleteDevice = async (id: number) => {
     } catch (error) {
       console.error('Failed to delete device', error);
     }
+  }
+};
+
+const openRenameDialog = (device: any) => {
+  activeMenuDeviceId.value = null;
+  renameDeviceId.value = Number(device.Id);
+  renameDeviceName.value = String(device.Name || '').trim();
+  renameError.value = '';
+  showRenameDialog.value = true;
+};
+
+const closeRenameDialog = () => {
+  showRenameDialog.value = false;
+  renameDeviceId.value = null;
+  renameDeviceName.value = '';
+  renameError.value = '';
+  renaming.value = false;
+};
+
+const submitRenameDevice = async () => {
+  if (!renameDeviceId.value) {
+    return;
+  }
+
+  const nextName = renameDeviceName.value.trim();
+  if (!nextName) {
+    renameError.value = '请输入设备名称';
+    return;
+  }
+
+  renaming.value = true;
+  renameError.value = '';
+  try {
+    const res = await apiFetch(`/api/devices/${renameDeviceId.value}/rename`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Name: nextName })
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      renameError.value = data?.error?.message || data?.error || '重命名失败';
+      return;
+    }
+
+    closeRenameDialog();
+    await fetchDevices();
+  } catch (error) {
+    renameError.value = t('Common.NetworkRequestFailed', '网络请求失败');
+  } finally {
+    renaming.value = false;
   }
 };
 

@@ -132,7 +132,7 @@
 
             <div class="webrtc-servers-grid-wrapper" :class="{ expanded: isLocalWebRtcServersListExpanded }">
               <div class="webrtc-servers-list">
-                <div v-for="(server, index) in localWebrtcServers" :key="`local-${index}`" class="webrtc-server-card">
+                <div v-for="(server, index) in localWebrtcServers" :key="server.id" class="webrtc-server-card">
                   <div class="webrtc-server-card__header">
                     <span class="webrtc-server-card__title">
                       {{ server.type === 'stun' ? 'STUN' : 'TURN' }} {{ t('Settings.IceServer', '服务器') }} {{ index + 1 }}
@@ -332,7 +332,7 @@
 
           <div class="webrtc-servers-grid-wrapper" :class="{ expanded: isWebRtcServersListExpanded }">
             <div class="webrtc-servers-list">
-              <div v-for="(server, index) in webrtcServers" :key="index" class="webrtc-server-card">
+              <div v-for="(server, index) in webrtcServers" :key="server.id" class="webrtc-server-card">
                 <div class="webrtc-server-card__header">
                   <span class="webrtc-server-card__title">
                     {{ server.type === 'stun' ? 'STUN' : 'TURN' }} {{ t('Settings.IceServer', '服务器') }} {{ index + 1 }}
@@ -528,14 +528,23 @@ function getLocalWebRtcScope() {
 }
 
 interface WebRtcServerForm {
+  id: string;
   type: 'stun' | 'turn';
   urlsText: string;
   username: string;
   credential: string;
 }
 
+let nextWebRtcServerFormId = 0;
+
+function createWebRtcServerFormId() {
+  nextWebRtcServerFormId += 1;
+  return `webrtc-server-${nextWebRtcServerFormId}`;
+}
+
 function createDefaultWebRtcServerForm(type: 'stun' | 'turn'): WebRtcServerForm {
   return {
+    id: createWebRtcServerFormId(),
     type,
     urlsText: type === 'stun' ? 'stun:stun.l.google.com:19302' : '',
     username: '',
@@ -652,11 +661,21 @@ function createWebRtcServerForm(server?: WebRtcIceServerPayload): WebRtcServerFo
   const isTurn = urls.some((u) => u.toLowerCase().startsWith('turn:')) || hasCredential;
 
   return {
+    id: createWebRtcServerFormId(),
     type: isTurn ? 'turn' : 'stun',
     urlsText,
     username: server?.Username ?? '',
     credential: server?.Credential ?? ''
   };
+}
+
+function isWebRtcServerDraft(server: WebRtcServerForm) {
+  return server.urlsText.trim() === '';
+}
+
+function mergeServerDrafts(savedServers: WebRtcServerForm[], currentServers: WebRtcServerForm[]) {
+  const drafts = currentServers.filter(isWebRtcServerDraft);
+  return drafts.length > 0 ? [...savedServers, ...drafts] : savedServers;
 }
 
 function normalizeOptionalPort(value: number | string | null | undefined): number | null {
@@ -732,7 +751,7 @@ function applyWebRtcSettings(payload?: WebRtcNetworkSettingsPayload | null) {
   isSettingInternally = true;
   webrtcTransportPolicy.value = normalizedPayload.IceTransportPolicy === 'relay' ? 'relay' : 'all';
   const servers = normalizedPayload.IceServers?.map((server) => createWebRtcServerForm(server)) ?? [];
-  webrtcServers.value = servers;
+  webrtcServers.value = mergeServerDrafts(servers, webrtcServers.value);
   webrtcHostCandidateOverrideEnabled.value = normalizedPayload.HostCandidateOverrideEnabled === true;
   webrtcHostCandidateOverrideIPsText.value = (normalizedPayload.HostCandidateOverrideIPs ?? []).join('\n');
   webrtcHostCandidatePortMin.value = normalizedPayload.HostCandidatePortMin != null ? String(normalizedPayload.HostCandidatePortMin) : '';
@@ -760,7 +779,8 @@ function applyLocalWebRtcSettings(payload?: WebRtcNetworkSettingsPayload | null)
   });
   isLocalSettingInternally = true;
   localWebrtcTransportPolicy.value = normalizedPayload.IceTransportPolicy === 'relay' ? 'relay' : 'all';
-  localWebrtcServers.value = normalizedPayload.IceServers?.map((server) => createWebRtcServerForm(server)) ?? [];
+  const servers = normalizedPayload.IceServers?.map((server) => createWebRtcServerForm(server)) ?? [];
+  localWebrtcServers.value = mergeServerDrafts(servers, localWebrtcServers.value);
 
   if (localSkipSaveTimer) window.clearTimeout(localSkipSaveTimer);
   localSkipSaveTimer = window.setTimeout(() => {

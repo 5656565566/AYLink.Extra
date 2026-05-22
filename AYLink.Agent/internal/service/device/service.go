@@ -16,6 +16,7 @@ import (
 
 var (
 	ErrDeviceNotFound      = errors.New("device not found")
+	ErrDeviceNameEmpty     = errors.New("device name is required")
 	ErrDeviceSerialEmpty   = errors.New("device serial is required")
 	ErrDevicePayloadEmpty  = errors.New("device payload is invalid")
 	ErrDeviceInvalidIPPort = errors.New("device does not have a valid IP and Port for network connection")
@@ -58,6 +59,7 @@ type reconnectRequest struct {
 
 type CreateInput struct {
 	Serial      string `json:"Serial"`
+	Name        string `json:"Name"`
 	PairingPort int    `json:"PairingPort"`
 	PairingCode string `json:"PairingCode"`
 }
@@ -186,6 +188,7 @@ func (s *Service) ResolveSerialForAccess(ctx context.Context, id int) (string, e
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (*domaindevice.Device, error) {
 	serial := strings.TrimSpace(input.Serial)
+	customName := strings.TrimSpace(input.Name)
 	if serial == "" {
 		return nil, ErrDeviceSerialEmpty
 	}
@@ -222,10 +225,14 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domaindevice.
 		existing.Status = "online"
 		existing.LastSeen = now
 		existing.UpdatedAt = now
-		if isDefaultLikeDeviceName(existing.Name, existing.Serial, serial) {
+		if customName != "" {
+			existing.Name = customName
+		} else if isDefaultLikeDeviceName(existing.Name, existing.Serial, serial) {
 			existing.Name = defaultDeviceName(serial)
 		}
-		s.refreshDefaultLikeName(ctx, existing, serial)
+		if customName == "" {
+			s.refreshDefaultLikeName(ctx, existing, serial)
+		}
 		if err := s.repo.Update(ctx, existing); err != nil {
 			return nil, err
 		}
@@ -242,10 +249,37 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domaindevice.
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	s.refreshDefaultLikeName(ctx, device, serial)
+	if customName != "" {
+		device.Name = customName
+	} else {
+		s.refreshDefaultLikeName(ctx, device, serial)
+	}
 	if err := s.repo.Insert(ctx, device); err != nil {
 		return nil, err
 	}
+	return device, nil
+}
+
+func (s *Service) Rename(ctx context.Context, id int, name string) (*domaindevice.Device, error) {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return nil, ErrDeviceNameEmpty
+	}
+
+	device, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if device == nil {
+		return nil, ErrDeviceNotFound
+	}
+
+	device.Name = trimmedName
+	device.UpdatedAt = time.Now().UTC()
+	if err := s.repo.Update(ctx, device); err != nil {
+		return nil, err
+	}
+
 	return device, nil
 }
 

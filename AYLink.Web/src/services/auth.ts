@@ -37,6 +37,7 @@ const initialized = ref(false);
 
 let initializePromise: Promise<void> | null = null;
 let refreshPromise: Promise<boolean> | null = null;
+let storageSyncInitialized = false;
 
 export function useAuth() {
   return {
@@ -73,6 +74,8 @@ export function getDefaultAuthorizedRoute() {
 }
 
 export async function initializeAuth() {
+  ensureStorageSync();
+
   if (initialized.value) {
     return;
   }
@@ -116,6 +119,11 @@ export function applyAuthResponse(payload: AuthResponsePayload) {
 }
 
 export async function refreshAccessToken() {
+  ensureStorageSync();
+  if (!refreshToken.value) {
+    syncSessionFromStorage();
+  }
+
   if (!refreshToken.value) {
     return false;
   }
@@ -125,17 +133,22 @@ export async function refreshAccessToken() {
   }
 
   refreshPromise = (async () => {
+    const attemptedRefreshToken = refreshToken.value;
+
     try {
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ refreshToken: refreshToken.value })
+        body: JSON.stringify({ refreshToken: attemptedRefreshToken })
       });
 
       if (!response.ok) {
-        clearSession();
+        syncSessionFromStorage();
+        if (refreshToken.value && refreshToken.value !== attemptedRefreshToken) {
+          return fetchMe();
+        }
         return false;
       }
 
@@ -153,6 +166,11 @@ export async function refreshAccessToken() {
 }
 
 export async function fetchMe() {
+  ensureStorageSync();
+  if (!accessToken.value) {
+    syncSessionFromStorage();
+  }
+
   if (!accessToken.value) {
     return false;
   }
@@ -209,6 +227,32 @@ export function clearSession() {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(PERMISSIONS_KEY);
+}
+
+export function hasActiveAccessToken() {
+  return !!accessToken.value;
+}
+
+export function syncSessionFromStorage() {
+  accessToken.value = localStorage.getItem(ACCESS_TOKEN_KEY) || '';
+  refreshToken.value = localStorage.getItem(REFRESH_TOKEN_KEY) || '';
+  currentUser.value = readStoredUser();
+  permissions.value = readStoredPermissions();
+}
+
+function ensureStorageSync() {
+  if (storageSyncInitialized || typeof window === 'undefined') {
+    return;
+  }
+
+  storageSyncInitialized = true;
+  window.addEventListener('storage', (event) => {
+    if (![ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY, PERMISSIONS_KEY].includes(event.key ?? '')) {
+      return;
+    }
+
+    syncSessionFromStorage();
+  });
 }
 
 function readStoredUser() {

@@ -9,11 +9,9 @@ body:
       label: Component / 组件
       description: Which component should this feature belong to? / 这个功能主要属于哪个组件？
       options:
+        - AYLink.Web
         - AYLink.Agent
-        - AYLink.Core
         - AYLink.Mobile
-        - AYLink.Controls
-        - AYLink.Desktop
         - Other / 其他组件
     validations:
       required: true

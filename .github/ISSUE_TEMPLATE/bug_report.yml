@@ -9,11 +9,9 @@ body:
       label: Component / 组件
       description: Which component is affected? / 受影响的组件是？
       options:
+        - AYLink.Web
         - AYLink.Agent
-        - AYLink.Core
         - AYLink.Mobile
-        - AYLink.Controls
-        - AYLink.Desktop
         - Other / 其他组件
     validations:
       required: true

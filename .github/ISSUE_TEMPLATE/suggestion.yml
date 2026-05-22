@@ -9,11 +9,9 @@ body:
       label: Related Component / 相关组件
       description: Which component is this related to? / 这条建议主要和哪个组件相关？
       options:
+        - AYLink.Web
         - AYLink.Agent
-        - AYLink.Core
         - AYLink.Mobile
-        - AYLink.Controls
-        - AYLink.Desktop
         - Other / 其他组件
     validations:
       required: true

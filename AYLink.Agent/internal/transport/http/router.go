@@ -189,7 +189,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		case strings.HasSuffix(r.URL.Path, "/settings"):
 			switch r.Method {
 			case http.MethodGet:
-				requireDevicesManage(http.HandlerFunc(deviceHandler.GetSettings)).ServeHTTP(w, r)
+				requireDevicesControl(http.HandlerFunc(deviceHandler.GetSettings)).ServeHTTP(w, r)
 			case http.MethodPut:
 				requireDevicesManage(http.HandlerFunc(deviceHandler.SaveSettings)).ServeHTTP(w, r)
 			case http.MethodDelete:
@@ -260,7 +260,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 	})))
 
-	mux.Handle("/api/control/webrtc-network", authMiddleware(requireSettingsView(http.HandlerFunc(settingsHandler.GetWebRtcNetwork))))
+	mux.Handle("/api/control/webrtc-network", authMiddleware(requireDevicesControl(http.HandlerFunc(settingsHandler.GetWebRtcNetwork))))
 	mux.Handle("/", handler.NewSPAHandler(deps.WWWRoot, deps.EmbeddedWWW, deps.Logger))
 
 	return middleware.Logging(deps.Logger, middleware.Recover(mux))

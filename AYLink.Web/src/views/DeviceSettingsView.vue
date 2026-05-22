@@ -278,7 +278,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from '../composables/useI18n';
 import { apiFetch } from '../utils/api';
@@ -289,7 +289,7 @@ const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 
-const deviceId = String(route.params.id || '');
+const deviceId = computed(() => String(route.params.id || '').trim());
 const deviceName = ref('设备设置');
 const loading = ref(true);
 const saving = ref(false);
@@ -424,7 +424,7 @@ const goBack = async () => {
     return;
   }
 
-  if (!deviceId || loading.value || saving.value) {
+  if (!deviceId.value || loading.value || saving.value) {
     leaving.value = true;
     try {
       await navigateAway();
@@ -461,14 +461,14 @@ const applySettings = (payload?: Partial<typeof settings> | null) => {
 };
 
 const resetToDefaults = async () => {
-  if (!deviceId) {
+  if (!deviceId.value) {
     applySettings();
     return;
   }
 
   saving.value = true;
   try {
-    const res = await apiFetch(`/api/devices/${deviceId}/settings`, {
+    const res = await apiFetch(`/api/devices/${deviceId.value}/settings`, {
       method: 'DELETE'
     });
 
@@ -486,35 +486,53 @@ const resetToDefaults = async () => {
 };
 
 const loadSettings = async () => {
+  if (!deviceId.value) {
+    deviceName.value = '设备设置';
+    applySettings();
+    loading.value = false;
+    return;
+  }
+
+  const currentDeviceId = deviceId.value;
   loading.value = true;
+  deviceName.value = '设备设置';
+  applySettings();
   try {
     const res = await apiFetch('/api/devices');
     if (res.ok) {
       const devices = await res.json();
-      const target = devices.find((d: any) => String(d.Id) === deviceId);
+      const target = devices.find((d: any) => String(d.Id) === currentDeviceId);
       if (target) {
         deviceName.value = target.Name || target.Serial || '设备设置';
       }
     }
 
-    const settingsRes = await apiFetch(`/api/devices/${deviceId}/settings`);
+    const settingsRes = await apiFetch(`/api/devices/${currentDeviceId}/settings`);
     if (settingsRes.ok) {
       const payload = await settingsRes.json();
-      applySettings(payload);
+      if (deviceId.value === currentDeviceId) {
+        applySettings(payload);
+      }
     }
   } catch (e) {
     console.error('Failed to load device info', e);
   } finally {
-    loading.value = false;
+    if (deviceId.value === currentDeviceId) {
+      loading.value = false;
+    }
   }
 };
 
 const saveSettings = async () => {
+  if (!deviceId.value) {
+    return;
+  }
+
   saving.value = true;
   try {
     Object.assign(settings, normalizeSettingsPayload(settings));
     sanitizeVideoEncoder();
-    const res = await apiFetch(`/api/devices/${deviceId}/settings`, {
+    const res = await apiFetch(`/api/devices/${deviceId.value}/settings`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
@@ -536,11 +554,9 @@ const saveSettings = async () => {
   }
 };
 
-onMounted(() => {
-  if (deviceId) {
-    loadSettings();
-  }
-});
+watch(deviceId, () => {
+  void loadSettings();
+}, { immediate: true });
 
 watch(() => settings.VideoCodec, () => {
   sanitizeVideoEncoder();

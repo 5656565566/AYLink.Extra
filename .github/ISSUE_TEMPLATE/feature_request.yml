@@ -1,0 +1,68 @@
+name: "✨ Feature Request / 功能请求"
+description: "Suggest a new feature or improvement / 提出新功能或改进建议"
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component / 组件
+      description: Which component should this feature belong to? / 这个功能主要属于哪个组件？
+      options:
+        - AYLink.Agent
+        - AYLink.Core
+        - AYLink.Mobile
+        - AYLink.Controls
+        - AYLink.Desktop
+        - Other / 其他组件
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement / 需求背景
+      description: What problem does this solve? / 这个需求要解决什么问题？
+      placeholder: |
+        CN: 描述当前遇到的不便或问题。
+        EN: Describe the inconvenience or problem you have now.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / 建议方案
+      description: What would you like to happen? / 你希望增加什么能力？
+      placeholder: |
+        CN: 描述你希望实现的功能。
+        EN: Describe the feature you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered / 替代方案
+      description: Any alternative solutions or workarounds? / 是否考虑过其他方案或临时做法？
+      placeholder: |
+        CN: 可填写你考虑过的其他方案。
+        EN: List other solutions or workarounds you considered.
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case / 使用场景
+      description: How would this be used in practice? / 实际使用场景是什么？
+      placeholder: |
+        CN: 描述一个或多个真实使用场景。
+        EN: Describe one or more real-world use cases.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context / 补充信息
+      description: Add mockups, screenshots, references, etc. / 可补充草图、截图、参考链接等
+      placeholder: |
+        CN: 可附加示意图、参考资料等。
+        EN: Add mockups, screenshots, references, etc.

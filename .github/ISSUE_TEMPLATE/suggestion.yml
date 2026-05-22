@@ -1,0 +1,55 @@
+name: "💡 Suggestion / 其他建议"
+description: "General suggestions, feedback, or discussion / 一般建议、反馈或讨论"
+title: "[Suggestion] "
+labels: ["discussion"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Related Component / 相关组件
+      description: Which component is this related to? / 这条建议主要和哪个组件相关？
+      options:
+        - AYLink.Agent
+        - AYLink.Core
+        - AYLink.Mobile
+        - AYLink.Controls
+        - AYLink.Desktop
+        - Other / 其他组件
+    validations:
+      required: true
+
+  - type: input
+    id: other_component_name
+    attributes:
+      label: Other Component Name / 其他组件名称
+      description: Fill this only if you selected “Other / 其他组件” / 仅当上面选择“Other / 其他组件”时填写
+      placeholder: "e.g. AYLink.Web / AYLink.Tools"
+
+  - type: textarea
+    id: content
+    attributes:
+      label: Suggestion Details / 建议内容
+      description: Describe your suggestion, idea, or feedback / 请描述你的建议、想法或反馈
+      placeholder: |
+        CN: 请详细说明你的建议。
+        EN: Please describe your suggestion in detail.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: Why It Matters / 背景与原因
+      description: Why do you think this is useful? / 你为什么认为这条建议有价值？
+      placeholder: |
+        CN: 描述这条建议的背景和价值。
+        EN: Explain the background and value of this suggestion.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context / 补充信息
+      description: Any extra notes, examples, screenshots, or references / 其他备注、示例、截图或参考资料
+      placeholder: |
+        CN: 补充更多上下文。
+        EN: Add more context if needed.

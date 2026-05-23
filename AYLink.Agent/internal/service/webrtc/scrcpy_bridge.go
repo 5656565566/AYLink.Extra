@@ -23,7 +23,6 @@ const (
 	defaultAudioSampleDuration = 20 * time.Millisecond
 	videoReadyTimeout          = 5 * time.Second
 	videoStallThreshold        = 3 * time.Second
-	videoRefreshDebounce       = 10 * time.Second
 )
 
 var errScrcpyRuntimeUnavailable = errors.New("scrcpy runtime is unavailable")
@@ -110,9 +109,15 @@ func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
 	defer unsubscribeAudio()
 	errorsCh, unsubscribeErrors := b.runtime.SubscribeErrors()
 	defer unsubscribeErrors()
+	stateCheck := time.NewTicker(500 * time.Millisecond)
+	defer stateCheck.Stop()
 
 	for {
 		select {
+		case <-stateCheck.C:
+			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+				return
+			}
 		case packet, ok := <-audioPackets:
 			if !ok {
 				return
@@ -134,6 +139,9 @@ func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
 			}
 			if packet.Release != nil {
 				packet.Release()
+			}
+			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+				return
 			}
 		case err, ok := <-errorsCh:
 			if ok && err != nil && !errors.Is(err, io.EOF) {
@@ -158,8 +166,6 @@ type scrcpyVideoBridge struct {
 	h264LengthSize   int
 	hasSentKeyFrame  bool
 	peerConnected    bool
-	refreshRequested bool
-	lastRefreshTime  time.Time
 	lastFrameWriteAt time.Time
 }
 
@@ -170,9 +176,15 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 	defer unsubscribeVideo()
 	errorsCh, unsubscribeErrors := b.runtime.SubscribeErrors()
 	defer unsubscribeErrors()
+	stateCheck := time.NewTicker(500 * time.Millisecond)
+	defer stateCheck.Stop()
 
 	for {
 		select {
+		case <-stateCheck.C:
+			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+				return
+			}
 		case packet, ok := <-videoPackets:
 			if !ok {
 				return
@@ -180,6 +192,9 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 			b.handlePacket(peerConnection, packet)
 			if packet.Release != nil {
 				packet.Release()
+			}
+			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+				return
 			}
 			if b.hasAnyReadyFrame() && !videoReady.Stop() {
 				select {
@@ -193,6 +208,9 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 			}
 			return
 		case <-videoReady.C:
+			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+				return
+			}
 			b.requestRefresh()
 			videoReady.Reset(videoReadyTimeout)
 		}
@@ -251,6 +269,11 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 
 	if packet.IsConfig {
 		b.lastConfig = cloneBytes(annexB)
+		b.pendingKeyFrame = nil
+		b.pendingFramePTS = 0
+		b.lastSentPTS = 0
+		b.hasSentKeyFrame = false
+		b.lastFrameWriteAt = time.Time{}
 		return
 	}
 
@@ -261,6 +284,10 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 				b.pendingKeyFrame = composeVideoFramePayload(b.lastConfig, annexB)
 				b.pendingFramePTS = packet.PresentationTimestamp
 			}
+			return
+		}
+
+		if !isIDR {
 			return
 		}
 	}
@@ -323,34 +350,10 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 }
 
 func (b *scrcpyVideoBridge) requestRefreshLocked() {
-	if b.refreshRequested {
-		if b.debugEnabled && b.logger != nil {
-			b.logger.Debug("webrtc video refresh skipped", "reason", "already_requested")
-		}
-		return
-	}
-
-	// 避免将浏览器的周期性 PLI/FIR 直接翻译成 scrcpy 采集重置，否则会引发持续 reset 和明显卡顿。
-	if time.Since(b.lastRefreshTime) < videoRefreshDebounce {
-		if b.debugEnabled && b.logger != nil {
-			b.logger.Debug("webrtc video refresh skipped", "reason", "debounced", "sinceLast", time.Since(b.lastRefreshTime).Round(time.Millisecond))
-		}
-		return
-	}
-	b.lastRefreshTime = time.Now()
-	b.refreshRequested = true
 	if b.debugEnabled && b.logger != nil {
-		b.logger.Debug("webrtc video refresh requested")
+		b.logger.Debug("webrtc video refresh requested", "scope", "runtime")
 	}
-
-	go func() {
-		defer func() {
-			b.mu.Lock()
-			b.refreshRequested = false
-			b.mu.Unlock()
-		}()
-		_ = b.runtime.SendControl(domainscrcpy.BuildResetVideoControl())
-	}()
+	_ = b.runtime.RequestVideoRefresh()
 }
 
 func (b *scrcpyVideoBridge) hasAnyReadyFrame() bool {
@@ -531,6 +534,12 @@ func containsH264IDR(sample []byte) bool {
 		}
 	}
 	return false
+}
+
+func isTerminalPeerConnectionState(state pion.PeerConnectionState) bool {
+	return state == pion.PeerConnectionStateClosed ||
+		state == pion.PeerConnectionStateFailed ||
+		state == pion.PeerConnectionStateDisconnected
 }
 
 func cloneBytes(value []byte) []byte {

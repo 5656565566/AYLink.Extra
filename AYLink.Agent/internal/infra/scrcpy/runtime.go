@@ -26,6 +26,10 @@ const (
 	videoPacketQueueSize          = 8
 	audioPacketQueueSize          = 32
 	controlQueueSize              = 256
+	videoRefreshDebounce          = 10 * time.Second
+	opusSampleRate                = 48000
+	opusChannels                  = 2
+	audioGainMultiplier           = 1.3
 )
 
 var opusWasmMu sync.Mutex
@@ -59,6 +63,10 @@ type runtime struct {
 	errorMu          sync.Mutex
 	errorSubscribers map[int]chan error
 	nextErrorSubID   int
+
+	refreshMu        sync.Mutex
+	refreshRequested bool
+	lastRefreshTime  time.Time
 
 	done chan struct{}
 }
@@ -211,6 +219,32 @@ func (r *runtime) SubscribeErrors() (<-chan error, func()) {
 			close(sub)
 		}
 	}
+}
+
+func (r *runtime) RequestVideoRefresh() error {
+	r.refreshMu.Lock()
+	if r.refreshRequested {
+		r.refreshMu.Unlock()
+		return nil
+	}
+	if time.Since(r.lastRefreshTime) < videoRefreshDebounce {
+		r.refreshMu.Unlock()
+		return nil
+	}
+	r.lastRefreshTime = time.Now()
+	r.refreshRequested = true
+	r.refreshMu.Unlock()
+
+	go func() {
+		defer func() {
+			r.refreshMu.Lock()
+			r.refreshRequested = false
+			r.refreshMu.Unlock()
+		}()
+		_ = r.SendControl(domainscrcpy.BuildResetVideoControl())
+	}()
+
+	return nil
 }
 
 func (r *runtime) SendControl(payload []byte) error {
@@ -408,7 +442,7 @@ func (r *runtime) readAudioLoop() {
 		// github.com/jj11hh/opus 使用全局共享的 Wasm 运行时和内存，
 		// 多个会话并发初始化/编码时会踩内存并导致 Windows 访问冲突。
 		opusWasmMu.Lock()
-		enc, err := opus.NewEncoder(48000, 2, opus.AppAudio)
+		enc, err := opus.NewEncoder(opusSampleRate, opusChannels, opus.AppAudio)
 		opusWasmMu.Unlock()
 		if err != nil {
 			r.emitError(fmt.Errorf("failed to create opus encoder: %w", err))
@@ -424,7 +458,7 @@ func (r *runtime) readAudioLoop() {
 	encodeScratch := make([]byte, 1500)
 	// WebRTC Opus 通常需要 20ms 帧 对于 48kHz 立体声:
 	// 48000 x 2声道 x 0.02 s = 1920 samples
-	const samplesPerFrame = 1920
+	const samplesPerFrame = opusSampleRate * opusChannels / 50
 
 	for {
 		if _, err := io.ReadFull(r.audioConn, header); err != nil {
@@ -471,6 +505,7 @@ func (r *runtime) readAudioLoop() {
 			for i := 0; i < sampleCount; i++ {
 				sampleScratch[i] = int16(binary.LittleEndian.Uint16(payload[i*2 : i*2+2]))
 			}
+			applyPCMInt16Gain(sampleScratch, audioGainMultiplier)
 			pcmBuffer = append(pcmBuffer, sampleScratch...)
 
 			// 编码为 20ms 长度的数据帧
@@ -603,6 +638,7 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 
 	if packet.IsConfig {
 		r.latestVideoConfig = cloneVideoPacketForCache(packet)
+		r.latestVideoKeyFrame = domainscrcpy.VideoPacket{}
 	} else if packet.IsKeyFrame || packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data) {
 		r.latestVideoKeyFrame = cloneVideoPacketForCache(packet)
 	}
@@ -836,6 +872,24 @@ func releaseMediaPacketBuffer(buffer []byte) {
 		return
 	}
 	mediaPacketBufferPool.Put(buffer[:0])
+}
+
+func applyPCMInt16Gain(samples []int16, gain float64) {
+	if gain == 1 || len(samples) == 0 {
+		return
+	}
+
+	for i, sample := range samples {
+		amplified := int(float64(sample) * gain)
+		switch {
+		case amplified > 32767:
+			samples[i] = 32767
+		case amplified < -32768:
+			samples[i] = -32768
+		default:
+			samples[i] = int16(amplified)
+		}
+	}
 }
 
 func isDroppableControlPayload(payload []byte) bool {

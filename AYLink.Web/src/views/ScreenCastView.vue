@@ -2704,6 +2704,8 @@ const startConnection = async (bypassStartGuard = false) => {
 
 const detachActiveConnectionFromView = () => {
   activeConnectionId++;
+  stopFlexDisplayHeartbeat();
+  clearPendingDisplayResize();
   activePointers.clear();
   pointerGenerations.clear();
   scrcpyPointerIds.clear();
@@ -2752,6 +2754,8 @@ const detachActiveConnectionFromView = () => {
 
 const stopConnection = (preserveForBackground = false, preserveTabKey = activeTabKey.value) => {
   stopScrcpySessionHeartbeat();
+  stopFlexDisplayHeartbeat();
+  clearPendingDisplayResize();
   activePointers.clear();
   pointerGenerations.clear();
   scrcpyPointerIds.clear();
@@ -2809,7 +2813,6 @@ const stopConnection = (preserveForBackground = false, preserveTabKey = activeTa
   pendingCandidates = [];
   clearPendingReconnect();
   clearPendingStartConnection();
-  clearPendingDisplayResize();
   lastDisplayResizeRequest = null;
   isConnected.value = false;
   isConnecting.value = false;
@@ -2861,6 +2864,7 @@ const closeTab = async (tabKey: string) => {
   castTabs.value.splice(closingIndex, 1);
 
   if (!closingActive) {
+    disposePersistedConnection(tabKey);
     void postScrcpySessionAction('release', closingTab?.deviceId ?? '', closingSessionId);
     persistTabs();
     return;

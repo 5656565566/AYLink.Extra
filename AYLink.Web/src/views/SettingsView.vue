@@ -84,7 +84,7 @@
         >
           <button class="fluent-btn">{{ t('Settings.CheckNow', '立即检查') }}</button>
         </SettingItem>
-        <SettingItem title="GitHub" description="https://github.com/5656565566/AYLink">
+        <SettingItem title="GitHub" description="https://github.com/5656565566/AYLink.Extra">
           <button class="fluent-btn">{{ t('Settings.OpenGitHub', '打开 GitHub 仓库') }}</button>
         </SettingItem>
         <SettingItem

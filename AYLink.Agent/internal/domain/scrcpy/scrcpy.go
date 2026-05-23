@@ -99,6 +99,7 @@ type Runtime interface {
 	SubscribeVideoPackets() (<-chan VideoPacket, func())
 	SubscribeAudioPackets() (<-chan AudioPacket, func())
 	SubscribeErrors() (<-chan error, func())
+	RequestVideoRefresh() error
 	SendControl([]byte) error
 	Close() error
 }

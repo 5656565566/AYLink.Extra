@@ -132,7 +132,7 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 		WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
 		return
 	}
-	if !h.service.HasActiveSessionLease(payload.DeviceID) {
+	if !h.service.HasActiveSessionLease(payload.DeviceID) && !h.hasRuntimeRefs(payload.DeviceID) {
 		h.forceCloseRuntime(payload.DeviceID)
 	}
 	h.cleanupIdleRuntimes()
@@ -359,6 +359,18 @@ func (h *WebRTCHandler) cleanupIdleRuntimes() {
 	for _, entry := range stale {
 		_ = entry.runtime.Close()
 	}
+}
+
+func (h *WebRTCHandler) hasRuntimeRefs(deviceID string) bool {
+	if deviceID == "" {
+		return false
+	}
+
+	h.runtimeMu.Lock()
+	defer h.runtimeMu.Unlock()
+
+	entry := h.runtimes[deviceID]
+	return entry != nil && entry.refCount > 0
 }
 
 func (h *WebRTCHandler) forceCloseRuntime(deviceID string) {

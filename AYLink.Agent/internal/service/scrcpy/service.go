@@ -39,6 +39,8 @@ type Service struct {
 	backend  Backend
 }
 
+const scrcpyControlMsgResizeDisplay byte = 21
+
 type WebRTCRuntimeOptions struct {
 	AppPackage string
 	AppName    string
@@ -93,11 +95,29 @@ func (s *Service) StartSession(ctx context.Context, deviceID int) (*domainscrcpy
 }
 
 func (s *Service) StartRuntime(ctx context.Context, deviceID int) (domainscrcpy.Runtime, error) {
-	session, err := s.StartSession(ctx, deviceID)
+	serial, err := s.resolveSerial(ctx, deviceID)
 	if err != nil {
 		return nil, err
 	}
-	return s.backend.OpenRuntime(ctx, session)
+	if !s.backend.IsAvailable() {
+		return nil, ErrServerUnavailable
+	}
+
+	settings, err := s.settings.GetByDeviceID(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	config := mapSettings(settings)
+	session, err := s.backend.StartSession(ctx, serial, config)
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := s.backend.OpenRuntime(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	return wrapRuntimeForConfig(runtime, config), nil
 }
 
 func (s *Service) StartRuntimeForWebRTC(ctx context.Context, deviceID int, options WebRTCRuntimeOptions) (domainscrcpy.Runtime, error) {
@@ -121,7 +141,11 @@ func (s *Service) StartRuntimeForWebRTC(ctx context.Context, deviceID int, optio
 	if err != nil {
 		return nil, err
 	}
-	return s.backend.OpenRuntime(ctx, session)
+	runtime, err := s.backend.OpenRuntime(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	return wrapRuntimeForConfig(runtime, config), nil
 }
 
 func (s *Service) resolveSerial(ctx context.Context, deviceID int) (string, error) {
@@ -195,4 +219,28 @@ func applyWebRTCRuntimeOptions(config domainscrcpy.SessionConfig, options WebRTC
 	}
 
 	return config
+}
+
+func wrapRuntimeForConfig(runtime domainscrcpy.Runtime, config domainscrcpy.SessionConfig) domainscrcpy.Runtime {
+	if runtime == nil {
+		return nil
+	}
+
+	return &runtimeControlGuard{
+		Runtime:            runtime,
+		allowDisplayResize: strings.TrimSpace(config.NewDisplay) != "" && config.FlexDisplay,
+	}
+}
+
+type runtimeControlGuard struct {
+	domainscrcpy.Runtime
+	allowDisplayResize bool
+}
+
+func (r *runtimeControlGuard) SendControl(payload []byte) error {
+	if len(payload) > 0 && payload[0] == scrcpyControlMsgResizeDisplay && !r.allowDisplayResize {
+		return nil
+	}
+
+	return r.Runtime.SendControl(payload)
 }

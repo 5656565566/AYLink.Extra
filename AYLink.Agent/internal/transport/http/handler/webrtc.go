@@ -225,6 +225,7 @@ func (h *WebRTCHandler) acquireRuntime(
 	options scrcpyservice.WebRTCRuntimeOptions,
 ) (domainscrcpy.Runtime, bool, error) {
 	signature := buildRuntimeSignature(deviceKey, options)
+	shareable := isRuntimeShareable(options)
 
 	for {
 		h.runtimeMu.Lock()
@@ -237,7 +238,7 @@ func (h *WebRTCHandler) acquireRuntime(
 				continue
 			}
 
-			if entry.runtime != nil && entry.signature == signature {
+			if shareable && entry.runtime != nil && entry.signature == signature {
 				entry.refCount++
 				if sessionID != "" {
 					if entry.sessionRefs == nil {
@@ -396,6 +397,10 @@ func buildRuntimeSignature(deviceID string, options scrcpyservice.WebRTCRuntimeO
 		strings.TrimSpace(options.AppPackage),
 		fmt.Sprintf("%t", options.NewDisplay),
 	}, "|")
+}
+
+func isRuntimeShareable(options scrcpyservice.WebRTCRuntimeOptions) bool {
+	return !options.NewDisplay
 }
 
 func (h *WebRTCHandler) launchProjectedApp(runtime domainscrcpy.Runtime, packageName string) error {

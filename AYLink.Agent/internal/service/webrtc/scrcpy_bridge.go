@@ -85,14 +85,17 @@ func (s *Service) attachScrcpyAudio(peerConnection *pion.PeerConnection, runtime
 	return nil
 }
 
-func (s *Service) bindScrcpyControl(peerConnection *pion.PeerConnection, runtime domainscrcpy.Runtime) {
-	if runtime == nil {
+func (s *Service) bindScrcpyControl(peerConnection *pion.PeerConnection, deviceID string, sessionID string, runtime domainscrcpy.Runtime) {
+	if runtime == nil || deviceID == "" || sessionID == "" {
 		return
 	}
 
 	peerConnection.OnDataChannel(func(channel *pion.DataChannel) {
 		channel.OnMessage(func(msg pion.DataChannelMessage) {
 			if !msg.IsString && len(msg.Data) > 0 {
+				if !s.TryAcquireControl(deviceID, sessionID) {
+					return
+				}
 				_ = runtime.SendControl(msg.Data)
 			}
 		})

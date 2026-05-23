@@ -208,7 +208,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.service.HandleSignalWebSocket(context.Background(), ticket.DeviceID, conn, h.settings, runtime); err != nil {
+	if err := h.service.HandleSignalWebSocket(context.Background(), ticket.DeviceID, ticket.SessionID, conn, h.settings, runtime); err != nil {
 		_ = conn.WriteJSON(map[string]any{
 			"type":    "error",
 			"message": "WebRTC 信令处理失败",

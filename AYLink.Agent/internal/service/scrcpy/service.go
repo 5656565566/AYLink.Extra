@@ -228,7 +228,7 @@ func wrapRuntimeForConfig(runtime domainscrcpy.Runtime, config domainscrcpy.Sess
 
 	return &runtimeControlGuard{
 		Runtime:            runtime,
-		allowDisplayResize: strings.TrimSpace(config.NewDisplay) != "" && config.FlexDisplay,
+		allowDisplayResize: config.NewDisplay != "" && config.FlexDisplay,
 	}
 }
 

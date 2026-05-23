@@ -23,7 +23,7 @@ type SettingsProvider interface {
 
 const signalingDisconnectGracePeriod = 20 * time.Second
 
-func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, conn *websocket.Conn, settings SettingsProvider, runtime domainscrcpy.Runtime) error {
+func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, sessionID string, conn *websocket.Conn, settings SettingsProvider, runtime domainscrcpy.Runtime) error {
 	debugWebRTC := s.debugWebRTC
 	api, config, rewriteCandidates, err := s.buildPeerConfiguration(ctx, settings)
 	if err != nil {
@@ -49,7 +49,7 @@ func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, co
 	// 若音频可用则尝试挂载音频媒体流轨道
 	_ = s.attachScrcpyAudio(peerConnection, runtime)
 
-	s.bindScrcpyControl(peerConnection, runtime)
+	s.bindScrcpyControl(peerConnection, deviceID, sessionID, runtime)
 
 	writeMu := make(chan struct{}, 1)
 	writeMu <- struct{}{}

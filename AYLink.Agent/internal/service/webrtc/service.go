@@ -26,11 +26,20 @@ type Service struct {
 	mu            sync.Mutex
 	tickets       map[string]domainwebrtc.Ticket
 	sessionLeases map[string]domainwebrtc.SessionLease
+	controlLeases map[string]controlLease
 	udpMuxes      map[int]ice.UDPMux
 	ticketTTL     time.Duration
 	leaseTTL      time.Duration
 	now           func() time.Time
 }
+
+type controlLease struct {
+	DeviceID  string
+	SessionID string
+	ExpiresAt time.Time
+}
+
+const controlLeaseTTL = 1500 * time.Millisecond
 
 type CreateTicketInput struct {
 	DeviceID   string `json:"deviceId"`
@@ -51,6 +60,7 @@ func NewService(logger logging.Logger) *Service {
 		debugWebRTC:   logging.FeatureEnabled("WEBRTC"),
 		tickets:       make(map[string]domainwebrtc.Ticket),
 		sessionLeases: make(map[string]domainwebrtc.SessionLease),
+		controlLeases: make(map[string]controlLease),
 		udpMuxes:      make(map[int]ice.UDPMux),
 		ticketTTL:     60 * time.Second,
 		leaseTTL:      45 * time.Second,
@@ -140,6 +150,9 @@ func (s *Service) ReleaseSession(_ context.Context, deviceID string, sessionID s
 	if ok && lease.DeviceID == deviceID {
 		delete(s.sessionLeases, sessionID)
 	}
+	if controlLease, ok := s.controlLeases[deviceID]; ok && controlLease.SessionID == sessionID {
+		delete(s.controlLeases, deviceID)
+	}
 	return nil
 }
 
@@ -176,6 +189,29 @@ func (s *Service) HasActiveSessionLease(deviceID string) bool {
 	return false
 }
 
+func (s *Service) TryAcquireControl(deviceID string, sessionID string) bool {
+	if deviceID == "" || sessionID == "" {
+		return false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cleanupLocked()
+	now := s.now()
+	lease, ok := s.controlLeases[deviceID]
+	if !ok || !lease.ExpiresAt.After(now) || lease.SessionID == sessionID {
+		s.controlLeases[deviceID] = controlLease{
+			DeviceID:  deviceID,
+			SessionID: sessionID,
+			ExpiresAt: now.Add(controlLeaseTTL),
+		}
+		return true
+	}
+
+	return false
+}
+
 func (s *Service) cleanupLocked() {
 	now := s.now()
 	for key, ticket := range s.tickets {
@@ -186,6 +222,11 @@ func (s *Service) cleanupLocked() {
 	for key, lease := range s.sessionLeases {
 		if !lease.ExpiresAt.After(now) {
 			delete(s.sessionLeases, key)
+		}
+	}
+	for key, lease := range s.controlLeases {
+		if !lease.ExpiresAt.After(now) {
+			delete(s.controlLeases, key)
 		}
 	}
 }

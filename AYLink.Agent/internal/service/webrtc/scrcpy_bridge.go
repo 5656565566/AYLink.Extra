@@ -93,13 +93,28 @@ func (s *Service) bindScrcpyControl(peerConnection *pion.PeerConnection, deviceI
 	peerConnection.OnDataChannel(func(channel *pion.DataChannel) {
 		channel.OnMessage(func(msg pion.DataChannelMessage) {
 			if !msg.IsString && len(msg.Data) > 0 {
-				if !s.TryAcquireControl(deviceID, sessionID) {
-					return
+				if isExclusiveControlPayload(msg.Data) {
+					if !s.TryAcquireControl(deviceID, sessionID) {
+						return
+					}
 				}
 				_ = runtime.SendControl(msg.Data)
 			}
 		})
 	})
+}
+
+func isExclusiveControlPayload(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+
+	switch payload[0] {
+	case 0, 1, 2, 9, 10, 13:
+		return true
+	default:
+		return false
+	}
 }
 
 type scrcpyAudioBridge struct {
@@ -185,6 +200,7 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 	for {
 		select {
 		case <-stateCheck.C:
+			b.handlePeerConnectionState(peerConnection.ConnectionState())
 			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
 				return
 			}
@@ -251,13 +267,7 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	switch peerConnection.ConnectionState() {
-	case pion.PeerConnectionStateConnected:
-		if !b.peerConnected {
-			b.peerConnected = true
-			b.flushPendingLocked()
-		}
-	case pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed:
+	if b.handlePeerConnectionStateLocked(peerConnection.ConnectionState()) {
 		return
 	}
 
@@ -310,6 +320,26 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 	}); err == nil {
 		b.lastFrameWriteAt = time.Now()
 	}
+}
+
+func (b *scrcpyVideoBridge) handlePeerConnectionState(state pion.PeerConnectionState) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.handlePeerConnectionStateLocked(state)
+}
+
+func (b *scrcpyVideoBridge) handlePeerConnectionStateLocked(state pion.PeerConnectionState) bool {
+	switch state {
+	case pion.PeerConnectionStateConnected:
+		if !b.peerConnected {
+			b.peerConnected = true
+			b.flushPendingLocked()
+		}
+	case pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed, pion.PeerConnectionStateDisconnected:
+		return true
+	}
+
+	return false
 }
 
 func (b *scrcpyVideoBridge) flushPendingLocked() {

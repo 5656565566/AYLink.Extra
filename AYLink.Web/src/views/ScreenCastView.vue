@@ -174,6 +174,8 @@ const VIDEO_RECOVERY_TIMEOUT_MS = 8000;
 const DEFAULT_AUTO_NEW_DISPLAY_DPI = 160;
 const MIN_NEW_DISPLAY_DPI = 72;
 const MAX_NEW_DISPLAY_DPI = 960;
+const MIN_NEW_DISPLAY_DIMENSION = 240;
+const MAX_NEW_DISPLAY_LONG_EDGE = 1920;
 const MENU_MARGIN = 20;
 const MENU_BUTTON_SIZE = 48;
 const MENU_ITEM_COUNT = 13;
@@ -247,7 +249,7 @@ const status = ref('未连接');
 const lastFrameOverlayUrl = ref('');
 const shouldShowLastFrameOverlay = ref(false);
 const shouldFillVideoFrame = ref(false);
-const effectiveFillMode = computed(() => isFlexDisplayEnabled.value || shouldFillVideoFrame.value);
+const effectiveFillMode = computed(() => shouldFillVideoFrame.value);
 const isMenuExpanded = ref(true);
 const isDocked = ref(true);
 const dockedEdge = ref<DockedEdge>('right');
@@ -705,6 +707,57 @@ const detectAutomaticNewDisplayDpi = () => {
   }
 
   return normalizeNewDisplayDpiValue(dpr * 160);
+};
+
+const roundDisplayDimension = (value: number) => {
+  const rounded = Math.max(MIN_NEW_DISPLAY_DIMENSION, Math.round(value));
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+};
+
+const getDisplayStageRect = () => {
+  return videoContainer.value?.getBoundingClientRect()
+    ?? shellElement.value?.getBoundingClientRect()
+    ?? null;
+};
+
+const getDisplayAspectSize = () => {
+  if (lastVideoFrameSize.width > 0 && lastVideoFrameSize.height > 0) {
+    return {
+      width: lastVideoFrameSize.width,
+      height: lastVideoFrameSize.height
+    };
+  }
+
+  const rect = getDisplayStageRect();
+  if (rect && rect.width > 0 && rect.height > 0) {
+    return {
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+  }
+
+  return {
+    width: Math.max(1, window.innerWidth),
+    height: Math.max(1, window.innerHeight)
+  };
+};
+
+const buildAdaptiveDisplaySize = () => {
+  const aspect = getDisplayAspectSize();
+  const rect = getDisplayStageRect();
+  const dpr = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+    ? Math.min(window.devicePixelRatio, 2)
+    : 1;
+  const targetLongEdge = rect
+    ? Math.min(MAX_NEW_DISPLAY_LONG_EDGE, Math.round(Math.max(rect.width, rect.height) * dpr))
+    : MAX_NEW_DISPLAY_LONG_EDGE;
+  const baseLongEdge = Math.max(aspect.width, aspect.height, 1);
+  const scale = targetLongEdge / baseLongEdge;
+
+  return {
+    width: roundDisplayDimension(aspect.width * scale),
+    height: roundDisplayDimension(aspect.height * scale)
+  };
 };
 
 const hasLiveConnection = () => {
@@ -1521,14 +1574,11 @@ const startFlexDisplayHeartbeat = () => {
 };
 
 const getDisplayResizeSize = () => {
-  const rect = videoContainer.value?.getBoundingClientRect();
-  if (!rect) {
+  if (!isNewDisplayMode.value) {
     return null;
   }
 
-  const width = Math.max(1, Math.round(rect.width));
-  const height = Math.max(1, Math.round(rect.height));
-  return width > 0 && height > 0 ? { width, height } : null;
+  return buildAdaptiveDisplaySize();
 };
 
 const sendDisplayResizeIfNeeded = () => {
@@ -2667,6 +2717,7 @@ const startConnection = async (bypassStartGuard = false) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     let wsUrl = import.meta.env.DEV ? 'ws://127.0.0.1:5501/webrtc' : `${protocol}//${host}/webrtc`;
+    const initialNewDisplaySize = isNewDisplayMode.value ? buildAdaptiveDisplaySize() : null;
     const ticketResponse = await apiFetch('/api/webrtc-ticket', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2675,6 +2726,8 @@ const startConnection = async (bypassStartGuard = false) => {
           appPackage: appPackageName.value || undefined,
           appName: appDisplayName.value || undefined,
           newDisplay: isNewDisplayMode.value,
+          newDisplayWidth: initialNewDisplaySize?.width,
+          newDisplayHeight: initialNewDisplaySize?.height,
           newDisplayDpi: resolvedNewDisplayDpi.value ?? undefined,
         })
       });

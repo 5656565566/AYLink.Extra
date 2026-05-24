@@ -27,7 +27,7 @@
           </label>
         </SettingItem>
         <SettingItem
-          :title="t('Settings.NewDisplayDpiMode', 'PPI 跟随')"
+          :title="t('Settings.NewDisplayDpiMode', 'DPI 跟随')"
           :description="t('Settings.NewDisplayDpiModeDescription', '用于新建显示器和应用投屏时的默认像素密度')"
         >
           <select class="fluent-select" :value="newDisplayDpiMode" @change="onNewDisplayDpiModeChange">
@@ -38,7 +38,7 @@
         </SettingItem>
         <SettingItem
           v-if="newDisplayDpiMode === 'custom'"
-          :title="t('Settings.NewDisplayDpiValue', '自定义 PPI')"
+          :title="t('Settings.NewDisplayDpiValue', '自定义 DPI')"
           :description="t('Settings.NewDisplayDpiValueDescription', '推荐 160-480，该值会作为 new_display 的可选 DPI 参数发送给后端')"
         >
           <input

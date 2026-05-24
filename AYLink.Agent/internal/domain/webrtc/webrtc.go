@@ -9,6 +9,9 @@ type Ticket struct {
 	AppPackage string
 	AppName    string
 	NewDisplay bool
+	NewDisplayWidth *int
+	NewDisplayHeight *int
+	NewDisplayDPI *int
 	ExpiresAt  time.Time
 }
 

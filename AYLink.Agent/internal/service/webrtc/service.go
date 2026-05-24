@@ -46,6 +46,9 @@ type CreateTicketInput struct {
 	AppPackage string `json:"appPackage"`
 	AppName    string `json:"appName"`
 	NewDisplay bool   `json:"newDisplay"`
+	NewDisplayWidth *int `json:"newDisplayWidth"`
+	NewDisplayHeight *int `json:"newDisplayHeight"`
+	NewDisplayDPI *int `json:"newDisplayDpi"`
 }
 
 type CreateTicketResult struct {
@@ -89,6 +92,9 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 		AppPackage: input.AppPackage,
 		AppName:    input.AppName,
 		NewDisplay: input.NewDisplay,
+		NewDisplayWidth: normalizeNewDisplayDimension(input.NewDisplayWidth),
+		NewDisplayHeight: normalizeNewDisplayDimension(input.NewDisplayHeight),
+		NewDisplayDPI: normalizeNewDisplayDPI(input.NewDisplayDPI),
 		ExpiresAt:  s.now().Add(s.ticketTTL),
 	}
 	s.tickets[value] = ticket
@@ -237,4 +243,30 @@ func randomHex(bytesLen int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buffer), nil
+}
+
+func normalizeNewDisplayDPI(value *int) *int {
+	if value == nil {
+		return nil
+	}
+
+	dpi := *value
+	if dpi < 72 || dpi > 960 {
+		return nil
+	}
+
+	return &dpi
+}
+
+func normalizeNewDisplayDimension(value *int) *int {
+	if value == nil {
+		return nil
+	}
+
+	dimension := *value
+	if dimension < 240 || dimension > 8192 {
+		return nil
+	}
+
+	return &dimension
 }

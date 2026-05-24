@@ -3,6 +3,7 @@ package scrcpy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	domaindevice "aylink-agent/internal/domain/device"
@@ -45,6 +46,9 @@ type WebRTCRuntimeOptions struct {
 	AppPackage string
 	AppName    string
 	NewDisplay bool
+	NewDisplayWidth *int
+	NewDisplayHeight *int
+	NewDisplayDPI *int
 }
 
 func NewService(devices DeviceRepository, settings SettingsRepository, backend Backend) *Service {
@@ -202,10 +206,25 @@ func mapSettings(settings domaindevice.SettingsProfile) domainscrcpy.SessionConf
 func applyWebRTCRuntimeOptions(config domainscrcpy.SessionConfig, options WebRTCRuntimeOptions) domainscrcpy.SessionConfig {
 	appPackage := strings.TrimSpace(options.AppPackage)
 	requiresDedicatedDisplay := options.NewDisplay || appPackage != ""
+	dpiSuffix := buildNewDisplayDPISuffix(options.NewDisplayDPI)
+	sizeValue := buildNewDisplaySizeValue(options.NewDisplayWidth, options.NewDisplayHeight)
 
 	if requiresDedicatedDisplay {
-		if strings.TrimSpace(config.NewDisplay) == "" {
-			config.NewDisplay = " "
+		if sizeValue != "" {
+			config.NewDisplay = sizeValue + dpiSuffix
+		} else {
+			trimmedNewDisplay := strings.TrimSpace(config.NewDisplay)
+			if trimmedNewDisplay == "" {
+				if dpiSuffix != "" {
+					config.NewDisplay = dpiSuffix
+				} else {
+					config.NewDisplay = " "
+				}
+			} else if dpiSuffix != "" && !strings.Contains(trimmedNewDisplay, "/") {
+				config.NewDisplay = trimmedNewDisplay + dpiSuffix
+			} else {
+				config.NewDisplay = trimmedNewDisplay
+			}
 		}
 		config.DisplayID = nil
 	} else {
@@ -219,6 +238,30 @@ func applyWebRTCRuntimeOptions(config domainscrcpy.SessionConfig, options WebRTC
 	}
 
 	return config
+}
+
+func buildNewDisplaySizeValue(width *int, height *int) string {
+	if width == nil || height == nil {
+		return ""
+	}
+
+	if *width < 240 || *height < 240 {
+		return ""
+	}
+
+	return fmt.Sprintf("%dx%d", *width, *height)
+}
+
+func buildNewDisplayDPISuffix(dpi *int) string {
+	if dpi == nil {
+		return ""
+	}
+
+	if *dpi < 72 || *dpi > 960 {
+		return ""
+	}
+
+	return fmt.Sprintf("/%d", *dpi)
 }
 
 func wrapRuntimeForConfig(runtime domainscrcpy.Runtime, config domainscrcpy.SessionConfig) domainscrcpy.Runtime {

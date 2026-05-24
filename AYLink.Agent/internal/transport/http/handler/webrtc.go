@@ -178,6 +178,9 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		AppPackage: ticket.AppPackage,
 		AppName:    ticket.AppName,
 		NewDisplay: ticket.NewDisplay,
+		NewDisplayWidth: ticket.NewDisplayWidth,
+		NewDisplayHeight: ticket.NewDisplayHeight,
+		NewDisplayDPI: ticket.NewDisplayDPI,
 	}
 	runtime, created, err := h.acquireRuntime(r.Context(), ticket.DeviceID, ticket.SessionID, deviceID, options)
 	if err != nil {
@@ -396,7 +399,17 @@ func buildRuntimeSignature(deviceID string, options scrcpyservice.WebRTCRuntimeO
 		strings.TrimSpace(deviceID),
 		strings.TrimSpace(options.AppPackage),
 		fmt.Sprintf("%t", options.NewDisplay),
+		fmt.Sprintf("%d", derefInt(options.NewDisplayWidth)),
+		fmt.Sprintf("%d", derefInt(options.NewDisplayHeight)),
+		fmt.Sprintf("%d", derefInt(options.NewDisplayDPI)),
 	}, "|")
+}
+
+func derefInt(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func isRuntimeShareable(options scrcpyservice.WebRTCRuntimeOptions) bool {

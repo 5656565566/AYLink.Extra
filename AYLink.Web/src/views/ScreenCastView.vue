@@ -171,6 +171,9 @@ const MOUSE_COMPAT_SUPPRESSION_MS = 900;
 const POINTER_MOVE_SAMPLE_INTERVAL_MS = 1000 / 120;
 const SIGNALING_DETACH_DELAY_MS = 3000;
 const VIDEO_RECOVERY_TIMEOUT_MS = 8000;
+const DEFAULT_AUTO_NEW_DISPLAY_DPI = 160;
+const MIN_NEW_DISPLAY_DPI = 72;
+const MAX_NEW_DISPLAY_DPI = 960;
 const MENU_MARGIN = 20;
 const MENU_BUTTON_SIZE = 48;
 const MENU_ITEM_COUNT = 13;
@@ -218,7 +221,7 @@ const KEYBOARD_REPORT_DESC = new Uint8Array([
 ]);
 
 const { t } = useI18n();
-const { backgroundMute } = useAppSettings();
+const { backgroundMute, newDisplayDpiMode, newDisplayDpiValue } = useAppSettings();
 const auth = useAuth();
 const route = useRoute();
 const router = useRouter();
@@ -330,6 +333,21 @@ const castTabItems = computed(() => castTabs.value.map((tab) => ({
 })));
 const isScreencastRouteActive = computed(() => route.name === 'screencast');
 const canUseFlexDisplay = computed(() => isNewDisplayMode.value && isFlexDisplayEnabled.value);
+const resolvedNewDisplayDpi = computed(() => {
+  if (!isNewDisplayMode.value) {
+    return null;
+  }
+
+  if (newDisplayDpiMode.value === 'disabled') {
+    return null;
+  }
+
+  if (newDisplayDpiMode.value === 'custom') {
+    return normalizeNewDisplayDpiValue(newDisplayDpiValue.value);
+  }
+
+  return detectAutomaticNewDisplayDpi();
+});
 
 type TrackKind = 'audio' | 'video';
 
@@ -669,6 +687,24 @@ const postScrcpySessionAction = async (action: 'heartbeat' | 'release', targetDe
   } catch (error) {
     console.warn(`Failed to ${action} scrcpy session:`, error);
   }
+};
+
+const normalizeNewDisplayDpiValue = (value: number | null | undefined) => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_AUTO_NEW_DISPLAY_DPI;
+  }
+
+  return Math.max(MIN_NEW_DISPLAY_DPI, Math.min(MAX_NEW_DISPLAY_DPI, Math.round(numeric)));
+};
+
+const detectAutomaticNewDisplayDpi = () => {
+  const dpr = window.devicePixelRatio;
+  if (!Number.isFinite(dpr) || dpr <= 0) {
+    return DEFAULT_AUTO_NEW_DISPLAY_DPI;
+  }
+
+  return normalizeNewDisplayDpiValue(dpr * 160);
 };
 
 const hasLiveConnection = () => {
@@ -2634,13 +2670,14 @@ const startConnection = async (bypassStartGuard = false) => {
     const ticketResponse = await apiFetch('/api/webrtc-ticket', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deviceId: deviceId.value,
-        appPackage: appPackageName.value || undefined,
-        appName: appDisplayName.value || undefined,
-        newDisplay: isNewDisplayMode.value,
-      })
-    });
+        body: JSON.stringify({
+          deviceId: deviceId.value,
+          appPackage: appPackageName.value || undefined,
+          appName: appDisplayName.value || undefined,
+          newDisplay: isNewDisplayMode.value,
+          newDisplayDpi: resolvedNewDisplayDpi.value ?? undefined,
+        })
+      });
 
     if (!ticketResponse.ok) {
       status.value = '创建连接凭据失败';

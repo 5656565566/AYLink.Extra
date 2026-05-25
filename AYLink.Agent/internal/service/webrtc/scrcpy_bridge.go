@@ -176,15 +176,38 @@ type scrcpyVideoBridge struct {
 	logger       logging.Logger
 	debugEnabled bool
 
-	mu               sync.Mutex
-	lastConfig       []byte
-	pendingKeyFrame  []byte
-	pendingFramePTS  int64
-	lastSentPTS      int64
-	h264LengthSize   int
-	hasSentKeyFrame  bool
-	peerConnected    bool
-	lastFrameWriteAt time.Time
+	mu                sync.Mutex
+	lastConfig        []byte
+	pendingKeyFrame   []byte
+	pendingFramePTS   int64
+	pendingGeneration uint64
+	lastSentPTS       int64
+	h264LengthSize    int
+	peerConnected     bool
+	lastFrameWriteAt  time.Time
+	generation        uint64
+	state             videoBridgeState
+}
+
+type videoBridgeState int
+
+const (
+	videoBridgeStateWaitingConfig videoBridgeState = iota
+	videoBridgeStateWaitingKeyFrame
+	videoBridgeStateReady
+)
+
+func (s videoBridgeState) String() string {
+	switch s {
+	case videoBridgeStateWaitingConfig:
+		return "waiting_config"
+	case videoBridgeStateWaitingKeyFrame:
+		return "waiting_keyframe"
+	case videoBridgeStateReady:
+		return "ready"
+	default:
+		return "unknown"
+	}
 }
 
 func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
@@ -281,33 +304,51 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 	}
 
 	if packet.IsConfig {
+		b.generation++
 		b.lastConfig = cloneBytes(annexB)
 		b.pendingKeyFrame = nil
 		b.pendingFramePTS = 0
+		b.pendingGeneration = 0
 		b.lastSentPTS = 0
-		b.hasSentKeyFrame = false
 		b.lastFrameWriteAt = time.Time{}
+		b.state = videoBridgeStateWaitingKeyFrame
+		b.logDebugLocked("webrtc video config arrived",
+			"generation", b.generation,
+			"size", len(annexB),
+			"state", b.state.String(),
+		)
+		return
+	}
+
+	if len(b.lastConfig) == 0 || b.generation == 0 {
+		if b.state != videoBridgeStateWaitingConfig {
+			b.state = videoBridgeStateWaitingConfig
+			b.logDebugLocked("webrtc video bridge waiting for config")
+		}
 		return
 	}
 
 	isIDR := packet.IsKeyFrame || containsH264IDR(annexB)
-	if !b.hasSentKeyFrame {
-		if !b.peerConnected {
-			if isIDR {
-				b.pendingKeyFrame = composeVideoFramePayload(b.lastConfig, annexB)
-				b.pendingFramePTS = packet.PresentationTimestamp
-			}
+	if b.state != videoBridgeStateReady {
+		if !isIDR {
 			return
 		}
 
-		if !isIDR {
+		if !b.peerConnected {
+			b.pendingKeyFrame = composeVideoFramePayload(b.lastConfig, annexB)
+			b.pendingFramePTS = packet.PresentationTimestamp
+			b.pendingGeneration = b.generation
+			b.state = videoBridgeStateWaitingKeyFrame
+			b.logDebugLocked("webrtc video key frame cached",
+				"generation", b.generation,
+				"pts", packet.PresentationTimestamp,
+			)
 			return
 		}
 	}
 
 	if isIDR {
 		annexB = composeVideoFramePayload(b.lastConfig, annexB)
-		b.hasSentKeyFrame = true
 	}
 
 	if !b.peerConnected {
@@ -319,6 +360,16 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 		Duration: b.getDuration(packet.PresentationTimestamp),
 	}); err == nil {
 		b.lastFrameWriteAt = time.Now()
+		if b.state != videoBridgeStateReady {
+			b.state = videoBridgeStateReady
+			b.pendingKeyFrame = nil
+			b.pendingFramePTS = 0
+			b.pendingGeneration = 0
+			b.logDebugLocked("webrtc video bridge ready",
+				"generation", b.generation,
+				"pts", packet.PresentationTimestamp,
+			)
+		}
 	}
 }
 
@@ -347,17 +398,39 @@ func (b *scrcpyVideoBridge) flushPendingLocked() {
 		b.requestRefreshLocked()
 		return
 	}
+	if b.pendingGeneration != b.generation {
+		b.logDebugLocked("webrtc video pending key frame discarded due to generation mismatch",
+			"pendingGeneration", b.pendingGeneration,
+			"generation", b.generation,
+		)
+		b.pendingKeyFrame = nil
+		b.pendingFramePTS = 0
+		b.pendingGeneration = 0
+		b.state = videoBridgeStateWaitingKeyFrame
+		b.requestRefreshLocked()
+		return
+	}
 
 	if err := b.track.WriteSample(media.Sample{
 		Data:     b.pendingKeyFrame,
 		Duration: defaultVideoSampleDuration,
 	}); err == nil {
 		b.lastFrameWriteAt = time.Now()
+		b.state = videoBridgeStateReady
+		b.logDebugLocked("webrtc video pending key frame flushed",
+			"generation", b.generation,
+			"pts", b.pendingFramePTS,
+		)
+		b.lastSentPTS = b.pendingFramePTS
+		b.pendingKeyFrame = nil
+		b.pendingFramePTS = 0
+		b.pendingGeneration = 0
+		return
 	}
-	b.hasSentKeyFrame = true
-	b.lastSentPTS = b.pendingFramePTS
-	b.pendingKeyFrame = nil
-	b.pendingFramePTS = 0
+	b.logDebugLocked("webrtc video pending key frame flush failed",
+		"generation", b.generation,
+		"pts", b.pendingFramePTS,
+	)
 }
 
 func (b *scrcpyVideoBridge) requestRefresh() {
@@ -370,7 +443,7 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if !b.hasSentKeyFrame {
+	if b.state != videoBridgeStateReady {
 		b.requestRefreshLocked()
 		return
 	}
@@ -384,7 +457,12 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 
 func (b *scrcpyVideoBridge) requestRefreshLocked() {
 	if b.debugEnabled && b.logger != nil {
-		b.logger.Debug("webrtc video refresh requested", "scope", "runtime")
+		b.logger.Debug("webrtc video refresh requested",
+			"scope", "runtime",
+			"generation", b.generation,
+			"state", b.state.String(),
+			"peerConnected", b.peerConnected,
+		)
 	}
 	_ = b.runtime.RequestVideoRefresh()
 }
@@ -392,7 +470,14 @@ func (b *scrcpyVideoBridge) requestRefreshLocked() {
 func (b *scrcpyVideoBridge) hasAnyReadyFrame() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return len(b.pendingKeyFrame) > 0 || b.hasSentKeyFrame
+	return len(b.pendingKeyFrame) > 0 || b.state == videoBridgeStateReady
+}
+
+func (b *scrcpyVideoBridge) logDebugLocked(message string, args ...any) {
+	if !b.debugEnabled || b.logger == nil {
+		return
+	}
+	b.logger.Debug(message, args...)
 }
 
 func (b *scrcpyVideoBridge) getDuration(pts int64) time.Duration {

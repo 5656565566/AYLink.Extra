@@ -571,7 +571,7 @@ function createDefaultWebRtcServerForm(type: 'stun' | 'turn'): WebRtcServerForm 
   return {
     id: createWebRtcServerFormId(),
     type,
-    urlsText: type === 'stun' ? 'stun:stun.l.google.com:19302' : '',
+    urlsText: '',
     username: '',
     credential: ''
   };

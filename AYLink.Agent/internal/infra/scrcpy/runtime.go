@@ -53,8 +53,9 @@ type runtime struct {
 	videoMu             sync.Mutex
 	videoSubscribers    map[int]chan domainscrcpy.VideoPacket
 	nextVideoSubID      int
-	latestVideoConfig   domainscrcpy.VideoPacket
-	latestVideoKeyFrame domainscrcpy.VideoPacket
+	videoGeneration     uint64
+	latestVideoConfig   cachedVideoPacket
+	latestVideoKeyFrame cachedVideoPacket
 
 	audioMu          sync.Mutex
 	audioSubscribers map[int]chan domainscrcpy.AudioPacket
@@ -69,6 +70,11 @@ type runtime struct {
 	lastRefreshTime  time.Time
 
 	done chan struct{}
+}
+
+type cachedVideoPacket struct {
+	packet     domainscrcpy.VideoPacket
+	generation uint64
 }
 
 func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session) (domainscrcpy.Runtime, error) {
@@ -138,11 +144,15 @@ func (r *runtime) SubscribeVideoPackets() (<-chan domainscrcpy.VideoPacket, func
 	id := r.nextVideoSubID
 	r.nextVideoSubID++
 	r.videoSubscribers[id] = ch
-	if packet := cloneVideoPacketForCache(r.latestVideoConfig); len(packet.Data) > 0 {
+	configPacket := r.latestVideoConfig
+	keyFramePacket := r.latestVideoKeyFrame
+	if packet := cloneCachedVideoPacket(configPacket); len(packet.Data) > 0 {
 		ch <- packet
 	}
-	if packet := cloneVideoPacketForCache(r.latestVideoKeyFrame); len(packet.Data) > 0 {
-		ch <- packet
+	if configPacket.generation != 0 && keyFramePacket.generation == configPacket.generation {
+		if packet := cloneCachedVideoPacket(keyFramePacket); len(packet.Data) > 0 {
+			ch <- packet
+		}
 	}
 	r.videoMu.Unlock()
 
@@ -637,10 +647,11 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 	}
 
 	if packet.IsConfig {
-		r.latestVideoConfig = cloneVideoPacketForCache(packet)
-		r.latestVideoKeyFrame = domainscrcpy.VideoPacket{}
+		r.videoGeneration++
+		r.latestVideoConfig = cloneVideoPacketForCache(packet, r.videoGeneration)
+		r.latestVideoKeyFrame = cachedVideoPacket{}
 	} else if packet.IsKeyFrame || packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data) {
-		r.latestVideoKeyFrame = cloneVideoPacketForCache(packet)
+		r.latestVideoKeyFrame = cloneVideoPacketForCache(packet, r.videoGeneration)
 	}
 
 	count := len(r.videoSubscribers)
@@ -724,6 +735,11 @@ func (r *runtime) closeAllSubscribers() {
 }
 
 func offerLatestVideoPacketToSubscriber(sub chan domainscrcpy.VideoPacket, packet domainscrcpy.VideoPacket) {
+	if isCriticalVideoPacket(packet) {
+		offerCriticalVideoPacketToSubscriber(sub, packet)
+		return
+	}
+
 	select {
 	case sub <- packet:
 		return
@@ -745,6 +761,32 @@ func offerLatestVideoPacketToSubscriber(sub chan domainscrcpy.VideoPacket, packe
 			packet.Release()
 		}
 	}
+}
+
+func offerCriticalVideoPacketToSubscriber(sub chan domainscrcpy.VideoPacket, packet domainscrcpy.VideoPacket) {
+	select {
+	case sub <- packet:
+		return
+	default:
+	}
+
+	releaseQueuedVideoPackets(sub)
+
+	select {
+	case sub <- packet:
+	default:
+		if packet.Release != nil {
+			packet.Release()
+		}
+	}
+}
+
+func isCriticalVideoPacket(packet domainscrcpy.VideoPacket) bool {
+	if packet.IsConfig || packet.IsKeyFrame {
+		return true
+	}
+
+	return packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data)
 }
 
 func offerLatestAudioPacketToSubscriber(sub chan domainscrcpy.AudioPacket, packet domainscrcpy.AudioPacket) {
@@ -803,7 +845,29 @@ func releaseQueuedAudioPackets(ch <-chan domainscrcpy.AudioPacket) {
 	}
 }
 
-func cloneVideoPacketForCache(packet domainscrcpy.VideoPacket) domainscrcpy.VideoPacket {
+func cloneVideoPacketForCache(packet domainscrcpy.VideoPacket, generation uint64) cachedVideoPacket {
+	if len(packet.Data) == 0 || generation == 0 {
+		return cachedVideoPacket{}
+	}
+	cloned := packet
+	cloned.Data = append([]byte(nil), packet.Data...)
+	cloned.Buffer = nil
+	cloned.Release = nil
+	return cachedVideoPacket{
+		packet:     cloned,
+		generation: generation,
+	}
+}
+
+func cloneCachedVideoPacket(packet cachedVideoPacket) domainscrcpy.VideoPacket {
+	if len(packet.packet.Data) == 0 || packet.generation == 0 {
+		return domainscrcpy.VideoPacket{}
+	}
+
+	return cloneVideoPacketValue(packet.packet)
+}
+
+func cloneVideoPacketValue(packet domainscrcpy.VideoPacket) domainscrcpy.VideoPacket {
 	if len(packet.Data) == 0 {
 		return domainscrcpy.VideoPacket{}
 	}

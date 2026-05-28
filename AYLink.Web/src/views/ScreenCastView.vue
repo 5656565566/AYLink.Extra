@@ -171,6 +171,10 @@ const MOUSE_COMPAT_SUPPRESSION_MS = 900;
 const POINTER_MOVE_SAMPLE_INTERVAL_MS = 1000 / 120;
 const SIGNALING_DETACH_DELAY_MS = 3000;
 const VIDEO_RECOVERY_TIMEOUT_MS = 8000;
+const VIDEO_FREEZE_THRESHOLD_MS = 2500;
+const VIDEO_FREEZE_WATCHDOG_INTERVAL_MS = 1000;
+const VIDEO_FREEZE_REFRESH_DEBOUNCE_MS = 4000;
+const VIDEO_FREEZE_ESCALATION_MS = 7000;
 const DEFAULT_AUTO_NEW_DISPLAY_DPI = 160;
 const MIN_NEW_DISPLAY_DPI = 72;
 const MAX_NEW_DISPLAY_DPI = 960;
@@ -190,6 +194,8 @@ const SCRCPY_MSG_UHID_CREATE = 12;
 const SCRCPY_MSG_UHID_INPUT = 13;
 const SCRCPY_MSG_UHID_DESTROY = 14;
 const SCRCPY_MSG_RESIZE_DISPLAY = 21;
+const LOCAL_META_CONTROL_PREFIX = 0xff;
+const LOCAL_META_MSG_VIDEO_REFRESH = 0x01;
 const SCRCPY_ACTION_DOWN = 0;
 const SCRCPY_ACTION_UP = 1;
 const SCRCPY_ACTION_MOVE = 2;
@@ -291,6 +297,7 @@ let activeConnectionId = 0;
 let hasHandledInitialActivation = false;
 let hasUsedInitialConnectionWarmup = false;
 let videoFrameCallbackHandle: number | null = null;
+let videoFreezeWatchdogTimer: number | null = null;
 let lastDisplayResizeRequest: { width: number; height: number } | null = null;
 let videoContainerResizeObserver: ResizeObserver | null = null;
 let lastPersistedTabsSnapshot = '';
@@ -317,6 +324,9 @@ let activeConnectionTargetKey = '';
 let detachedSignalingConnectionId = 0;
 let expectedSignalingCloseConnectionId = 0;
 let currentScrcpySessionId = '';
+let lastVideoFrameAt = 0;
+let lastVideoFreezeRecoveryAt = 0;
+let lastVideoFreezeRecoveryConnectionId = 0;
 
 interface PendingPointerMove {
   pointerId: number;
@@ -535,6 +545,150 @@ const stopVideoFrameCaptureLoop = () => {
     console.warn('Failed to cancel video frame callback:', error);
   }
   videoFrameCallbackHandle = null;
+};
+
+const resetVideoFreezeState = () => {
+  lastVideoFrameAt = 0;
+  lastVideoFreezeRecoveryAt = 0;
+  lastVideoFreezeRecoveryConnectionId = 0;
+};
+
+const stopVideoFreezeWatchdog = () => {
+  if (videoFreezeWatchdogTimer != null) {
+    window.clearInterval(videoFreezeWatchdogTimer);
+    videoFreezeWatchdogTimer = null;
+  }
+};
+
+const getRefreshRequestChannel = () => {
+  if (metaControlChannel?.readyState === 'open') {
+    return metaControlChannel;
+  }
+  if (dataChannel?.readyState === 'open') {
+    return dataChannel;
+  }
+  return null;
+};
+
+const requestVideoRefreshFromFrontend = (reason: string) => {
+  const channel = getRefreshRequestChannel();
+  if (!channel) {
+    return false;
+  }
+
+  try {
+    channel.send(buildVideoRefreshMetaMessage() as unknown as ArrayBufferView<ArrayBuffer>);
+    console.warn('[WebRTC] Requested runtime video refresh from frontend.', {
+      reason,
+      deviceId: deviceId.value,
+      tabKey: activeTabKey.value
+    });
+    return true;
+  } catch (error) {
+    console.warn('Failed to request runtime video refresh:', error);
+    return false;
+  }
+};
+
+const buildVideoRefreshMetaMessage = () => {
+  return new Uint8Array([LOCAL_META_CONTROL_PREFIX, LOCAL_META_MSG_VIDEO_REFRESH]);
+};
+
+const shouldMonitorFrozenVideo = (connectionId: number) => {
+  if (suppressAutoReconnect || connectionId !== activeConnectionId) {
+    return false;
+  }
+  if (document.visibilityState !== 'visible' || route.name !== 'screencast') {
+    return false;
+  }
+  if (!peerConnection || peerConnection.connectionState !== 'connected') {
+    return false;
+  }
+  const videoTrack = remoteTracks.get('video');
+  if (!videoTrack || videoTrack.readyState !== 'live') {
+    return false;
+  }
+  return !!videoElement.value?.srcObject;
+};
+
+const handleFrozenVideo = (connectionId: number, reason: string) => {
+  if (!shouldMonitorFrozenVideo(connectionId)) {
+    return;
+  }
+
+  const now = performance.now();
+  if (lastVideoFrameAt <= 0 || now - lastVideoFrameAt < VIDEO_FREEZE_THRESHOLD_MS) {
+    return;
+  }
+
+  const sameRecoveryWindow = lastVideoFreezeRecoveryConnectionId === connectionId;
+  const sinceLastRecovery = sameRecoveryWindow ? now - lastVideoFreezeRecoveryAt : Number.POSITIVE_INFINITY;
+
+  if (!sameRecoveryWindow || sinceLastRecovery >= VIDEO_FREEZE_REFRESH_DEBOUNCE_MS) {
+    const requested = requestVideoRefreshFromFrontend(reason);
+    if (requested) {
+      lastVideoFreezeRecoveryAt = now;
+      lastVideoFreezeRecoveryConnectionId = connectionId;
+      status.value = '画面冻结，正在请求关键帧恢复...';
+      return;
+    }
+  }
+
+  if (sameRecoveryWindow && sinceLastRecovery >= VIDEO_FREEZE_ESCALATION_MS) {
+    console.warn('[WebRTC] Frozen video persisted after refresh request, escalating recovery.', {
+      reason,
+      deviceId: deviceId.value,
+      tabKey: activeTabKey.value,
+      peerConnectionState: peerConnection?.connectionState ?? null
+    });
+    lastVideoFreezeRecoveryAt = now;
+    void (async () => {
+      const restarted = await tryIceRestart(`video_frozen_${reason}`);
+      if (!restarted) {
+        stopConnection();
+        scheduleReconnect(`video_frozen_${reason}`);
+      }
+    })();
+  }
+};
+
+const startVideoFrameMonitor = (connectionId: number) => {
+  stopVideoFrameCaptureLoop();
+  stopVideoFreezeWatchdog();
+  resetVideoFreezeState();
+
+  const source = videoElement.value;
+  if (!source) {
+    return;
+  }
+
+  const updateFrameActivity = () => {
+    lastVideoFrameAt = performance.now();
+    if (lastVideoFreezeRecoveryConnectionId === connectionId) {
+      lastVideoFreezeRecoveryAt = 0;
+      lastVideoFreezeRecoveryConnectionId = 0;
+    }
+  };
+
+  const scheduleNextFrame = () => {
+    if (!videoElement.value || videoElement.value !== source || connectionId !== activeConnectionId) {
+      return;
+    }
+    if (typeof source.requestVideoFrameCallback !== 'function') {
+      return;
+    }
+    videoFrameCallbackHandle = source.requestVideoFrameCallback(() => {
+      updateFrameActivity();
+      syncVideoFrameSize();
+      scheduleNextFrame();
+    });
+  };
+
+  updateFrameActivity();
+  scheduleNextFrame();
+  videoFreezeWatchdogTimer = window.setInterval(() => {
+    handleFrozenVideo(connectionId, 'frame_watchdog');
+  }, VIDEO_FREEZE_WATCHDOG_INTERVAL_MS);
 };
 
 const stopScrcpySessionHeartbeat = () => {
@@ -942,6 +1096,7 @@ const restorePersistedConnection = (tabKey = activeTabKey.value) => {
       : `WebRTC 状态: ${peerConnection.connectionState}`;
   hideLastFrameOverlay();
   scheduleResumeMediaPlayback(0);
+  startVideoFrameMonitor(connectionId);
   persistCurrentConnection(tabKey);
   return true;
 };
@@ -2379,6 +2534,7 @@ const bindVideoTrack = (event: RTCTrackEvent) => {
   if (videoElement.value.srcObject !== remoteVideoStream) {
     videoElement.value.srcObject = remoteVideoStream;
   }
+  startVideoFrameMonitor(activeConnectionId);
   clearPendingVideoRecovery();
   scheduleSignalingDetach(activeConnectionId);
 };
@@ -2479,6 +2635,8 @@ const attachRemoteTrack = async (event: RTCTrackEvent) => {
 
 const cleanupMediaStream = () => {
   stopVideoFrameCaptureLoop();
+  stopVideoFreezeWatchdog();
+  resetVideoFreezeState();
   clearPendingReconnect();
   clearPendingResumePlayback();
   lastVideoFrameSize = { width: 0, height: 0 };
@@ -2530,16 +2688,17 @@ const wirePeerConnectionEventHandlers = (connectionId: number, targetPeerConnect
       tabKey: activeTabKey.value
     });
 
-    if (peerConnection.connectionState === 'connected') {
-      isConnecting.value = false;
-      clearPendingReconnect();
-      clearPendingIceRestartFallback();
-      isIceRestartInFlight = false;
-      reconnectAttempt = 0;
-      startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
-      scheduleDisplayResize(150);
-      scheduleSignalingDetach(connectionId);
-      if (!remoteTracks.has('video')) {
+  if (peerConnection.connectionState === 'connected') {
+    isConnecting.value = false;
+    clearPendingReconnect();
+    clearPendingIceRestartFallback();
+    isIceRestartInFlight = false;
+    reconnectAttempt = 0;
+    startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
+    startVideoFrameMonitor(connectionId);
+    scheduleDisplayResize(150);
+    scheduleSignalingDetach(connectionId);
+    if (!remoteTracks.has('video')) {
         scheduleVideoRecovery(connectionId, 'peer_connected_without_video');
       }
     }
@@ -2845,6 +3004,7 @@ const detachActiveConnectionFromView = () => {
 const stopConnection = (preserveForBackground = false, preserveTabKey = activeTabKey.value) => {
   stopScrcpySessionHeartbeat();
   stopFlexDisplayHeartbeat();
+  stopVideoFreezeWatchdog();
   clearPendingDisplayResize();
   activePointers.clear();
   pointerGenerations.clear();

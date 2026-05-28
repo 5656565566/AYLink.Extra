@@ -25,6 +25,8 @@ const (
 	videoStallThreshold        = 3 * time.Second
 	videoRefreshConfigGrace    = 1500 * time.Millisecond
 	videoRefreshKeyFrameGrace  = 1500 * time.Millisecond
+	localMetaControlPrefix     = 0xFF
+	localMetaMsgVideoRefresh   = 0x01
 )
 
 var errScrcpyRuntimeUnavailable = errors.New("scrcpy runtime is unavailable")
@@ -96,16 +98,36 @@ func (s *Service) bindScrcpyControl(peerConnection *pion.PeerConnection, deviceI
 
 	peerConnection.OnDataChannel(func(channel *pion.DataChannel) {
 		channel.OnMessage(func(msg pion.DataChannelMessage) {
-			if !msg.IsString && len(msg.Data) > 0 {
-				if isExclusiveControlPayload(msg.Data) {
-					if !s.TryAcquireControl(deviceID, sessionID) {
-						return
-					}
-				}
-				_ = runtime.SendControl(msg.Data)
+			if msg.IsString || len(msg.Data) == 0 {
+				return
 			}
+			if channel.Label() == "control-meta" && isLocalMetaControlPayload(msg.Data) {
+				handleLocalMetaControlPayload(runtime, msg.Data)
+				return
+			}
+			if isExclusiveControlPayload(msg.Data) {
+				if !s.TryAcquireControl(deviceID, sessionID) {
+					return
+				}
+			}
+			_ = runtime.SendControl(msg.Data)
 		})
 	})
+}
+
+func isLocalMetaControlPayload(payload []byte) bool {
+	return len(payload) >= 2 && payload[0] == localMetaControlPrefix
+}
+
+func handleLocalMetaControlPayload(runtime domainscrcpy.Runtime, payload []byte) {
+	if runtime == nil || len(payload) < 2 {
+		return
+	}
+
+	switch payload[1] {
+	case localMetaMsgVideoRefresh:
+		_ = runtime.RequestVideoRefresh()
+	}
 }
 
 func isExclusiveControlPayload(payload []byte) bool {

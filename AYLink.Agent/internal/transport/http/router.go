@@ -204,6 +204,20 @@ func NewRouter(deps Dependencies) http.Handler {
 		case strings.HasSuffix(r.URL.Path, "/encoders"):
 			requireDevicesControl(http.HandlerFunc(deviceHandler.ListEncoders)).ServeHTTP(w, r)
 			return
+		case strings.HasSuffix(r.URL.Path, "/clipboard"):
+			requireDevicesControl(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					webRtcHandler.GetClipboard(w, r)
+				case http.MethodPut:
+					webRtcHandler.SetClipboard(w, r)
+				case http.MethodPost:
+					webRtcHandler.SetClipboard(w, r)
+				default:
+					handler.WriteMethodNotAllowed(w, http.MethodGet+", "+http.MethodPut+", "+http.MethodPost)
+				}
+			})).ServeHTTP(w, r)
+			return
 		case strings.HasSuffix(r.URL.Path, "/apps"):
 			requireDevicesControl(http.HandlerFunc(deviceHandler.ListApps)).ServeHTTP(w, r)
 			return

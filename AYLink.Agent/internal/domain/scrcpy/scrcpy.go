@@ -1,5 +1,7 @@
 package scrcpy
 
+import "context"
+
 type AppInfo struct {
 	Name        string `json:"Name"`
 	PackageName string `json:"PackageName"`
@@ -99,6 +101,10 @@ type Runtime interface {
 	SubscribeVideoPackets() (<-chan VideoPacket, func())
 	SubscribeAudioPackets() (<-chan AudioPacket, func())
 	SubscribeErrors() (<-chan error, func())
+	GetClipboardCached() (string, bool)
+	GetClipboard(ctx context.Context) (string, error)
+	SetClipboard(ctx context.Context, text string) error
+	PasteClipboard(ctx context.Context, text string) error
 	RequestVideoRefresh() error
 	SendControl([]byte) error
 	Close() error

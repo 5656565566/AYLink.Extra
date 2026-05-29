@@ -139,6 +139,110 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
+func (h *WebRTCHandler) GetClipboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	deviceID, err := deviceIDFromPath(r.URL.Path)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+
+	runtime, release, err := h.borrowRuntime(strconv.Itoa(deviceID))
+	if err != nil {
+		WriteError(w, http.StatusConflict, "SCRCPY_RUNTIME_UNAVAILABLE", "Devices.RuntimeUnavailable", "当前设备没有可用的投屏会话")
+		return
+	}
+	defer release()
+
+	if cachedText, ok := runtime.GetClipboardCached(); ok {
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"text":   cachedText,
+			"cached": true,
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 1200*time.Millisecond)
+	defer cancel()
+
+	text, err := runtime.GetClipboard(ctx)
+	if err != nil {
+		if cachedText, ok := runtime.GetClipboardCached(); ok {
+			WriteJSON(w, http.StatusOK, map[string]any{
+				"text":   cachedText,
+				"cached": true,
+			})
+			return
+		}
+
+		WriteError(w, http.StatusBadGateway, "DEVICE_CLIPBOARD_READ_FAILED", "Devices.ClipboardReadFailed", "读取远端剪贴板失败")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"text":   text,
+		"cached": false,
+	})
+}
+
+func (h *WebRTCHandler) SetClipboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		WriteMethodNotAllowed(w, http.MethodPut+", "+http.MethodPost)
+		return
+	}
+
+	deviceID, err := deviceIDFromPath(r.URL.Path)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := decodeJSONBody(r, &payload); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
+
+	runtime, release, err := h.borrowRuntime(strconv.Itoa(deviceID))
+	if err != nil {
+		WriteError(w, http.StatusConflict, "SCRCPY_RUNTIME_UNAVAILABLE", "Devices.RuntimeUnavailable", "当前设备没有可用的投屏会话")
+		return
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if r.Method == http.MethodPost {
+		if err := runtime.PasteClipboard(ctx, payload.Text); err != nil {
+			WriteError(w, http.StatusBadGateway, "DEVICE_CLIPBOARD_PASTE_FAILED", "Devices.ClipboardPasteFailed", "远端粘贴失败")
+			return
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"success": true,
+			"text":    payload.Text,
+			"paste":   true,
+		})
+		return
+	}
+
+	if err := runtime.SetClipboard(ctx, payload.Text); err != nil {
+		WriteError(w, http.StatusBadGateway, "DEVICE_CLIPBOARD_WRITE_FAILED", "Devices.ClipboardWriteFailed", "同步远端剪贴板失败")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"text":    payload.Text,
+	})
+}
+
 func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -175,12 +279,12 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	options := scrcpyservice.WebRTCRuntimeOptions{
-		AppPackage: ticket.AppPackage,
-		AppName:    ticket.AppName,
-		NewDisplay: ticket.NewDisplay,
-		NewDisplayWidth: ticket.NewDisplayWidth,
+		AppPackage:       ticket.AppPackage,
+		AppName:          ticket.AppName,
+		NewDisplay:       ticket.NewDisplay,
+		NewDisplayWidth:  ticket.NewDisplayWidth,
 		NewDisplayHeight: ticket.NewDisplayHeight,
-		NewDisplayDPI: ticket.NewDisplayDPI,
+		NewDisplayDPI:    ticket.NewDisplayDPI,
 	}
 	runtime, created, err := h.acquireRuntime(r.Context(), ticket.DeviceID, ticket.SessionID, deviceID, options)
 	if err != nil {
@@ -340,6 +444,55 @@ func (h *WebRTCHandler) runtimeJanitor() {
 
 	for range ticker.C {
 		h.cleanupIdleRuntimes()
+	}
+}
+
+func (h *WebRTCHandler) borrowRuntime(deviceID string) (domainscrcpy.Runtime, func(), error) {
+	if deviceID == "" {
+		return nil, func() {}, errors.New("device id is required")
+	}
+
+	for {
+		h.runtimeMu.Lock()
+		entry := h.runtimes[deviceID]
+		if entry == nil {
+			h.runtimeMu.Unlock()
+			return nil, func() {}, errors.New("runtime not found")
+		}
+		if entry.starting {
+			ready := entry.ready
+			h.runtimeMu.Unlock()
+			<-ready
+			continue
+		}
+		if entry.runtime == nil {
+			h.runtimeMu.Unlock()
+			return nil, func() {}, errors.New("runtime not ready")
+		}
+
+		entry.refCount++
+		entry.lastUsedAt = time.Now().UTC()
+		h.runtimeMu.Unlock()
+
+		released := false
+		return entry.runtime, func() {
+			if released {
+				return
+			}
+			released = true
+
+			h.runtimeMu.Lock()
+			defer h.runtimeMu.Unlock()
+
+			current := h.runtimes[deviceID]
+			if current == nil || current != entry {
+				return
+			}
+			if current.refCount > 0 {
+				current.refCount--
+			}
+			current.lastUsedAt = time.Now().UTC()
+		}, nil
 	}
 }
 

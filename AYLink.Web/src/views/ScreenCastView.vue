@@ -42,6 +42,36 @@
       <audio ref="audioElement" autoplay playsinline style="display: none"></audio>
     </div>
 
+    <div v-if="hasCastTabs && isClipboardWindowVisible" ref="clipboardFloatElement" class="clipboard-float" :style="clipboardWindowStyle">
+      <div class="clipboard-float__header" @pointerdown="startClipboardDrag">
+        <span class="clipboard-float__title">远端剪贴板</span>
+        <div class="clipboard-float__actions" @pointerdown.stop>
+          <button type="button" class="clipboard-float__btn" @click="readClipboard">读取</button>
+          <button type="button" class="clipboard-float__btn" @click="syncClipboard">同步</button>
+          <button type="button" class="clipboard-float__btn" @click="pasteClipboard">粘贴</button>
+          <button type="button" class="clipboard-float__btn clipboard-float__btn--close" @click="closeClipboardWindow">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <textarea
+        v-model="clipboardText"
+        class="clipboard-float__editor"
+        placeholder="这里显示远端设备当前剪贴板内容"
+        spellcheck="false"
+      ></textarea>
+
+      <div class="clipboard-float__footer">
+        <span class="clipboard-float__status">{{ clipboardStatusText }}</span>
+        <div class="clipboard-float__indicators">
+          <span v-if="isClipboardLoading" class="clipboard-float__hint">读取中...</span>
+          <span v-else-if="isClipboardSaving" class="clipboard-float__hint">同步中...</span>
+          <div class="clipboard-float__sync-indicator" :class="{ 'is-active': isClipboardLoading || isClipboardSaving }"></div>
+        </div>
+      </div>
+    </div>
+
     <div
       v-if="hasCastTabs"
       class="floating-menu"
@@ -49,7 +79,6 @@
         `dock-${dockedEdge}`,
         {
           expanded: isMenuExpanded,
-          'is-docked': isDocked,
           'layout-horizontal': isHorizontalLayout,
           'layout-vertical': !isHorizontalLayout
         }
@@ -90,8 +119,11 @@
         <button type="button" class="menu-item" title="全屏" @click="toggleFullscreen">
           <FullScreenMaximize20Regular />
         </button>
-        <button type="button" class="menu-item" title="恢复音频播放" @click="resumeMediaPlayback">
-          <Play20Regular />
+        <button type="button" class="menu-item" title="远端剪贴板" @click="toggleClipboardWindow">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M9 4.75C9 3.78 9.78 3 10.75 3H13.25C14.22 3 15 3.78 15 4.75V5H16.25C17.22 5 18 5.78 18 6.75V18.25C18 19.22 17.22 20 16.25 20H7.75C6.78 20 6 19.22 6 18.25V6.75C6 5.78 6.78 5 7.75 5H9V4.75Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M9 7H15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
         </button>
         <button type="button" class="menu-item" title="音量加" @click="sendAndroidCommand('volumeup')">
           <Speaker220Regular />
@@ -124,7 +156,6 @@ import {
   Speaker020Regular,
   SpeakerMute20Regular,
   Speaker220Regular,
-  Play20Regular,
   ArrowExpand24Regular,
   Phone20Regular
 } from '@vicons/fluent';
@@ -186,6 +217,10 @@ const MENU_ITEM_COUNT = 13;
 const MENU_ITEM_SIZE = 38;
 const MENU_ITEM_GAP = 6;
 const MENU_EXPANDED_LENGTH = MENU_BUTTON_SIZE + 6 + (MENU_ITEM_COUNT * MENU_ITEM_SIZE) + ((MENU_ITEM_COUNT - 1) * MENU_ITEM_GAP) + 12;
+const MENU_COLLAPSED_VISIBLE_WIDTH = 18;
+const CLIPBOARD_WINDOW_MARGIN = 16;
+const CLIPBOARD_WINDOW_DEFAULT_WIDTH = 380;
+const CLIPBOARD_WINDOW_DEFAULT_HEIGHT = 220;
 const SCRCPY_PRIMARY_BUTTON = 1;
 const SCRCPY_MSG_INJECT_KEYCODE = 0;
 const SCRCPY_MSG_INJECT_TOUCH_EVENT = 2;
@@ -249,6 +284,7 @@ const isMouseLocked = ref(false);
 const videoElement = ref<HTMLVideoElement | null>(null);
 const audioElement = ref<HTMLAudioElement | null>(null);
 const videoContainer = ref<HTMLDivElement | null>(null);
+const clipboardFloatElement = ref<HTMLDivElement | null>(null);
 const isConnected = ref(false);
 const isConnecting = ref(false);
 const status = ref('未连接');
@@ -257,7 +293,13 @@ const shouldShowLastFrameOverlay = ref(false);
 const shouldFillVideoFrame = ref(false);
 const effectiveFillMode = computed(() => shouldFillVideoFrame.value);
 const isMenuExpanded = ref(true);
-const isDocked = ref(true);
+const isClipboardWindowVisible = ref(false);
+const clipboardText = ref('');
+const clipboardStatusText = ref('');
+const isClipboardLoading = ref(false);
+const isClipboardSaving = ref(false);
+const clipboardWindowX = ref(0);
+const clipboardWindowY = ref(0);
 const dockedEdge = ref<DockedEdge>('right');
 const isMenuHorizontalLocked = ref(false);
 const menuX = ref(0);
@@ -306,6 +348,10 @@ let dragStartOffset = { x: 0, y: 0 };
 let dragStartPoint = { x: 0, y: 0 };
 let isDraggingMenu = false;
 let didDragMenu = false;
+let wasMenuExpandedAtDragStart = false;
+let currentMenuExpandDirection: 'left' | 'right' = 'right';
+let isDraggingClipboard = false;
+let clipboardDragStartOffset = { x: 0, y: 0 };
 let nextScrcpyPointerId = 0n;
 const scrcpyPointerIds = new Map<number, bigint>();
 let currentHidMouseButtons = 0;
@@ -395,10 +441,62 @@ const statusDotClass = computed(() => ({
   connected: isConnected.value
 }));
 
-const menuStyle = computed(() => ({
-  left: `${menuX.value}px`,
-  top: `${menuY.value}px`
-}));
+const menuStyle = computed(() => {
+  const frame = getMenuFrameAt(menuX.value, menuY.value, isMenuExpanded.value);
+  return {
+    left: `${frame.x}px`,
+    top: `${frame.y}px`
+  };
+});
+
+const getClipboardWindowSize = () => {
+  const rect = clipboardFloatElement.value?.getBoundingClientRect();
+  return {
+    width: rect?.width && rect.width > 0 ? rect.width : CLIPBOARD_WINDOW_DEFAULT_WIDTH,
+    height: rect?.height && rect.height > 0 ? rect.height : CLIPBOARD_WINDOW_DEFAULT_HEIGHT
+  };
+};
+
+const clampClipboardWindowPosition = (x: number, y: number) => {
+  const bounds = getStageBounds();
+  const size = getClipboardWindowSize();
+  const minX = bounds.offsetLeft + CLIPBOARD_WINDOW_MARGIN;
+  const minY = bounds.offsetTop + CLIPBOARD_WINDOW_MARGIN;
+  const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - size.width - CLIPBOARD_WINDOW_MARGIN);
+  const maxY = Math.max(minY, bounds.offsetTop + bounds.height - size.height - CLIPBOARD_WINDOW_MARGIN);
+  return {
+    x: Math.min(Math.max(minX, x), maxX),
+    y: Math.min(Math.max(minY, y), maxY)
+  };
+};
+
+const initializeClipboardWindowPosition = () => {
+  const bounds = getStageBounds();
+  const size = getClipboardWindowSize();
+  const clamped = clampClipboardWindowPosition(
+    bounds.offsetLeft + bounds.width - size.width - CLIPBOARD_WINDOW_MARGIN,
+    bounds.offsetTop + bounds.height - size.height - CLIPBOARD_WINDOW_MARGIN
+  );
+  clipboardWindowX.value = clamped.x;
+  clipboardWindowY.value = clamped.y;
+};
+
+const clipboardWindowStyle = computed(() => {
+  let x = clipboardWindowX.value;
+  let y = clipboardWindowY.value;
+  if (x === 0 && y === 0) {
+    const bounds = getStageBounds();
+    const size = getClipboardWindowSize();
+    x = bounds.offsetLeft + bounds.width - size.width - CLIPBOARD_WINDOW_MARGIN;
+    y = bounds.offsetTop + bounds.height - size.height - CLIPBOARD_WINDOW_MARGIN;
+  }
+  return {
+    left: `${x}px`,
+    top: `${y}px`,
+    right: 'auto',
+    bottom: 'auto'
+  };
+});
 
 const getPersistentAudioElement = () => {
   if (!window.__aylinkPersistentAudioElement) {
@@ -1149,51 +1247,152 @@ const getMenuBoundsAt = (y: number) => {
 
 const isHorizontalLayout = computed(() => getMenuBoundsAt(menuY.value).horizontal);
 
-const getMenuBounds = () => getMenuBoundsAt(menuY.value);
-
-const clampMenuPosition = (x: number, y: number) => {
+const getMenuExpandDirectionAt = (x: number, y: number, expanded = isMenuExpanded.value) => {
   const bounds = getStageBounds();
-  const minX = bounds.offsetLeft + MENU_MARGIN;
+  const centerX = x + (MENU_BUTTON_SIZE / 2);
+  const centerRatio = bounds.width <= 0 ? 0.5 : (centerX - bounds.offsetLeft) / bounds.width;
+  if (!expanded) {
+    return centerRatio <= 0.5 ? 'right' : 'left';
+  }
+
+  const menuBounds = getMenuBoundsAt(y);
+  if (!menuBounds.horizontal) {
+    return centerRatio <= 0.5 ? 'right' : 'left';
+  }
+
+  const extraWidth = Math.max(0, menuBounds.width - MENU_BUTTON_SIZE);
+  const availableLeft = centerX - (MENU_BUTTON_SIZE / 2) - bounds.offsetLeft - MENU_MARGIN;
+  const availableRight = bounds.offsetLeft + bounds.width - (centerX + (MENU_BUTTON_SIZE / 2)) - MENU_MARGIN;
+  const leftEnough = availableLeft >= extraWidth;
+  const rightEnough = availableRight >= extraWidth;
+
+  if (leftEnough && !rightEnough) {
+    return 'left';
+  }
+
+  if (rightEnough && !leftEnough) {
+    return 'right';
+  }
+
+  if (leftEnough && rightEnough) {
+    return centerRatio <= 0.5 ? 'right' : 'left';
+  }
+
+  return availableRight >= availableLeft ? 'right' : 'left';
+};
+
+const getMenuFrameAt = (x: number, y: number, expanded: boolean) => {
+  if (!expanded) {
+    return {
+      x,
+      y,
+      width: MENU_BUTTON_SIZE,
+      height: MENU_BUTTON_SIZE,
+      horizontal: false,
+      direction: getMenuExpandDirectionAt(x, y, false)
+    };
+  }
+
+  const bounds = getMenuBoundsAt(y);
+  const direction = getMenuExpandDirectionAt(x, y, true);
+  return {
+    x: bounds.horizontal && direction === 'left' ? x - (bounds.width - MENU_BUTTON_SIZE) : x,
+    y,
+    width: bounds.width,
+    height: bounds.height,
+    horizontal: bounds.horizontal,
+    direction
+  };
+};
+
+const clampCollapsedMenuPosition = (x: number, y: number) => {
+  const bounds = getStageBounds();
+  const hiddenWidth = MENU_BUTTON_SIZE - MENU_COLLAPSED_VISIBLE_WIDTH;
+  const minX = bounds.offsetLeft - hiddenWidth;
+  const maxX = bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH;
   const minY = bounds.offsetTop + MENU_MARGIN;
-
-  let menuBounds = getMenuBoundsAt(y);
-  let maxX = Math.max(minX, bounds.offsetLeft + bounds.width - menuBounds.width - MENU_MARGIN);
-  let maxY = Math.max(minY, bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN);
-
-  const clampedY = Math.min(Math.max(minY, y), maxY);
-  menuBounds = getMenuBoundsAt(clampedY);
-  maxX = Math.max(minX, bounds.offsetLeft + bounds.width - menuBounds.width - MENU_MARGIN);
-  maxY = Math.max(minY, bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN);
-
+  const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
   return {
     x: Math.min(Math.max(minX, x), maxX),
     y: Math.min(Math.max(minY, y), maxY)
   };
 };
 
+const clampExpandedMenuPosition = (x: number, y: number) => {
+  const bounds = getStageBounds();
+  const frame = getMenuFrameAt(x, y, true);
+  const minFrameX = bounds.offsetLeft + MENU_MARGIN;
+  const maxFrameX = Math.max(minFrameX, bounds.offsetLeft + bounds.width - frame.width - MENU_MARGIN);
+  const minFrameY = bounds.offsetTop + MENU_MARGIN;
+  const maxFrameY = Math.max(minFrameY, bounds.offsetTop + bounds.height - frame.height - MENU_MARGIN);
+  const clampedFrameX = Math.min(Math.max(minFrameX, frame.x), maxFrameX);
+  const clampedFrameY = Math.min(Math.max(minFrameY, frame.y), maxFrameY);
+  return {
+    x: frame.horizontal && frame.direction === 'left'
+      ? clampedFrameX + (frame.width - MENU_BUTTON_SIZE)
+      : clampedFrameX,
+    y: clampedFrameY
+  };
+};
+
+const clampMenuPosition = (x: number, y: number) => {
+  return isMenuExpanded.value
+    ? clampExpandedMenuPosition(x, y)
+    : clampCollapsedMenuPosition(x, y);
+};
+
+const syncMenuSideState = () => {
+  currentMenuExpandDirection = getMenuExpandDirectionAt(menuX.value, menuY.value, isMenuExpanded.value);
+  dockedEdge.value = currentMenuExpandDirection === 'left' ? 'right' : 'left';
+};
+
+const shouldCollapseExpandedMenuWhileDragging = (rawX: number, rawY: number, clampedX: number, clampedY: number) => {
+  if (!wasMenuExpandedAtDragStart) {
+    return false;
+  }
+
+  const bounds = getStageBounds();
+  const frame = getMenuFrameAt(clampedX, clampedY, true);
+  const minFrameX = bounds.offsetLeft + MENU_MARGIN;
+  const maxFrameX = Math.max(minFrameX, bounds.offsetLeft + bounds.width - frame.width - MENU_MARGIN);
+  const minFrameY = bounds.offsetTop + MENU_MARGIN;
+  const maxFrameY = Math.max(minFrameY, bounds.offsetTop + bounds.height - frame.height - MENU_MARGIN);
+  const hittingLeftEdge = frame.x <= minFrameX;
+  const hittingRightEdge = frame.x >= maxFrameX;
+  const hittingBottomEdge = frame.y >= maxFrameY;
+  const pushingHorizontal = frame.horizontal && (
+    (frame.direction === 'right' && hittingLeftEdge && rawX < clampedX)
+    || (frame.direction === 'left' && hittingRightEdge && rawX > clampedX)
+  );
+  const pushingVertical = !frame.horizontal
+    && hittingBottomEdge
+    && rawY > clampedY;
+
+  return pushingHorizontal || pushingVertical;
+};
+
 const updateMenuRelativePosition = () => {
   const bounds = getStageBounds();
-  const clamped = clampMenuPosition(menuX.value, menuY.value);
-  const menuBounds = getMenuBoundsAt(clamped.y);
-  const minX = bounds.offsetLeft + MENU_MARGIN;
+  const clamped = clampCollapsedMenuPosition(menuX.value, menuY.value);
+  const minX = bounds.offsetLeft - (MENU_BUTTON_SIZE - MENU_COLLAPSED_VISIBLE_WIDTH);
   const minY = bounds.offsetTop + MENU_MARGIN;
-  const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - menuBounds.width - MENU_MARGIN);
-  const maxY = Math.max(minY, bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN);
+  const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH);
+  const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
 
   menuRelativeX.value = maxX <= minX ? 0 : (clamped.x - minX) / (maxX - minX);
   menuRelativeY.value = maxY <= minY ? 0 : (clamped.y - minY) / (maxY - minY);
 };
 
 const setMenuPosition = (x: number, y: number, syncRelative = true) => {
-  if (isMenuExpanded.value) {
-    isMenuHorizontalLocked.value = doesVerticalLayoutOverflowAt(y);
-  } else {
-    isMenuHorizontalLocked.value = false;
-  }
-
   const clamped = clampMenuPosition(x, y);
   menuX.value = clamped.x;
   menuY.value = clamped.y;
+  syncMenuSideState();
+  if (isMenuExpanded.value) {
+    isMenuHorizontalLocked.value = doesVerticalLayoutOverflowAt(clamped.y);
+  } else {
+    isMenuHorizontalLocked.value = false;
+  }
   if (syncRelative) {
     updateMenuRelativePosition();
   }
@@ -1201,12 +1400,10 @@ const setMenuPosition = (x: number, y: number, syncRelative = true) => {
 
 const restoreMenuPositionFromRelative = () => {
   const bounds = getStageBounds();
-  const minX = bounds.offsetLeft + MENU_MARGIN;
+  const minX = bounds.offsetLeft - (MENU_BUTTON_SIZE - MENU_COLLAPSED_VISIBLE_WIDTH);
   const minY = bounds.offsetTop + MENU_MARGIN;
-  const initialY = minY + Math.max(bounds.height - (MENU_BUTTON_SIZE + MENU_MARGIN * 2), 0) * menuRelativeY.value;
-  const menuBounds = getMenuBoundsAt(initialY);
-  const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - menuBounds.width - MENU_MARGIN);
-  const maxY = Math.max(minY, bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN);
+  const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH);
+  const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
 
   setMenuPosition(
     minX + (maxX - minX) * menuRelativeX.value,
@@ -1215,53 +1412,8 @@ const restoreMenuPositionFromRelative = () => {
   );
 };
 
-const applyDockPosition = (edge: DockedEdge) => {
-  const bounds = getStageBounds();
-  const menuBounds = getMenuBounds();
-  const centeredY = Math.max(
-    bounds.offsetTop + MENU_MARGIN,
-    Math.min(
-      menuY.value,
-      bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN
-    )
-  );
-
-  if (edge === 'left') {
-    setMenuPosition(bounds.offsetLeft + MENU_MARGIN, centeredY);
-  } else if (edge === 'right') {
-    setMenuPosition(
-      Math.max(bounds.offsetLeft + MENU_MARGIN, bounds.offsetLeft + bounds.width - menuBounds.width - MENU_MARGIN),
-      centeredY
-    );
-  }
-};
-
 const initializeMenuPosition = () => {
-  if (isDocked.value && dockedEdge.value !== 'none') {
-    applyDockPosition(dockedEdge.value);
-  } else {
-    restoreMenuPositionFromRelative();
-  }
-};
-
-const resolveDockEdge = () => {
-  const bounds = getStageBounds();
-  const menuBounds = getMenuBounds();
-  const distances = [
-    { edge: 'left' as DockedEdge, value: Math.abs(menuX.value - (bounds.offsetLeft + MENU_MARGIN)) },
-    { edge: 'right' as DockedEdge, value: Math.abs(bounds.offsetLeft + bounds.width - (menuX.value + menuBounds.width)) }
-  ].sort((a, b) => a.value - b.value);
-
-  const nearest = distances[0];
-  if (nearest.value <= 64) {
-    dockedEdge.value = nearest.edge;
-    isDocked.value = true;
-    applyDockPosition(nearest.edge);
-  } else {
-    dockedEdge.value = 'none';
-    isDocked.value = false;
-    setMenuPosition(menuX.value, menuY.value);
-  }
+  restoreMenuPositionFromRelative();
 };
 
 const buildTabKey = (tab: Pick<CastTab, 'deviceId' | 'appPackageName' | 'newDisplay'>) => {
@@ -2500,6 +2652,137 @@ const scheduleResumeMediaPlayback = (delayMs = 40) => {
   }, delayMs);
 };
 
+const applyRemoteClipboardText = (text: string) => {
+  clipboardText.value = text;
+};
+
+const readClipboard = async () => {
+  if (!deviceId.value) {
+    clipboardStatusText.value = '未选中设备';
+    return;
+  }
+
+  isClipboardLoading.value = true;
+  clipboardStatusText.value = '正在读取...';
+
+  try {
+    const response = await apiFetch(`/api/devices/${deviceId.value}/clipboard`);
+    if (!response.ok) {
+      throw new Error(`Failed to load clipboard: ${response.status}`);
+    }
+
+    const payload = await response.json() as { text?: string };
+    applyRemoteClipboardText(String(payload.text ?? ''));
+    clipboardStatusText.value = '读取成功';
+  } catch (error) {
+    console.error('Failed to load remote clipboard:', error);
+    clipboardStatusText.value = '读取失败';
+  } finally {
+    isClipboardLoading.value = false;
+  }
+};
+
+const syncClipboard = async () => {
+  if (!deviceId.value) {
+    clipboardStatusText.value = '未选中设备';
+    return;
+  }
+
+  isClipboardSaving.value = true;
+  clipboardStatusText.value = '正在同步...';
+
+  try {
+    const response = await apiFetch(`/api/devices/${deviceId.value}/clipboard`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: clipboardText.value
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to save clipboard: ${response.status}`);
+    }
+    clipboardStatusText.value = '已同步';
+  } catch (error) {
+    console.error('Failed to save remote clipboard:', error);
+    clipboardStatusText.value = '同步失败';
+  } finally {
+    isClipboardSaving.value = false;
+  }
+};
+
+const pasteClipboard = async () => {
+  if (!deviceId.value) {
+    clipboardStatusText.value = '未选中设备';
+    return;
+  }
+
+  isClipboardSaving.value = true;
+  clipboardStatusText.value = '正在粘贴...';
+
+  try {
+    const response = await apiFetch(`/api/devices/${deviceId.value}/clipboard`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: clipboardText.value
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to paste clipboard: ${response.status}`);
+    }
+    clipboardStatusText.value = '已发送粘贴';
+  } catch (error) {
+    console.error('Failed to paste remote clipboard:', error);
+    clipboardStatusText.value = '粘贴失败';
+  } finally {
+    isClipboardSaving.value = false;
+  }
+};
+
+const openClipboardWindow = () => {
+  if (clipboardWindowX.value === 0 && clipboardWindowY.value === 0) {
+    initializeClipboardWindowPosition();
+  } else {
+    const clamped = clampClipboardWindowPosition(clipboardWindowX.value, clipboardWindowY.value);
+    clipboardWindowX.value = clamped.x;
+    clipboardWindowY.value = clamped.y;
+  }
+  isClipboardWindowVisible.value = true;
+};
+
+const closeClipboardWindow = () => {
+  isClipboardWindowVisible.value = false;
+};
+
+const toggleClipboardWindow = () => {
+  if (isClipboardWindowVisible.value) {
+    closeClipboardWindow();
+    return;
+  }
+
+  openClipboardWindow();
+};
+
+const startClipboardDrag = (event: PointerEvent) => {
+  const target = event.currentTarget as HTMLElement | null;
+  if (!target) {
+    return;
+  }
+
+  event.preventDefault();
+  isDraggingClipboard = true;
+  clipboardDragStartOffset = {
+    x: event.clientX - clipboardWindowX.value,
+    y: event.clientY - clipboardWindowY.value
+  };
+  target.setPointerCapture?.(event.pointerId);
+};
+
 const replaceSingleTrack = (stream: MediaStream, track: MediaStreamTrack) => {
   for (const existingTrack of stream.getTracks()) {
     stream.removeTrack(existingTrack);
@@ -3617,6 +3900,14 @@ const handlePointerCaptureLost = (event: PointerEvent) => {
 };
 
 const handleWindowPointerUp = (event: PointerEvent) => {
+  if (isDraggingClipboard) {
+    isDraggingClipboard = false;
+    const clamped = clampClipboardWindowPosition(clipboardWindowX.value, clipboardWindowY.value);
+    clipboardWindowX.value = clamped.x;
+    clipboardWindowY.value = clamped.y;
+    return;
+  }
+
   if (isDraggingMenu) {
     finishMenuDrag();
     return;
@@ -3626,6 +3917,10 @@ const handleWindowPointerUp = (event: PointerEvent) => {
 };
 
 const handleWindowPointerCancel = (event: PointerEvent) => {
+  if (isDraggingClipboard) {
+    isDraggingClipboard = false;
+  }
+
   if (isDraggingMenu) {
     finishMenuDrag();
   }
@@ -3634,14 +3929,33 @@ const handleWindowPointerCancel = (event: PointerEvent) => {
 };
 
 const handleWindowPointerMove = (event: PointerEvent) => {
+  if (isDraggingClipboard) {
+    const position = clampClipboardWindowPosition(
+      event.clientX - clipboardDragStartOffset.x,
+      event.clientY - clipboardDragStartOffset.y
+    );
+    clipboardWindowX.value = position.x;
+    clipboardWindowY.value = position.y;
+    return;
+  }
+
   if (!isDraggingMenu) return;
 
-  const position = clampMenuPosition(event.clientX - dragStartOffset.x, event.clientY - dragStartOffset.y);
-  menuX.value = position.x;
-  menuY.value = position.y;
-  updateMenuRelativePosition();
-  isDocked.value = false;
-  dockedEdge.value = 'none';
+  const rawX = event.clientX - dragStartOffset.x;
+  const rawY = event.clientY - dragStartOffset.y;
+
+  if (isMenuExpanded.value) {
+    const expandedPosition = clampExpandedMenuPosition(rawX, rawY);
+    if (shouldCollapseExpandedMenuWhileDragging(rawX, rawY, expandedPosition.x, expandedPosition.y)) {
+      isMenuExpanded.value = false;
+      isMenuHorizontalLocked.value = false;
+      setMenuPosition(rawX, rawY);
+    } else {
+      setMenuPosition(expandedPosition.x, expandedPosition.y);
+    }
+  } else {
+    setMenuPosition(rawX, rawY);
+  }
 
   const distanceX = Math.abs(event.clientX - dragStartPoint.x);
   const distanceY = Math.abs(event.clientY - dragStartPoint.y);
@@ -3731,6 +4045,7 @@ const handleWindowMouseUp = (event: MouseEvent) => {
 };
 
 const handleWindowBlur = () => {
+  isDraggingClipboard = false;
   finishMenuDrag();
   releaseAllPointers('cancel');
   resetHidInputs();
@@ -3824,7 +4139,20 @@ const handleVideoResize = () => {
 };
 
 const handleWindowResize = () => {
-  initializeMenuPosition();
+  if (menuX.value === 0 && menuY.value === 0) {
+    initializeMenuPosition();
+  } else if (isMenuExpanded.value) {
+    setMenuPosition(menuX.value, menuY.value);
+  } else {
+    restoreMenuPositionFromRelative();
+  }
+
+  if (isClipboardWindowVisible.value || clipboardWindowX.value !== 0 || clipboardWindowY.value !== 0) {
+    const clamped = clampClipboardWindowPosition(clipboardWindowX.value, clipboardWindowY.value);
+    clipboardWindowX.value = clamped.x;
+    clipboardWindowY.value = clamped.y;
+  }
+
   scheduleDisplayResize();
 };
 
@@ -3898,31 +4226,26 @@ const teardownVideoContainerResizeObserver = () => {
 };
 
 const handleMenuPointerEnter = () => {
-  if (isDocked.value && !isMenuExpanded.value) {
-    setMenuPosition(menuX.value, menuY.value);
-  }
+  return;
 };
 
 const handleMenuPointerLeave = () => {
-  if (!isDraggingMenu && isDocked.value && !isMenuExpanded.value) {
-    applyDockPosition(dockedEdge.value);
-  }
+  return;
 };
 
 const syncDockedMenuPosition = async () => {
   await nextTick();
-  if (!isDocked.value || dockedEdge.value === 'none') {
+  if (menuX.value === 0 && menuY.value === 0) {
     return;
   }
 
-  applyDockPosition(dockedEdge.value);
+  setMenuPosition(menuX.value, menuY.value);
 };
 
 const finishMenuDrag = () => {
   if (!isDraggingMenu) return;
   isDraggingMenu = false;
   setMenuPosition(menuX.value, menuY.value);
-  resolveDockEdge();
 };
 
 const startMenuDrag = (event: PointerEvent) => {
@@ -3931,18 +4254,7 @@ const startMenuDrag = (event: PointerEvent) => {
   event.preventDefault();
   isDraggingMenu = true;
   didDragMenu = false;
-  
-  if (isDocked.value) {
-    const bounds = getStageBounds();
-    if (dockedEdge.value === 'left') {
-      menuX.value = bounds.offsetLeft + MENU_MARGIN;
-    } else if (dockedEdge.value === 'right') {
-      menuX.value = bounds.offsetLeft + bounds.width - getMenuBounds().width - MENU_MARGIN;
-    }
-  }
-
-  isDocked.value = false;
-  dockedEdge.value = 'none';
+  wasMenuExpandedAtDragStart = isMenuExpanded.value;
 
   dragStartOffset = {
     x: event.clientX - menuX.value,
@@ -3966,8 +4278,21 @@ const toggleMenu = () => {
     isMenuHorizontalLocked.value = false;
   }
   setMenuPosition(menuX.value, menuY.value);
-  void syncDockedMenuPosition();
 };
+
+watch(
+  () => deviceId.value,
+  () => {
+    clipboardStatusText.value = '';
+
+    if (!isClipboardWindowVisible.value) {
+      clipboardText.value = '';
+      return;
+    }
+
+    openClipboardWindow();
+  }
+);
 
 watch(
   () => route.query,
@@ -3997,11 +4322,8 @@ watch(backgroundMute, () => {
 });
 
 watch(
-  () => [isMenuExpanded.value, isHorizontalLayout.value, dockedEdge.value, isDocked.value],
+  () => [isMenuExpanded.value, isHorizontalLayout.value, dockedEdge.value],
   () => {
-    if (!isDocked.value || dockedEdge.value === 'none') {
-      return;
-    }
     void syncDockedMenuPosition();
   }
 );
@@ -4319,26 +4641,6 @@ video.fill-mode {
   flex-direction: row-reverse;
 }
 
-.floating-menu.is-docked.dock-left:not(:hover):not(.expanded) {
-  transform: translateX(-44px);
-  opacity: 0.34;
-}
-
-.floating-menu.is-docked.dock-right:not(:hover):not(.expanded) {
-  transform: translateX(44px);
-  opacity: 0.34;
-}
-
-.floating-menu.is-docked.dock-top:not(:hover):not(.expanded) {
-  transform: translateY(-44px);
-  opacity: 0.34;
-}
-
-.floating-menu.is-docked.dock-bottom:not(:hover):not(.expanded) {
-  transform: translateY(44px);
-  opacity: 0.34;
-}
-
 .menu-toggle,
 .menu-item {
   display: inline-flex;
@@ -4470,6 +4772,193 @@ video.fill-mode {
 .empty-state__desc {
   font-size: 13px;
   color: var(--fluent-text-secondary);
+}
+
+.clipboard-float {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  width: min(380px, calc(100vw - 40px));
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24), 0 2px 8px rgba(0, 0, 0, 0.12);
+  z-index: 31;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.clipboard-float__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: move;
+  user-select: none;
+}
+
+.clipboard-float__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fluent-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clipboard-float__title::before {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 14px;
+  background: var(--fluent-accent);
+  border-radius: 2px;
+}
+
+.clipboard-float__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clipboard-float__btn {
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fluent-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clipboard-float__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--fluent-text-primary);
+}
+
+.clipboard-float__btn--close {
+  padding: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+
+.clipboard-float__btn--close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.clipboard-float__btn--close:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.clipboard-float__editor {
+  flex: 1 1 auto;
+  min-height: 160px;
+  resize: vertical;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--fluent-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.clipboard-float__editor:focus {
+  outline: none;
+  border-color: var(--fluent-accent);
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.15);
+}
+
+.clipboard-float__editor::selection {
+  background: rgba(96, 165, 250, 0.38);
+  color: #f8fafc;
+  -webkit-text-fill-color: #f8fafc;
+}
+
+.clipboard-float__editor::-moz-selection {
+  background: rgba(96, 165, 250, 0.38);
+  color: #f8fafc;
+}
+
+.clipboard-float__editor::placeholder {
+  color: var(--fluent-text-tertiary);
+}
+
+.clipboard-float__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--fluent-text-secondary);
+}
+
+.clipboard-float__indicators {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clipboard-float__sync-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fluent-text-tertiary);
+  transition: background-color 0.3s;
+}
+
+.clipboard-float__sync-indicator.is-active {
+  background: var(--fluent-accent);
+  animation: pulse-sync 1.5s infinite;
+}
+
+@keyframes pulse-sync {
+  0% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+  }
+}
+
+.fade-slide-up-enter-active,
+.fade-slide-up-leave-active {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fade-slide-up-enter-from,
+.fade-slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(16px) scale(0.96);
+}
+
+@media (max-width: 768px) {
+  .clipboard-float {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    width: auto;
+    min-height: 200px;
+  }
+
+  .clipboard-float__editor {
+    min-height: 140px;
+  }
 }
 
 </style>

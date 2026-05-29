@@ -17,19 +17,23 @@ import (
 )
 
 const (
-	deviceMetaLengthWithDummyByte = 65
-	sessionHeaderLength           = 12
-	configPacketFlag              = 1 << 62
-	keyFrameFlag                  = 1 << 61
-	ptsMask                       = keyFrameFlag - 1
-	controlQueueWaitTimeout       = 100 * time.Millisecond
-	videoPacketQueueSize          = 8
-	audioPacketQueueSize          = 32
-	controlQueueSize              = 256
-	videoRefreshDebounce          = 10 * time.Second
-	opusSampleRate                = 48000
-	opusChannels                  = 2
-	audioGainMultiplier           = 1.3
+	deviceMetaLengthWithDummyByte             = 65
+	sessionHeaderLength                       = 12
+	configPacketFlag                          = 1 << 62
+	keyFrameFlag                              = 1 << 61
+	ptsMask                                   = keyFrameFlag - 1
+	controlQueueWaitTimeout                   = 100 * time.Millisecond
+	videoPacketQueueSize                      = 8
+	audioPacketQueueSize                      = 32
+	controlQueueSize                          = 256
+	videoRefreshDebounce                      = 10 * time.Second
+	opusSampleRate                            = 48000
+	opusChannels                              = 2
+	audioGainMultiplier                       = 1.3
+	deviceMsgTypeClipboard                    = 0
+	deviceMsgTypeAckClipboard                 = 1
+	deviceMsgTypeUHIDOutput                   = 2
+	controlMsgClipboardSequenceInvalid uint64 = 0
 )
 
 var opusWasmMu sync.Mutex
@@ -49,6 +53,8 @@ type runtime struct {
 	controlMu     sync.Mutex
 	closeOnce     sync.Once
 	controlWrites chan []byte
+	controlReadMu sync.Mutex
+	controlBuffer []byte
 
 	videoMu             sync.Mutex
 	videoSubscribers    map[int]chan domainscrcpy.VideoPacket
@@ -64,6 +70,14 @@ type runtime struct {
 	errorMu          sync.Mutex
 	errorSubscribers map[int]chan error
 	nextErrorSubID   int
+
+	clipboardMu           sync.Mutex
+	clipboardWaiters      map[int]chan string
+	nextClipboardWaiterID int
+	clipboardAckWaiters   map[uint64]chan struct{}
+	nextClipboardSequence uint64
+	latestClipboardText   string
+	hasLatestClipboard    bool
 
 	refreshMu        sync.Mutex
 	refreshRequested bool
@@ -92,13 +106,16 @@ func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session
 	}
 
 	rt := &runtime{
-		logger:           s.logger,
-		videoConn:        videoConn,
-		videoSubscribers: make(map[int]chan domainscrcpy.VideoPacket),
-		audioSubscribers: make(map[int]chan domainscrcpy.AudioPacket),
-		errorSubscribers: make(map[int]chan error),
-		done:             make(chan struct{}),
-		controlWrites:    make(chan []byte, controlQueueSize),
+		logger:                s.logger,
+		videoConn:             videoConn,
+		videoSubscribers:      make(map[int]chan domainscrcpy.VideoPacket),
+		audioSubscribers:      make(map[int]chan domainscrcpy.AudioPacket),
+		errorSubscribers:      make(map[int]chan error),
+		clipboardWaiters:      make(map[int]chan string),
+		clipboardAckWaiters:   make(map[uint64]chan struct{}),
+		nextClipboardSequence: 1,
+		done:                  make(chan struct{}),
+		controlWrites:         make(chan []byte, controlQueueSize),
 	}
 	go rt.readVideoLoop()
 
@@ -228,6 +245,93 @@ func (r *runtime) SubscribeErrors() (<-chan error, func()) {
 		if ok {
 			close(sub)
 		}
+	}
+}
+
+func (r *runtime) GetClipboard(ctx context.Context) (string, error) {
+	if r.controlConn == nil {
+		return "", errors.New("scrcpy control socket is not available")
+	}
+
+	waiter := make(chan string, 1)
+
+	r.clipboardMu.Lock()
+	waiterID := r.nextClipboardWaiterID
+	r.nextClipboardWaiterID++
+	r.clipboardWaiters[waiterID] = waiter
+	r.clipboardMu.Unlock()
+
+	if err := r.SendControl(domainscrcpy.BuildGetClipboardControl()); err != nil {
+		r.removeClipboardWaiter(waiterID)
+		return "", err
+	}
+
+	select {
+	case <-r.done:
+		r.removeClipboardWaiter(waiterID)
+		return "", net.ErrClosed
+	case text := <-waiter:
+		return text, nil
+	case <-ctx.Done():
+		r.removeClipboardWaiter(waiterID)
+		return "", ctx.Err()
+	}
+}
+
+func (r *runtime) GetClipboardCached() (string, bool) {
+	r.clipboardMu.Lock()
+	defer r.clipboardMu.Unlock()
+
+	if !r.hasLatestClipboard {
+		return "", false
+	}
+
+	return r.latestClipboardText, true
+}
+
+func (r *runtime) SetClipboard(ctx context.Context, text string) error {
+	return r.setClipboard(ctx, text, false)
+}
+
+func (r *runtime) PasteClipboard(ctx context.Context, text string) error {
+	return r.setClipboard(ctx, text, true)
+}
+
+func (r *runtime) setClipboard(ctx context.Context, text string, paste bool) error {
+	if r.controlConn == nil {
+		return errors.New("scrcpy control socket is not available")
+	}
+
+	waiter := make(chan struct{}, 1)
+
+	r.clipboardMu.Lock()
+	sequence := r.nextClipboardSequence
+	r.nextClipboardSequence++
+	if sequence == controlMsgClipboardSequenceInvalid {
+		sequence = r.nextClipboardSequence
+		r.nextClipboardSequence++
+	}
+	r.clipboardAckWaiters[sequence] = waiter
+	r.clipboardMu.Unlock()
+
+	if err := r.SendControl(domainscrcpy.BuildSetClipboardControl(sequence, text, paste)); err != nil {
+		r.removeClipboardAckWaiter(sequence)
+		return err
+	}
+
+	select {
+	case <-r.done:
+		r.removeClipboardAckWaiter(sequence)
+		return net.ErrClosed
+	case <-waiter:
+		r.clipboardMu.Lock()
+		r.latestClipboardText = text
+		r.hasLatestClipboard = true
+		r.clipboardMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		r.removeClipboardAckWaiter(sequence)
+		return ctx.Err()
 	}
 }
 
@@ -552,7 +656,7 @@ func (r *runtime) readControlLoop() {
 		return
 	}
 
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 4096)
 	for {
 		if err := r.controlConn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
 			return
@@ -572,6 +676,11 @@ func (r *runtime) readControlLoop() {
 		}
 
 		if n == 0 {
+			return
+		}
+
+		if err := r.handleControlMessages(buffer[:n]); err != nil {
+			r.emitError(err)
 			return
 		}
 	}
@@ -604,6 +713,131 @@ func (r *runtime) writeControlLoop() {
 				return
 			}
 		}
+	}
+}
+
+func (r *runtime) handleControlMessages(chunk []byte) error {
+	r.controlReadMu.Lock()
+	r.controlBuffer = append(r.controlBuffer, chunk...)
+
+	for {
+		consumed, err := r.consumeControlMessageLocked()
+		if err != nil {
+			r.controlReadMu.Unlock()
+			return err
+		}
+		if consumed == 0 {
+			r.controlReadMu.Unlock()
+			return nil
+		}
+		r.controlBuffer = append(r.controlBuffer[:0], r.controlBuffer[consumed:]...)
+	}
+}
+
+func (r *runtime) consumeControlMessageLocked() (int, error) {
+	if len(r.controlBuffer) == 0 {
+		return 0, nil
+	}
+
+	switch r.controlBuffer[0] {
+	case deviceMsgTypeClipboard:
+		if len(r.controlBuffer) < 5 {
+			return 0, nil
+		}
+		textLength := int(binary.BigEndian.Uint32(r.controlBuffer[1:5]))
+		if textLength < 0 || textLength > (1<<18)-5 {
+			return 0, fmt.Errorf("invalid scrcpy clipboard payload size: %d", textLength)
+		}
+		messageSize := 5 + textLength
+		if len(r.controlBuffer) < messageSize {
+			return 0, nil
+		}
+		text := string(r.controlBuffer[5:messageSize])
+		r.dispatchClipboardText(text)
+		return messageSize, nil
+	case deviceMsgTypeAckClipboard:
+		if len(r.controlBuffer) < 9 {
+			return 0, nil
+		}
+		sequence := binary.BigEndian.Uint64(r.controlBuffer[1:9])
+		r.dispatchClipboardAck(sequence)
+		return 9, nil
+	case deviceMsgTypeUHIDOutput:
+		if len(r.controlBuffer) < 5 {
+			return 0, nil
+		}
+		payloadSize := int(binary.BigEndian.Uint16(r.controlBuffer[3:5]))
+		if payloadSize < 0 || payloadSize > (1<<18)-5 {
+			return 0, fmt.Errorf("invalid scrcpy uhid output size: %d", payloadSize)
+		}
+		messageSize := 5 + payloadSize
+		if len(r.controlBuffer) < messageSize {
+			return 0, nil
+		}
+		return messageSize, nil
+	default:
+		return 0, fmt.Errorf("unsupported scrcpy device message type: %d", r.controlBuffer[0])
+	}
+}
+
+func (r *runtime) dispatchClipboardText(text string) {
+	r.clipboardMu.Lock()
+	r.latestClipboardText = text
+	r.hasLatestClipboard = true
+
+	waiters := r.clipboardWaiters
+	r.clipboardWaiters = make(map[int]chan string)
+	r.clipboardMu.Unlock()
+
+	for _, waiter := range waiters {
+		select {
+		case waiter <- text:
+		default:
+		}
+		close(waiter)
+	}
+}
+
+func (r *runtime) dispatchClipboardAck(sequence uint64) {
+	r.clipboardMu.Lock()
+	waiter := r.clipboardAckWaiters[sequence]
+	if waiter != nil {
+		delete(r.clipboardAckWaiters, sequence)
+	}
+	r.clipboardMu.Unlock()
+
+	if waiter != nil {
+		select {
+		case waiter <- struct{}{}:
+		default:
+		}
+		close(waiter)
+	}
+}
+
+func (r *runtime) removeClipboardWaiter(waiterID int) {
+	r.clipboardMu.Lock()
+	waiter := r.clipboardWaiters[waiterID]
+	if waiter != nil {
+		delete(r.clipboardWaiters, waiterID)
+	}
+	r.clipboardMu.Unlock()
+
+	if waiter != nil {
+		close(waiter)
+	}
+}
+
+func (r *runtime) removeClipboardAckWaiter(sequence uint64) {
+	r.clipboardMu.Lock()
+	waiter := r.clipboardAckWaiters[sequence]
+	if waiter != nil {
+		delete(r.clipboardAckWaiters, sequence)
+	}
+	r.clipboardMu.Unlock()
+
+	if waiter != nil {
+		close(waiter)
 	}
 }
 
@@ -731,6 +965,20 @@ func (r *runtime) closeAllSubscribers() {
 
 	for _, sub := range errorSubscribers {
 		close(sub)
+	}
+
+	r.clipboardMu.Lock()
+	clipboardWaiters := r.clipboardWaiters
+	clipboardAckWaiters := r.clipboardAckWaiters
+	r.clipboardWaiters = make(map[int]chan string)
+	r.clipboardAckWaiters = make(map[uint64]chan struct{})
+	r.clipboardMu.Unlock()
+
+	for _, waiter := range clipboardWaiters {
+		close(waiter)
+	}
+	for _, waiter := range clipboardAckWaiters {
+		close(waiter)
 	}
 }
 

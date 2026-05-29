@@ -1,0 +1,4 @@
+.page-container { display: flex; flex-direction: column; height: 100%; }
+.content-area { flex: 1; position: relative; }
+.empty-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--fluent-text-secondary); gap: 8px; }
+.subtle { font-size: 13px; color: var(--fluent-text-tertiary); }

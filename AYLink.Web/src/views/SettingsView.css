@@ -1,0 +1,382 @@
+.settings-view {
+  padding: 32px 40px;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.settings-content {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.fluent-select {
+  background-color: var(--fluent-control-fill-default, rgba(255, 255, 255, 0.05));
+  color: var(--fluent-text-primary);
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  padding: 6px 32px 6px 12px;
+  border-radius: 4px;
+  outline: none;
+  font-size: 14px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2.14645 4.64645C2.34171 4.45118 2.65829 4.45118 2.85355 4.64645L6 7.79289L9.14645 4.64645C9.34171 4.45118 9.65829 4.45118 9.85355 4.64645C10.0488 4.84171 10.0488 5.15829 9.85355 5.35355L6.35355 8.85355C6.15829 9.04882 5.84171 9.04882 5.64645 8.85355L2.14645 5.35355C1.95118 5.15829 1.95118 4.84171 2.14645 4.64645Z' fill='%23ffffff'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  min-width: 120px;
+}
+
+.fluent-select:hover {
+  background-color: var(--fluent-control-fill-secondary, rgba(255, 255, 255, 0.08));
+}
+
+.fluent-select option {
+  background-color: var(--fluent-bg-solid);
+  color: var(--fluent-text-primary);
+}
+
+.fluent-input,
+.fluent-textarea {
+  width: 100%;
+  background-color: var(--fluent-control-fill-default, rgba(255, 255, 255, 0.05));
+  color: var(--fluent-text-primary);
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  padding: 10px 12px;
+  border-radius: 8px;
+  outline: none;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+.fluent-textarea {
+  resize: vertical;
+  min-height: 84px;
+}
+
+.fluent-input:focus,
+.fluent-textarea:focus {
+  border-color: var(--fluent-accent-default);
+  background-color: var(--fluent-bg-solid);
+}
+
+.fluent-color-picker {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  overflow: hidden;
+}
+
+.fluent-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.fluent-color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.fluent-btn {
+  background-color: var(--fluent-control-fill-default, rgba(255, 255, 255, 0.05));
+  color: var(--fluent-text-primary);
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  padding: 6px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  min-width: 80px;
+}
+
+.fluent-btn:hover {
+  background: var(--fluent-control-fill-secondary, rgba(255, 255, 255, 0.08));
+}
+
+.fluent-btn:active {
+  background-color: var(--fluent-control-fill-tertiary, rgba(255, 255, 255, 0.03));
+  transform: scale(0.98);
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  width: 46px;
+  height: 26px;
+  cursor: pointer;
+}
+
+.toggle-switch__input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-switch__slider {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background-color: var(--fluent-control-fill-secondary, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  transition: all 0.2s ease;
+}
+
+.toggle-switch__slider::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--fluent-text-secondary);
+  transition: all 0.2s ease;
+}
+
+.toggle-switch.active .toggle-switch__slider {
+  background-color: var(--fluent-accent-default);
+  border-color: var(--fluent-accent-default);
+}
+
+.toggle-switch.active .toggle-switch__slider::after {
+  left: 22px;
+  background-color: #fff;
+}
+
+.webrtc-servers-container {
+  margin-top: 12px;
+  background: var(--fluent-control-fill-default, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.webrtc-servers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--fluent-control-fill-secondary, rgba(255, 255, 255, 0.04));
+  transition: all 0.2s ease;
+}
+
+.webrtc-servers-header.expanded {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+}
+
+.webrtc-servers-header:hover {
+  background: var(--fluent-control-fill-tertiary, rgba(255, 255, 255, 0.06));
+}
+
+.webrtc-servers-header__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fluent-text-primary);
+  display: flex;
+  align-items: center;
+}
+
+.webrtc-servers-header__chevron {
+  color: var(--fluent-text-secondary);
+  transition: transform 0.3s ease;
+  display: block;
+}
+
+.webrtc-servers-header__chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.webrtc-servers-grid-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s ease;
+}
+
+.webrtc-servers-grid-wrapper.expanded {
+  grid-template-rows: 1fr;
+}
+
+.webrtc-servers-list {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 16px;
+  transition: padding 0.3s ease;
+}
+
+.webrtc-servers-grid-wrapper.expanded .webrtc-servers-list {
+  padding: 16px;
+}
+
+.webrtc-server-card {
+  border-radius: 8px;
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  background: var(--fluent-bg-solid);
+}
+
+.webrtc-server-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+}
+
+.webrtc-server-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fluent-text-primary);
+}
+
+.webrtc-server-card__remove-btn {
+  background: transparent;
+  border: none;
+  color: #ffcece;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.webrtc-server-card__remove-btn:hover {
+  background: rgba(255, 0, 0, 0.1);
+}
+
+.webrtc-server-card__body {
+  padding: 14px;
+}
+
+.webrtc-server-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.webrtc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.webrtc-field__label {
+  font-size: 13px;
+  color: var(--fluent-text-secondary);
+}
+
+.webrtc-single-port-input {
+  width: min(320px, 100%);
+}
+
+.webrtc-list-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.fluent-btn-ghost {
+  background: transparent;
+  color: var(--fluent-accent-default, #60cdff);
+  border: 1px dashed var(--fluent-accent-default, #60cdff);
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+  flex: 1;
+  text-align: center;
+}
+
+.fluent-btn-ghost:hover {
+  background: rgba(96, 205, 255, 0.1);
+}
+
+.webrtc-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.fluent-btn-text {
+  background: transparent;
+  color: var(--fluent-text-secondary);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.fluent-btn-text:hover {
+  background: var(--fluent-control-fill-default, rgba(255, 255, 255, 0.05));
+  color: var(--fluent-text-primary);
+}
+
+.webrtc-status {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--fluent-text-secondary);
+}
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  background-color: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 12px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
+}
+
+.dialog-header {
+  padding: 18px 20px 0;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 18px;
+  color: var(--fluent-text-primary);
+}
+
+.dialog-content {
+  padding: 16px 20px 20px;
+}
+
+.dialog-footer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 16px 20px 20px;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.error-text {
+  color: #ff99a4;
+  font-size: 13px;
+}

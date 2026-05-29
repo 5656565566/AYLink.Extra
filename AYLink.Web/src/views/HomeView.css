@@ -1,0 +1,348 @@
+.page-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  padding: 16px 24px;
+}
+
+.title-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.group-select {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+select {
+  min-width: 140px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--fluent-text-secondary);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--fluent-control-fill-secondary);
+  border-top-color: var(--fluent-accent-default);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* List Styles */
+.list-header {
+  display: grid;
+  grid-template-columns: 1fr 150px 180px;
+  padding: 12px 24px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fluent-text-primary);
+  border-bottom: 1px solid var(--fluent-stroke-default);
+}
+
+.list-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.list-row {
+  display: grid;
+  grid-template-columns: 1fr 150px 180px;
+  padding: 16px 24px;
+  align-items: center;
+  transition: background-color 0.2s ease;
+}
+
+.list-row:hover {
+  background-color: var(--fluent-control-fill-secondary);
+}
+
+.col-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.device-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fluent-text-primary);
+}
+
+.device-ip {
+  font-size: 12px;
+  color: var(--fluent-text-secondary);
+}
+
+.col-conn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.list-header .col-conn {
+  text-align: center;
+  display: block;
+}
+
+.wifi-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fluent-text-primary);
+}
+
+.wifi-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--fluent-text-primary);
+}
+
+.col-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  position: relative;
+}
+
+.list-header .col-actions {
+  display: block;
+  text-align: right;
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fluent-control-fill-default);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 4px;
+  color: var(--fluent-text-primary);
+  padding: 0;
+  transition: all 0.2s ease;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-btn:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.icon-btn:active {
+  background: var(--fluent-control-fill-tertiary);
+  transform: scale(0.96);
+}
+
+/* Dropdown Menu */
+.dropdown-container {
+  position: relative;
+  display: inline-flex;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background-color: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.actions .dropdown-menu {
+  left: 0;
+  right: auto;
+  min-width: 160px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--fluent-text-primary);
+  font-size: 14px;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.col-actions .dropdown-item {
+  justify-content: center;
+  text-align: center;
+}
+
+.dropdown-item:hover:not(:disabled) {
+  background-color: var(--fluent-control-fill-secondary);
+}
+
+.dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dropdown-item.danger {
+  color: #ff99a4;
+}
+
+.dropdown-item.danger:hover:not(:disabled) {
+  background-color: rgba(255, 153, 164, 0.1);
+}
+
+.dropdown-divider {
+  height: 1px;
+  background-color: var(--fluent-stroke-default);
+  margin: 4px 0;
+}
+
+.item-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dialog {
+  background-color: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-secondary);
+  border-radius: 8px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: slideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.dialog-header {
+  padding: 16px 24px;
+}
+
+.dialog-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.dialog-subtitle {
+  font-size: 14px;
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: var(--fluent-text-primary);
+}
+
+.dialog-content {
+  padding: 0 24px 24px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  font-size: 14px;
+}
+
+.form-group input {
+  width: 100%;
+}
+
+.error-msg {
+  color: #ff99a4;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.dialog-footer-grid {
+  padding: 16px 24px;
+  background-color: var(--fluent-bg-solid);
+  border-top: 1px solid var(--fluent-stroke-default);
+  border-radius: 0 0 8px 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.dialog-footer-grid button {
+  width: 100%;
+  justify-content: center;
+}

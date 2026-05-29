@@ -1,0 +1,141 @@
+.page-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--fluent-stroke-default);
+}
+
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.back-btn {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  transition: opacity 0.2s ease;
+}
+
+.back-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.back-text {
+  font-size: 14px;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fluent-text-primary);
+}
+
+.content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--fluent-text-secondary);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--fluent-control-fill-secondary);
+  border-top-color: var(--fluent-accent-default);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.settings-content {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.toggle-switch {
+  width: 40px;
+  height: 20px;
+  background-color: var(--fluent-control-fill-secondary);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toggle-switch.active {
+  background-color: var(--fluent-accent-default);
+  border-color: var(--fluent-accent-default);
+}
+
+.toggle-knob {
+  width: 12px;
+  height: 12px;
+  background-color: var(--fluent-text-secondary);
+  border-radius: 50%;
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  transition: all 0.2s ease;
+}
+
+.toggle-switch.active .toggle-knob {
+  left: 22px;
+  background-color: #fff;
+}
+
+.toggle-label {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 24px;
+}
+
+.fluent-input,
+.fluent-select {
+  width: 180px;
+  padding: 6px 12px;
+  font-size: 14px;
+  background-color: var(--fluent-control-fill-secondary);
+  border: 1px solid var(--fluent-stroke-default);
+  color: var(--fluent-text-primary);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.fluent-input:focus,
+.fluent-select:focus {
+  outline: none;
+  border-color: var(--fluent-accent-default);
+  background-color: var(--fluent-control-fill-default);
+}
+
+.actions-row {
+  display: flex;
+  align-items: center;
+  margin-top: 32px;
+}

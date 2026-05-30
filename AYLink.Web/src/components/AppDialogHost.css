@@ -1,0 +1,55 @@
+.app-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.app-dialog {
+  width: min(100%, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 10px;
+  background: var(--fluent-bg-layer, #202020);
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+}
+
+.app-dialog__header {
+  display: flex;
+  align-items: center;
+}
+
+.app-dialog__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fluent-text-primary, #ffffff);
+}
+
+.app-dialog__content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-dialog__message {
+  white-space: pre-line;
+  line-height: 1.5;
+  color: var(--fluent-text-secondary, rgba(255, 255, 255, 0.78));
+}
+
+.app-dialog__input {
+  width: 100%;
+}
+
+.app-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}

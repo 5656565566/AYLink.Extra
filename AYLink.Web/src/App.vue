@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from './composables/useI18n';
+import AppDialogHost from './components/AppDialogHost.vue';
 import NotificationToast from './components/NotificationToast.vue';
 import { hasPermission, useAuth } from './services/auth';
 import { backgroundEnabled, currentBackgroundImage } from './services/background';
@@ -103,10 +104,12 @@ const toggleSidebar = () => {
     </main>
     
     <NotificationToast />
+    <AppDialogHost />
   </div>
   <div v-else class="full-screen-layout">
     <router-view />
     <NotificationToast />
+    <AppDialogHost />
   </div>
 </template>
 

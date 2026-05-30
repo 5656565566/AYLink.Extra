@@ -2,10 +2,13 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from '../../composables/useI18n';
 import { hasPermission } from '../../services/auth';
+import { useDialog } from '../../services/dialog';
 import { useNotification } from '../../services/notification';
 import { requestWorkspaceOpen } from '../../services/workspaceNavigation';
 import { apiFetch, readApiErrorMessage, resolveApiErrorMessage } from '../../utils/api';
 import type { DeviceSummary } from '../../types/devices';
+import { isAbortError } from '../../lib/async/abort';
+import { createLatestRequestController } from '../../lib/async/latestRequest';
 
 interface AddDevicePayload {
   Serial: string;
@@ -17,6 +20,7 @@ interface AddDevicePayload {
 export function useHomeDevices() {
   const router = useRouter();
   const notificationService = useNotification();
+  const dialogService = useDialog();
   const { t } = useI18n();
 
   const devices = ref<DeviceSummary[]>([]);
@@ -41,6 +45,8 @@ export function useHomeDevices() {
   const deviceEncoders = ref<string[]>([]);
   const encodersDeviceName = ref('');
   const activeMenuDeviceId = ref<number | null>(null);
+  const devicesRequest = createLatestRequestController();
+  const encodersRequest = createLatestRequestController();
 
   const canManageDevices = computed(() => hasPermission('devices.manage'));
   const canControlDevices = computed(() => hasPermission('devices.control'));
@@ -69,17 +75,30 @@ export function useHomeDevices() {
   };
 
   const fetchDevices = async () => {
+    const { requestId, signal } = devicesRequest.begin();
     loading.value = true;
 
     try {
-      const response = await apiFetch('/api/devices');
+      const response = await apiFetch('/api/devices', {
+        signal,
+        timeoutMs: 15000,
+      });
+      if (!devicesRequest.isLatest(requestId)) {
+        return;
+      }
+
       if (response.ok) {
         devices.value = await response.json();
       }
     } catch (error) {
-      console.error('Failed to fetch devices', error);
+      if (!isAbortError(error)) {
+        console.error('Failed to fetch devices', error);
+      }
     } finally {
-      loading.value = false;
+      if (devicesRequest.isLatest(requestId)) {
+        loading.value = false;
+      }
+      devicesRequest.finalize(requestId);
     }
   };
 
@@ -159,15 +178,23 @@ export function useHomeDevices() {
   const deleteDevice = async (id: number) => {
     activeMenuDeviceId.value = null;
 
-    if (confirm('确定要移除此设备吗？')) {
-      try {
-        const response = await apiFetch(`/api/devices/${id}`, { method: 'DELETE' });
-        if (response.ok) {
-          await fetchDevices();
-        }
-      } catch (error) {
-        console.error('Failed to delete device', error);
+    const confirmed = await dialogService.confirm(
+      t('Devices.DeleteConfirmTitle', '移除设备'),
+      t('Devices.DeleteConfirmMessage', '确定要移除此设备吗？'),
+      t('Common.Delete', '删除'),
+      t('Common.Cancel', '取消')
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await apiFetch(`/api/devices/${id}`, { method: 'DELETE' });
+      if (response.ok) {
+        await fetchDevices();
       }
+    } catch (error) {
+      console.error('Failed to delete device', error);
     }
   };
 
@@ -297,6 +324,7 @@ export function useHomeDevices() {
   };
 
   const showEncoderList = async (device: DeviceSummary) => {
+    const { requestId, signal } = encodersRequest.begin();
     activeMenuDeviceId.value = null;
     fetchingEncoders.value = true;
     showEncodersDialog.value = true;
@@ -304,14 +332,26 @@ export function useHomeDevices() {
     deviceEncoders.value = [];
 
     try {
-      const response = await apiFetch(`/api/devices/${device.Id}/encoders`);
+      const response = await apiFetch(`/api/devices/${device.Id}/encoders`, {
+        signal,
+        timeoutMs: 15000,
+      });
+      if (!encodersRequest.isLatest(requestId)) {
+        return;
+      }
+
       if (response.ok) {
         deviceEncoders.value = await response.json();
       }
     } catch (error) {
-      console.error('Failed to fetch encoders', error);
+      if (!isAbortError(error)) {
+        console.error('Failed to fetch encoders', error);
+      }
     } finally {
-      fetchingEncoders.value = false;
+      if (encodersRequest.isLatest(requestId)) {
+        fetchingEncoders.value = false;
+      }
+      encodersRequest.finalize(requestId);
     }
   };
 
@@ -326,6 +366,8 @@ export function useHomeDevices() {
   });
 
   onUnmounted(() => {
+    devicesRequest.dispose();
+    encodersRequest.dispose();
     document.removeEventListener('click', closeMenu);
   });
 

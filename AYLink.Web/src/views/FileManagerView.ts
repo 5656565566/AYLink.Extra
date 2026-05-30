@@ -5,6 +5,10 @@ import { useFileManagerTabs } from '../features/files/useFileManagerTabs';
 import type { FileEntry } from '../types/files';
 import { apiFetch, readApiErrorMessage } from '../utils/api';
 import { useI18n } from '../composables/useI18n';
+import { useDialog } from '../services/dialog';
+import { useNotification } from '../services/notification';
+import { isAbortError } from '../lib/async/abort';
+import { createLatestRequestController } from '../lib/async/latestRequest';
 
 export default defineComponent({
   name: 'FileManagerView',
@@ -13,10 +17,13 @@ export default defineComponent({
   },
   setup() {
     const { t } = useI18n();
+    const dialogService = useDialog();
+    const notifications = useNotification();
 
     const entries = ref<FileEntry[]>([]);
     const loading = ref(false);
     const errorMessage = ref('');
+    const filesRequest = createLatestRequestController();
     const selectedEntry = ref<FileEntry | null>(null);
     const contextMenu = ref({
       show: false,
@@ -68,9 +75,11 @@ export default defineComponent({
     };
 
     const loadFiles = async () => {
+      const { requestId, signal } = filesRequest.begin();
       const tab = activeTab.value;
       if (!tab) {
         entries.value = [];
+        filesRequest.finalize(requestId);
         return;
       }
 
@@ -80,8 +89,13 @@ export default defineComponent({
         const response = await apiFetch(`/api/devices/${tab.deviceId}/files/list`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: tab.path })
+          body: JSON.stringify({ path: tab.path }),
+          signal,
+          timeoutMs: 15000,
         });
+        if (!filesRequest.isLatest(requestId)) {
+          return;
+        }
 
         if (!response.ok) {
           errorMessage.value = await getResponseErrorMessage(response, t('FilePage.ReadFailed', '无法读取当前目录'));
@@ -94,11 +108,16 @@ export default defineComponent({
         entries.value = Array.isArray(payload.items) ? payload.items : [];
         selectedEntry.value = null;
       } catch (error) {
-        console.error('Failed to load files', error);
-        errorMessage.value = t('FilePage.LoadFailed', '文件列表加载失败');
-        entries.value = [];
+        if (!isAbortError(error)) {
+          console.error('Failed to load files', error);
+          errorMessage.value = t('FilePage.LoadFailed', '文件列表加载失败');
+          entries.value = [];
+        }
       } finally {
-        loading.value = false;
+        if (filesRequest.isLatest(requestId)) {
+          loading.value = false;
+        }
+        filesRequest.finalize(requestId);
       }
     };
 
@@ -163,7 +182,14 @@ export default defineComponent({
     };
 
     const renameEntry = async (entry: FileEntry) => {
-      const nextName = window.prompt(t('FilePage.RenamePrompt', '请输入新名称'), entry.Name)?.trim();
+      const nextName = (await dialogService.prompt(
+        t('FilePage.RenameTitle', '重命名'),
+        t('FilePage.RenamePrompt', '请输入新名称'),
+        entry.Name,
+        t('FilePage.RenamePlaceholder', '请输入新名称'),
+        t('Common.Save', '保存'),
+        t('Common.Cancel', '取消')
+      ))?.trim();
       if (!nextName || nextName === entry.Name) {
         return;
       }
@@ -184,8 +210,11 @@ export default defineComponent({
     };
 
     const deleteEntry = async (entry: FileEntry) => {
-      const confirmed = window.confirm(
-        t('FilePage.DeleteConfirm', '确认删除该项目？')
+      const confirmed = await dialogService.confirm(
+        t('FilePage.DeleteTitle', '删除项目'),
+        t('FilePage.DeleteConfirm', '确认删除该项目？'),
+        t('Common.Delete', '删除'),
+        t('Common.Cancel', '取消')
       );
       if (!confirmed) {
         return;
@@ -228,7 +257,11 @@ export default defineComponent({
         }
       } catch (error) {
         console.error('File action failed', error);
-        window.alert(error instanceof Error ? error.message : t('Common.OperationFailed', '操作失败'));
+        notifications.show({
+          type: 'error',
+          title: t('Common.OperationFailed', '操作失败'),
+          message: error instanceof Error ? error.message : t('Common.OperationFailed', '操作失败')
+        });
       }
 
       closeContextMenu();
@@ -261,6 +294,7 @@ export default defineComponent({
     });
 
     onUnmounted(() => {
+      filesRequest.dispose();
       document.removeEventListener('click', closeContextMenu);
     });
 

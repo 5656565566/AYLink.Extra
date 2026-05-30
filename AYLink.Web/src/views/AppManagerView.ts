@@ -5,9 +5,12 @@ import WorkspaceTabs from '../components/WorkspaceTabs.vue';
 import { useI18n } from '../composables/useI18n';
 import { useAsyncAction } from '../features/async/useAsyncAction';
 import { useAppManagerTabs } from '../features/apps/useAppManagerTabs';
+import { useDialog } from '../services/dialog';
 import { requestWorkspaceOpen } from '../services/workspaceNavigation';
 import { useNotification } from '../services/notification';
 import type { AppDetails, AppInfo } from '../types/apps';
+import { isAbortError } from '../lib/async/abort';
+import { createLatestRequestController } from '../lib/async/latestRequest';
 
 export default defineComponent({
   name: 'AppManagerView',
@@ -18,8 +21,10 @@ export default defineComponent({
     const apps = ref<AppInfo[]>([]);
     const searchQuery = ref('');
     const loading = ref(false);
+    const appsRequest = createLatestRequestController();
 
     const { t } = useI18n();
+    const dialogService = useDialog();
     const notifications = useNotification();
     const { isRunning: actionInProgress, run: runAction } = useAsyncAction();
 
@@ -49,23 +54,38 @@ export default defineComponent({
     });
 
     const loadApps = async (deviceId: string) => {
+      const { requestId, signal } = appsRequest.begin();
+
       if (!deviceId) {
         apps.value = [];
         loading.value = false;
+        appsRequest.finalize(requestId);
         return;
       }
 
       loading.value = true;
       apps.value = [];
       try {
-        const response = await apiFetch(`/api/devices/${deviceId}/apps`);
+        const response = await apiFetch(`/api/devices/${deviceId}/apps`, {
+          signal,
+          timeoutMs: 15000,
+        });
+        if (!appsRequest.isLatest(requestId)) {
+          return;
+        }
+
         if (response.ok) {
           apps.value = await response.json();
         }
       } catch (error) {
-        console.error('Failed to load apps', error);
+        if (!isAbortError(error)) {
+          console.error('Failed to load apps', error);
+        }
       } finally {
-        loading.value = false;
+        if (appsRequest.isLatest(requestId)) {
+          loading.value = false;
+        }
+        appsRequest.finalize(requestId);
       }
     };
 
@@ -223,8 +243,11 @@ export default defineComponent({
     };
 
     const uninstallApp = async (app: AppInfo) => {
-      const confirmed = window.confirm(
-        t('AppPage.UninstallConfirm', '确认卸载该应用？')
+      const confirmed = await dialogService.confirm(
+        t('AppPage.UninstallTitle', '卸载应用'),
+        t('AppPage.UninstallConfirm', '确认卸载该应用？'),
+        t('Common.Delete', '删除'),
+        t('Common.Cancel', '取消')
       );
       if (!confirmed) {
         return;
@@ -338,6 +361,7 @@ export default defineComponent({
     });
 
     onUnmounted(() => {
+      appsRequest.dispose();
       document.removeEventListener('click', closeContextMenu);
     });
 

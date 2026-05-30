@@ -5,6 +5,7 @@ import { useI18n } from '../composables/useI18n';
 import SettingItem from '../components/SettingItem.vue';
 import SettingSection from '../components/SettingSection.vue';
 import { useAuth } from '../services/auth';
+import { useDialog } from '../services/dialog';
 import { useNotification } from '../services/notification';
 import { getPermissionDescription, getPermissionLabel } from '../services/permissionCatalog';
 import { apiFetch, resolveApiErrorMessage } from '../utils/api';
@@ -47,6 +48,8 @@ export default defineComponent({
     const { t } = useI18n();
 
     const auth = useAuth();
+
+    const dialogService = useDialog();
 
     const notifications = useNotification();
 
@@ -258,7 +261,14 @@ export default defineComponent({
     }
 
     async function resetPassword(user: UserItem) {    
-      const newPassword = window.prompt(t('AccountPage.ResetPasswordPrompt', '为 {0} 输入新密码。\n留空则自动生成随机密码。', user.Username), '');    
+      const newPassword = await dialogService.prompt(
+        t('AccountPage.ResetPasswordTitle', '重置密码'),
+        t('AccountPage.ResetPasswordPrompt', '为 {0} 输入新密码。\n留空则自动生成随机密码。', user.Username),
+        '',
+        t('AccountPage.ResetPasswordPlaceholder', '留空则自动生成随机密码'),
+        t('Common.Save', '保存'),
+        t('Common.Cancel', '取消')
+      );
       if (newPassword === null) {    
         return;    
       }    

@@ -1,35 +1,13 @@
 import { computed, ref } from 'vue';
+import { registerAuthSessionHandlers, sendApiRequest } from '../core/http/client';
 import { readLocalJson, readLocalString, removeLocalValue, writeLocalJson, writeLocalString } from '../core/storage/browserStorage';
 import { storageKeys } from '../core/storage/keys';
+import type { AuthMePayload, AuthResponsePayload, AuthUser } from '../types/auth';
 
 const ACCESS_TOKEN_KEY = storageKeys.auth.accessToken;
 const REFRESH_TOKEN_KEY = storageKeys.auth.refreshToken;
 const USER_KEY = storageKeys.auth.user;
 const PERMISSIONS_KEY = storageKeys.auth.permissions;
-
-export interface RoleSummary {
-  Id: number;
-  Name: string;
-  Description: string;
-}
-
-export interface AuthUser {
-  Id: number;
-  Username: string;
-  IsActive: boolean;
-  LastLoginAt?: string | null;
-  Roles: RoleSummary[];
-  Permissions: string[];
-}
-
-interface AuthResponsePayload {
-  accessToken?: string;
-  accessTokenExpiresAt?: string;
-  refreshToken?: string;
-  refreshTokenExpiresAt?: string;
-  user?: AuthUser;
-  permissions?: string[];
-}
 
 const accessToken = ref<string>(readLocalString(ACCESS_TOKEN_KEY) || '');
 const refreshToken = ref<string>(readLocalString(REFRESH_TOKEN_KEY) || '');
@@ -139,12 +117,16 @@ export async function refreshAccessToken() {
     const attemptedRefreshToken = refreshToken.value;
 
     try {
-      const response = await fetch('/api/auth/refresh', {
+      const response = await sendApiRequest('/api/auth/refresh', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ refreshToken: attemptedRefreshToken })
+        body: JSON.stringify({ refreshToken: attemptedRefreshToken }),
+        requiresAuth: false,
+        retryOnUnauthorized: false,
+        handleUnauthorized: false,
+        handleForbidden: false
       });
 
       if (!response.ok) {
@@ -179,17 +161,16 @@ export async function fetchMe() {
   }
 
   try {
-    const response = await fetch('/api/auth/me', {
-      headers: {
-        Authorization: `Bearer ${accessToken.value}`
-      }
+    const response = await sendApiRequest('/api/auth/me', {
+      handleUnauthorized: false,
+      handleForbidden: false
     });
 
     if (!response.ok) {
       return false;
     }
 
-    const payload = await response.json() as { user?: AuthUser; permissions?: string[] };
+    const payload = await response.json() as AuthMePayload;
     currentUser.value = payload.user || null;
     permissions.value = payload.permissions || payload.user?.Permissions || [];
     writeLocalJson(USER_KEY, currentUser.value);
@@ -206,13 +187,15 @@ export async function logout() {
 
   try {
     if (activeAccessToken || activeRefreshToken) {
-      await fetch('/api/logout', {
+      await sendApiRequest('/api/logout', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          ...(activeAccessToken ? { Authorization: `Bearer ${activeAccessToken}` } : {})
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ refreshToken: activeRefreshToken || null })
+        body: JSON.stringify({ refreshToken: activeRefreshToken || null }),
+        retryOnUnauthorized: false,
+        handleUnauthorized: false,
+        handleForbidden: false
       });
     }
   } catch {
@@ -266,3 +249,38 @@ function readStoredUser() {
 function readStoredPermissions() {
   return readLocalJson<string[]>(PERMISSIONS_KEY) || [];
 }
+
+export async function login(username: string, password: string) {
+  const response = await sendApiRequest('/api/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ username, password }),
+    requiresAuth: false,
+    retryOnUnauthorized: false,
+    handleUnauthorized: false,
+    handleForbidden: false
+  });
+
+  const payload = await response.json().catch(() => null) as AuthResponsePayload | null;
+  const ok = response.ok && payload?.success !== false;
+
+  if (ok && payload) {
+    applyAuthResponse(payload);
+  }
+
+  return {
+    ok,
+    response,
+    payload,
+  };
+}
+
+registerAuthSessionHandlers({
+  clearSession,
+  getAccessToken,
+  hasActiveAccessToken,
+  refreshAccessToken,
+  syncSessionFromStorage,
+});

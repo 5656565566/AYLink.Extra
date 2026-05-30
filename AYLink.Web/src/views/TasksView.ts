@@ -1,6 +1,8 @@
 import { defineComponent } from 'vue';
 import { computed, onMounted, ref } from 'vue';
 import WorkspaceTabs from '../components/WorkspaceTabs.vue';
+import { persistSessionTabs, restoreSessionTabs } from '../features/workspace/sessionTabs';
+import type { SessionTabItem } from '../types/workspace';
 
 export default defineComponent({
   name: 'TasksView',
@@ -8,63 +10,63 @@ export default defineComponent({
     WorkspaceTabs
   },
   setup() {
-    interface SimpleTab {    
-      key: string;    
-      title: string;    
+    interface SimpleTab extends SessionTabItem {
+      title: string;
     }
 
     const STORAGE_KEY = 'aylink_task_tabs';
-
     const ACTIVE_KEY = 'aylink_task_active_tab';
 
     const tabs = ref<SimpleTab[]>([]);
-
     const activeTabKey = ref('');
 
     const activeTab = computed(() => tabs.value.find((tab) => tab.key === activeTabKey.value) ?? null);
-
     const tabItems = computed(() => tabs.value);
 
-    const persistTabs = () => {    
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(tabs.value));    
-      sessionStorage.setItem(ACTIVE_KEY, activeTabKey.value);    
+    const isSimpleTab = (item: unknown): item is SimpleTab => {
+      return !!item
+        && typeof item === 'object'
+        && typeof (item as SimpleTab).key === 'string'
+        && typeof (item as SimpleTab).title === 'string';
     };
 
-    const ensureDefaultTab = () => {    
-      if (tabs.value.length === 0) {    
-        tabs.value = [{ key: 'tasks-default', title: '任务管理' }];    
-        activeTabKey.value = 'tasks-default';    
-        persistTabs();    
-      }    
+    const persistTabs = () => {
+      persistSessionTabs(STORAGE_KEY, ACTIVE_KEY, tabs.value, activeTabKey.value);
     };
 
-    const activateTab = (tabKey: string) => {    
-      activeTabKey.value = tabKey;    
-      persistTabs();    
+    const ensureDefaultTab = () => {
+      if (tabs.value.length === 0) {
+        tabs.value = [{ key: 'tasks-default', title: '任务管理' }];
+        activeTabKey.value = 'tasks-default';
+        persistTabs();
+      }
     };
 
-    const closeTab = (tabKey: string) => {    
-      const index = tabs.value.findIndex((tab) => tab.key === tabKey);    
-      if (index < 0) return;    
-      tabs.value.splice(index, 1);    
-      activeTabKey.value = tabs.value[index]?.key ?? tabs.value[index - 1]?.key ?? '';    
-      persistTabs();    
+    const activateTab = (tabKey: string) => {
+      activeTabKey.value = tabKey;
+      persistTabs();
     };
 
-    onMounted(() => {    
-      try {    
-        const rawTabs = sessionStorage.getItem(STORAGE_KEY);    
-        const rawActive = sessionStorage.getItem(ACTIVE_KEY) ?? '';    
-        const parsedTabs = rawTabs ? JSON.parse(rawTabs) : [];    
-        if (Array.isArray(parsedTabs)) {    
-          tabs.value = parsedTabs.filter((item): item is SimpleTab => !!item && typeof item.key === 'string' && typeof item.title === 'string');    
-        }    
-        activeTabKey.value = tabs.value.some((tab) => tab.key === rawActive) ? rawActive : tabs.value[0]?.key ?? '';    
-      } catch {    
-        tabs.value = [];    
-        activeTabKey.value = '';    
-      }    
-      ensureDefaultTab();    
+    const closeTab = (tabKey: string) => {
+      const index = tabs.value.findIndex((tab) => tab.key === tabKey);
+      if (index < 0) return;
+
+      tabs.value.splice(index, 1);
+      activeTabKey.value = tabs.value[index]?.key ?? tabs.value[index - 1]?.key ?? '';
+      persistTabs();
+    };
+
+    onMounted(() => {
+      try {
+        const restored = restoreSessionTabs(STORAGE_KEY, ACTIVE_KEY, isSimpleTab);
+        tabs.value = restored.tabs;
+        activeTabKey.value = restored.activeTabKey;
+      } catch {
+        tabs.value = [];
+        activeTabKey.value = '';
+      }
+
+      ensureDefaultTab();
     });
 
     return {

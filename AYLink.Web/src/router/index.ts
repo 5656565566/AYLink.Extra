@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
+import { registerUnauthorizedHandler } from '../core/http/client';
 import HomeView from '../views/HomeView.vue';
 import { getDefaultAuthorizedRoute, hasPermission, initializeAuth, useAuth } from '../services/auth';
 import { useNotification } from '../services/notification';
@@ -69,6 +70,10 @@ const router = createRouter({
       meta: { requiresAuth: true, permission: 'devices.manage' }
     },
   ]
+});
+
+registerUnauthorizedHandler(() => {
+  void router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } });
 });
 
 router.beforeEach(async (to, _from, next) => {

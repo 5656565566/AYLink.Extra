@@ -1,27 +1,10 @@
 import { readonly, ref } from 'vue';
+import { sendApiRequest } from '../core/http/client';
 import { readLocalString, writeLocalString } from '../core/storage/browserStorage';
 import { storageKeys } from '../core/storage/keys';
+import type { LanguageOption, LanguagePayload, LocalePayload, MessageTree } from '../types/i18n';
 import { getAccessToken } from './auth';
 import { apiFetch } from '../utils/api';
-
-export interface LanguageOption {
-  locale: string;
-  name: string;
-}
-
-type LocalePayload = {
-  locale?: string;
-  Locale?: string;
-};
-
-type LanguagePayload = {
-  locale?: string;
-  Locale?: string;
-  name?: string;
-  Name?: string;
-};
-
-type MessageTree = Record<string, unknown>;
 
 const LANGUAGE_STORAGE_KEY = storageKeys.app.language;
 const DEFAULT_LOCALE = 'zh-CN';
@@ -99,7 +82,12 @@ export async function loadServerLocale() {
 }
 
 async function loadLanguages() {
-  const response = await fetch('/api/i18n/languages');
+  const response = await sendApiRequest('/api/i18n/languages', {
+    requiresAuth: false,
+    retryOnUnauthorized: false,
+    handleUnauthorized: false,
+    handleForbidden: false,
+  });
   if (!response.ok) {
     languages.value = [
       { locale: 'zh-CN', name: '中文（简体）' },
@@ -118,7 +106,12 @@ async function loadLanguages() {
 async function loadLocaleMessages(locale: string) {
   isLoadingLanguage.value = true;
   try {
-    const response = await fetch(`/api/i18n/${encodeURIComponent(locale)}`);
+    const response = await sendApiRequest(`/api/i18n/${encodeURIComponent(locale)}`, {
+      requiresAuth: false,
+      retryOnUnauthorized: false,
+      handleUnauthorized: false,
+      handleForbidden: false,
+    });
     if (response.ok) {
       messages.value = await response.json() as MessageTree;
     }

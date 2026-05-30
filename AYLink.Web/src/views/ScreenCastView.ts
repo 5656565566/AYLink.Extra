@@ -13,39 +13,29 @@ import {
   Phone20Regular
 } from '@vicons/fluent';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from '../composables/useI18n';
 import { useAppSettings } from '../services/appSettings';
 import { getAccessToken, useAuth } from '../services/auth';
 import { loadLocalWebRtcOverrideConfig, loadLocalWebRtcOverrideEnabled } from '../services/webrtcSettings';
 import { apiFetch, readApiErrorMessage } from '../utils/api';
 import WorkspaceTabs from '../components/WorkspaceTabs.vue';
-import { consumeWorkspaceOpen, type WorkspaceOpenRequest } from '../services/workspaceNavigation';
-
-type TrackKind = 'audio' | 'video';
-
-interface PersistedCastConnection {
-  tabKey: string;
-  deviceId: string;
-  appPackageName: string;
-  appDisplayName: string;
-  newDisplay: boolean;
-  sessionId: string;
-  persistedAt: number;
-  peerConnection: RTCPeerConnection;
-  ws: WebSocket | null;
-  dataChannel: RTCDataChannel | null;
-  metaControlChannel: RTCDataChannel | null;
-  pointerMoveChannel: RTCDataChannel | null;
-  remoteTracks: Map<TrackKind, MediaStreamTrack>;
-  remoteVideoStream: MediaStream;
-  remoteAudioStream: MediaStream;
-  pendingCandidates: RTCIceCandidateInit[];
-}
+import {
+  clearPendingReconnect as clearPendingReconnectTimer,
+  clearPendingStartConnection as clearPendingStartConnectionTimer,
+  clearStartConnectionState as resetStartConnectionState,
+  createCastConnectionSchedulerState,
+  disableAutoReconnect as disableAutoReconnectFlow,
+  enableAutoReconnect as enableAutoReconnectFlow,
+  scheduleReconnect as scheduleReconnectFlow,
+  scheduleStartConnection as scheduleStartConnectionFlow
+} from '../features/screencast/connectionScheduler';
+import { useCastDeviceContext } from '../features/screencast/useCastDeviceContext';
+import { useCastTabs } from '../features/screencast/useCastTabs';
+import { useCastSessionPersistence } from '../features/screencast/useCastSessionPersistence';
+import type { CastTab } from '../types/screencast';
 
 declare global {
   interface Window {
-    __aylinkPersistedCastConnections?: Record<string, PersistedCastConnection>;
     __aylinkPersistedCastFrameImages?: Record<string, string>;
     __aylinkPersistentAudioElement?: HTMLAudioElement;
   }
@@ -70,15 +60,6 @@ export default defineComponent({
   setup() {
     type DockedEdge = 'left' | 'right' | 'none';
 
-    interface CastTab {
-      key: string;
-      deviceId: string;
-      appPackageName: string;
-      appDisplayName: string;
-      deviceName: string;
-      newDisplay: boolean;
-    }
-
     interface WebRtcNetworkSettingsPayload {
       IceTransportPolicy?: string;
       IceServers?: Array<{
@@ -99,10 +80,6 @@ export default defineComponent({
       relativeRight?: number;
       relativeTop?: number;
     }
-
-    const CAST_TABS_STORAGE_KEY = 'aylink_cast_tabs';
-
-    const CAST_ACTIVE_TAB_STORAGE_KEY = 'aylink_cast_active_tab';
 
     const CAST_MENU_PLACEMENT_STORAGE_KEY = 'aylink_cast_menu_placement';
 
@@ -230,17 +207,9 @@ export default defineComponent({
 
     const auth = useAuth();
 
-    const route = useRoute();
-
-    const router = useRouter();
-
     const localWebRtcScope = computed(() => String(auth.currentUser.value?.Id ?? 'anonymous'));
 
     const shellElement = ref<HTMLDivElement | null>(null);
-
-    const castTabs = ref<CastTab[]>([]);
-
-    const activeTabKey = ref('');
 
     const deviceId = ref('');
 
@@ -394,19 +363,13 @@ export default defineComponent({
 
     let lastVideoFrameSize = { width: 0, height: 0 };
 
-    let pendingReconnectTimer: number | null = null;
-
-    let pendingStartConnectionTimer: number | null = null;
-
-    let scrcpySessionHeartbeatTimer: number | null = null;
+    const connectionSchedulerState = createCastConnectionSchedulerState();
 
     let pendingResumePlaybackTimer: number | null = null;
 
     let pendingDisplayResizeTimer: number | null = null;
 
     let flexDisplayHeartbeatTimer: number | null = null;
-
-    let pendingPersistTabsTimer: number | null = null;
 
     let pendingVideoRecoveryTimer: number | null = null;
 
@@ -429,10 +392,6 @@ export default defineComponent({
     let lastDisplayResizeRequest: { width: number; height: number } | null = null;
 
     let videoContainerResizeObserver: ResizeObserver | null = null;
-
-    let lastPersistedTabsSnapshot = '';
-
-    let lastPersistedActiveTabKey = '';
 
     let dragStartOffset = { x: 0, y: 0 };
 
@@ -470,15 +429,7 @@ export default defineComponent({
 
     let lastPointerMoveFlushAt = 0;
 
-    let reconnectAttempt = 0;
-
-    let suppressAutoReconnect = false;
-
     let isIceRestartInFlight = false;
-
-    let isStartConnectionInFlight = false;
-
-    let activeConnectionTargetKey = '';
 
     let detachedSignalingConnectionId = 0;
 
@@ -501,16 +452,59 @@ export default defineComponent({
       pressure: number;
     }
 
-    const activeTab = computed(() => castTabs.value.find((tab) => tab.key === activeTabKey.value) ?? null);
+    const getTabTitle = (tab: CastTab) => {
+      const baseTitle = tab.deviceName || '设备投屏';
+      return tab.appDisplayName ? `${baseTitle} · ${tab.appDisplayName}` : baseTitle;
+    };
 
-    const hasCastTabs = computed(() => castTabs.value.length > 0);
+    const {
+      CAST_TABS_STORAGE_KEY,
+      CAST_ACTIVE_TAB_STORAGE_KEY,
+      route,
+      router,
+      castTabs,
+      activeTabKey,
+      activeTab,
+      hasCastTabs,
+      castTabItems,
+      isScreencastRouteActive,
+      buildTabKey,
+      flushPersistTabs,
+      schedulePersistTabs,
+      cleanupPersistTabs,
+      persistTabs,
+      syncRouteToActiveTab,
+      upsertTab,
+      createTabFromQuery,
+      createTabFromRequest,
+      openIncomingTab,
+      consumeIncomingTab,
+      loadPersistedTabs
+    } = useCastTabs(getTabTitle);
 
-    const castTabItems = computed(() => castTabs.value.map((tab) => ({
-      key: tab.key,
-      title: getTabTitle(tab)
-    })));
+    const {
+      postScrcpySessionAction,
+      stopScrcpySessionHeartbeat,
+      startScrcpySessionHeartbeat,
+      persistCurrentConnection: persistCastConnectionSnapshot,
+      clearPersistedConnection: clearPersistedCastConnection,
+      getPersistedConnection: getPersistedCastConnection,
+      disposePersistedConnection: disposePersistedCastConnection,
+      disposeOtherPersistedConnections,
+      disposeAllPersistedConnections
+    } = useCastSessionPersistence();
 
-    const isScreencastRouteActive = computed(() => route.name === 'screencast');
+    const clearPersistedConnection = (tabKey = activeTabKey.value) => {
+      clearPersistedCastConnection(tabKey);
+    };
+
+    const getPersistedConnection = (tabKey = activeTabKey.value) => {
+      return getPersistedCastConnection(tabKey);
+    };
+
+    const disposePersistedConnection = (tabKey: string) => {
+      disposePersistedCastConnection(tabKey);
+    };
 
     const canUseFlexDisplay = computed(() => isNewDisplayMode.value && isFlexDisplayEnabled.value);
 
@@ -787,7 +781,7 @@ export default defineComponent({
     };
 
     const shouldMonitorFrozenVideo = (connectionId: number) => {
-      if (suppressAutoReconnect || connectionId !== activeConnectionId) {
+      if (connectionSchedulerState.suppressAutoReconnect || connectionId !== activeConnectionId) {
         return false;
       }
       if (document.visibilityState !== 'visible' || route.name !== 'screencast') {
@@ -883,27 +877,6 @@ export default defineComponent({
       }, VIDEO_FREEZE_WATCHDOG_INTERVAL_MS);
     };
 
-    const stopScrcpySessionHeartbeat = () => {
-      if (scrcpySessionHeartbeatTimer != null) {
-        window.clearInterval(scrcpySessionHeartbeatTimer);
-        scrcpySessionHeartbeatTimer = null;
-      }
-    };
-
-    const startScrcpySessionHeartbeat = (targetDeviceId: string, sessionId: string) => {
-      stopScrcpySessionHeartbeat();
-      if (!targetDeviceId || !sessionId) {
-        return;
-      }
-    
-      const tick = () => {
-        void postScrcpySessionAction('heartbeat', targetDeviceId, sessionId);
-      };
-    
-      tick();
-      scrcpySessionHeartbeatTimer = window.setInterval(tick, 15000);
-    };
-
     const stopPointerMoveFlushLoop = () => {
       if (pointerMoveFlushHandle != null) {
         window.cancelAnimationFrame(pointerMoveFlushHandle);
@@ -997,46 +970,6 @@ export default defineComponent({
       );
     };
 
-    const flushPersistTabs = () => {
-      pendingPersistTabsTimer = null;
-    
-      const tabsSnapshot = JSON.stringify(castTabs.value);
-      const activeTabSnapshot = activeTabKey.value;
-      if (tabsSnapshot === lastPersistedTabsSnapshot && activeTabSnapshot === lastPersistedActiveTabKey) {
-        return;
-      }
-    
-      sessionStorage.setItem(CAST_TABS_STORAGE_KEY, tabsSnapshot);
-      sessionStorage.setItem(CAST_ACTIVE_TAB_STORAGE_KEY, activeTabSnapshot);
-      lastPersistedTabsSnapshot = tabsSnapshot;
-      lastPersistedActiveTabKey = activeTabSnapshot;
-    };
-
-    const schedulePersistTabs = () => {
-      if (pendingPersistTabsTimer != null) {
-        return;
-      }
-    
-      pendingPersistTabsTimer = window.setTimeout(flushPersistTabs, 0);
-    };
-
-    const postScrcpySessionAction = async (action: 'heartbeat' | 'release', targetDeviceId: string, sessionId: string) => {
-      if (!targetDeviceId || !sessionId) {
-        return;
-      }
-    
-      try {
-        console.debug('[WebRTC] Session action ->', action, { deviceId: targetDeviceId, sessionId });
-        await apiFetch(`/api/scrcpy-sessions/${action}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deviceId: targetDeviceId, sessionId })
-        });
-      } catch (error) {
-        console.warn(`Failed to ${action} scrcpy session:`, error);
-      }
-    };
-
     const normalizeNewDisplayDpiValue = (value: number | null | undefined) => {
       const numeric = typeof value === 'number' ? value : Number(value);
       if (!Number.isFinite(numeric)) {
@@ -1096,9 +1029,8 @@ export default defineComponent({
       if (!peerConnection || !tabKey) {
         return;
       }
-    
-      window.__aylinkPersistedCastConnections ??= {};
-      window.__aylinkPersistedCastConnections[tabKey] = {
+
+      persistCastConnectionSnapshot(tabKey, {
         tabKey,
         deviceId: deviceId.value,
         appPackageName: appPackageName.value,
@@ -1115,95 +1047,7 @@ export default defineComponent({
         remoteVideoStream,
         remoteAudioStream,
         pendingCandidates: [...pendingCandidates]
-      };
-      disposeOtherPersistedConnections(tabKey);
-    };
-
-    const clearPersistedConnection = (tabKey = activeTabKey.value) => {
-      if (!tabKey || !window.__aylinkPersistedCastConnections) {
-        return;
-      }
-    
-      delete window.__aylinkPersistedCastConnections[tabKey];
-      if (Object.keys(window.__aylinkPersistedCastConnections).length === 0) {
-        window.__aylinkPersistedCastConnections = undefined;
-      }
-    };
-
-    const getPersistedConnection = (tabKey = activeTabKey.value) => {
-      if (!tabKey) {
-        return null;
-      }
-    
-      return window.__aylinkPersistedCastConnections?.[tabKey] ?? null;
-    };
-
-    const disposePersistedConnection = (tabKey: string) => {
-      const persisted = window.__aylinkPersistedCastConnections?.[tabKey];
-      if (!persisted) {
-        return;
-      }
-    
-      try {
-        persisted.dataChannel?.close();
-      } catch {
-      }
-    
-      try {
-        persisted.metaControlChannel?.close();
-      } catch {
-      }
-    
-      try {
-        persisted.pointerMoveChannel?.close();
-      } catch {
-      }
-    
-      try {
-        persisted.peerConnection.ontrack = null;
-        persisted.peerConnection.onicecandidate = null;
-        persisted.peerConnection.onconnectionstatechange = null;
-        persisted.peerConnection.ondatachannel = null;
-        persisted.peerConnection.close();
-      } catch {
-      }
-    
-      try {
-        persisted.ws?.onopen && (persisted.ws.onopen = null);
-        persisted.ws?.onmessage && (persisted.ws.onmessage = null);
-        persisted.ws?.onerror && (persisted.ws.onerror = null);
-        persisted.ws?.onclose && (persisted.ws.onclose = null);
-        persisted.ws?.close();
-      } catch {
-      }
-    
-      clearPersistedConnection(tabKey);
-    };
-
-    const disposeOtherPersistedConnections = (keepTabKey: string) => {
-      const persistedConnections = window.__aylinkPersistedCastConnections;
-      if (!persistedConnections) {
-        return;
-      }
-    
-      for (const tabKey of Object.keys(persistedConnections)) {
-        if (tabKey === keepTabKey) {
-          continue;
-        }
-    
-        disposePersistedConnection(tabKey);
-      }
-    };
-
-    const disposeAllPersistedConnections = () => {
-      const persistedConnections = window.__aylinkPersistedCastConnections;
-      if (!persistedConnections) {
-        return;
-      }
-    
-      for (const tabKey of Object.keys(persistedConnections)) {
-        disposePersistedConnection(tabKey);
-      }
+      });
     };
 
     const restorePersistedConnection = (tabKey = activeTabKey.value) => {
@@ -1218,8 +1062,8 @@ export default defineComponent({
       }
     
       activeConnectionId++;
-      isStartConnectionInFlight = false;
-      activeConnectionTargetKey = tabKey;
+      connectionSchedulerState.isStartConnectionInFlight = false;
+      connectionSchedulerState.activeConnectionTargetKey = tabKey;
       resetSignalingDetachState();
       currentScrcpySessionId = persisted.sessionId ?? '';
       const restoredPeerConnection = persisted.peerConnection;
@@ -1581,20 +1425,6 @@ export default defineComponent({
       persistMenuPlacement();
     };
 
-    const buildTabKey = (tab: Pick<CastTab, 'deviceId' | 'appPackageName' | 'newDisplay'>) => {
-      const mode = tab.newDisplay ? 'new-display' : 'screen';
-      return tab.appPackageName ? `${tab.deviceId}::${mode}::${tab.appPackageName}` : `${tab.deviceId}::${mode}`;
-    };
-
-    const getTabTitle = (tab: CastTab) => {
-      const baseTitle = tab.deviceName || '设备投屏';
-      return tab.appDisplayName ? `${baseTitle} · ${tab.appDisplayName}` : baseTitle;
-    };
-
-    const persistTabs = () => {
-      schedulePersistTabs();
-    };
-
     const syncRefsFromActiveTab = () => {
       const tab = activeTab.value;
       deviceId.value = tab?.deviceId ?? '';
@@ -1604,136 +1434,24 @@ export default defineComponent({
       isNewDisplayMode.value = tab?.newDisplay === true;
     };
 
-    const syncRouteToActiveTab = async () => {
-      if (Object.keys(route.query).length > 0) {
-        await router.replace({ name: 'screencast', query: {} });
-      }
-    };
+    const {
+      fetchDeviceName,
+      fetchDeviceSettings,
+      refreshDeviceContext
+    } = useCastDeviceContext({
+      deviceId,
+      isNewDisplayMode,
+      selectedDeviceName,
+      isFlexDisplayEnabled,
+      isHidKeyboardEnabled,
+      isHidMouseEnabled,
+      activeTab,
+      upsertTab
+    });
 
-    const upsertTab = (tab: CastTab) => {
-      const existingIndex = castTabs.value.findIndex((item) => item.key === tab.key);
-      if (existingIndex >= 0) {
-        castTabs.value[existingIndex] = { ...castTabs.value[existingIndex], ...tab };
-      } else {
-        castTabs.value.push(tab);
-      }
-      persistTabs();
-    };
-
-    const createTabFromQuery = () => {
-      if (!isScreencastRouteActive.value) {
-        return null;
-      }
-    
-      const nextDeviceId = String(route.query.deviceId ?? '').trim();
-      if (!nextDeviceId) return null;
-    
-      const nextAppPackageName = String(route.query.appPackage ?? '').trim();
-      const nextAppDisplayName = String(route.query.appName ?? '').trim();
-      const nextDeviceName = activeTab.value?.deviceId === nextDeviceId ? selectedDeviceName.value : '设备投屏';
-      const nextNewDisplay = String(route.query.newDisplay ?? '').trim() === '1';
-    
-      const nextTab: CastTab = {
-        key: buildTabKey({ deviceId: nextDeviceId, appPackageName: nextAppPackageName, newDisplay: nextNewDisplay }),
-        deviceId: nextDeviceId,
-        appPackageName: nextAppPackageName,
-        appDisplayName: nextAppDisplayName,
-        deviceName: nextDeviceName,
-        newDisplay: nextNewDisplay
-      };
-    
-      return nextTab;
-    };
-
-    const createTabFromRequest = (request: WorkspaceOpenRequest) => {
-      const nextAppPackageName = request.appPackageName ?? '';
-      const nextNewDisplay = request.newDisplay === true;
-      const nextTab: CastTab = {
-        key: buildTabKey({ deviceId: request.deviceId, appPackageName: nextAppPackageName, newDisplay: nextNewDisplay }),
-        deviceId: request.deviceId,
-        appPackageName: nextAppPackageName,
-        appDisplayName: request.appDisplayName ?? '',
-        deviceName: request.deviceName ?? '设备投屏',
-        newDisplay: nextNewDisplay
-      };
-    
-      return nextTab;
-    };
-
-    const openIncomingTab = async (tab: CastTab) => {
-      upsertTab(tab);
-      activeTabKey.value = tab.key;
-      syncRefsFromActiveTab();
-      persistTabs();
-      await syncRouteToActiveTab();
-      await fetchDeviceName();
-      await fetchDeviceSettings();
+    const handleTabOpened = async () => {
+      await refreshDeviceContext();
       scheduleStartConnection();
-    };
-
-    const consumeIncomingTab = async () => {
-      const pendingTab = consumeWorkspaceOpen('screencast');
-      if (pendingTab) {
-        await openIncomingTab(createTabFromRequest(pendingTab));
-        return true;
-      }
-    
-      const routeTab = createTabFromQuery();
-      if (routeTab) {
-        await openIncomingTab(routeTab);
-        return true;
-      }
-    
-      await syncRouteToActiveTab();
-      return false;
-    };
-
-    const fetchDeviceName = async () => {
-      if (!deviceId.value) {
-        selectedDeviceName.value = '设备投屏';
-        return;
-      }
-    
-      try {
-        const response = await apiFetch('/api/devices');
-        if (!response.ok) return;
-        const devices = await response.json();
-        const target = Array.isArray(devices)
-          ? devices.find((item: any) => String(item.Id ?? item.id) === String(deviceId.value))
-          : null;
-        selectedDeviceName.value = target?.Name ?? target?.name ?? target?.Serial ?? target?.serial ?? '设备投屏';
-        if (activeTab.value) {
-          upsertTab({ ...activeTab.value, deviceName: selectedDeviceName.value });
-        }
-      } catch (error) {
-        console.warn('Failed to load device name:', error);
-      }
-    };
-
-    const fetchDeviceSettings = async () => {
-      if (!deviceId.value) {
-        isFlexDisplayEnabled.value = false;
-        isHidKeyboardEnabled.value = false;
-        isHidMouseEnabled.value = false;
-        return;
-      }
-    
-      try {
-        const response = await apiFetch(`/api/devices/${deviceId.value}/settings`);
-        if (!response.ok) {
-          return;
-        }
-    
-        const settings = await response.json();
-        isFlexDisplayEnabled.value = isNewDisplayMode.value && settings?.FlexDisplay === true;
-        isHidKeyboardEnabled.value = settings?.HidKeyboard === true;
-        isHidMouseEnabled.value = settings?.HidMouse === true;
-      } catch (error) {
-        console.warn('Failed to load device settings:', error);
-        isFlexDisplayEnabled.value = false;
-        isHidKeyboardEnabled.value = false;
-        isHidMouseEnabled.value = false;
-      }
     };
 
     const createSyntheticPointerEvent = (pointerId: number, xRatio = 0.5, yRatio = 0.5): PointerEvent | null => {
@@ -1815,10 +1533,7 @@ export default defineComponent({
     };
 
     const clearPendingReconnect = () => {
-      if (pendingReconnectTimer != null) {
-        window.clearTimeout(pendingReconnectTimer);
-        pendingReconnectTimer = null;
-      }
+      clearPendingReconnectTimer(connectionSchedulerState);
     };
 
     const clearPendingIceRestartFallback = () => {
@@ -1849,62 +1564,49 @@ export default defineComponent({
     };
 
     const clearStartConnectionState = () => {
-      isStartConnectionInFlight = false;
-      activeConnectionTargetKey = '';
+      resetStartConnectionState(connectionSchedulerState);
     };
 
     const scheduleReconnect = (reason: string) => {
-      if (suppressAutoReconnect || !activeTab.value || !deviceId.value) {
-        return;
-      }
-      if (pendingReconnectTimer != null || pendingStartConnectionTimer != null) {
-        return;
-      }
-    
-      const delays = [1000, 2000, 5000, 10000];
-      const delayMs = delays[Math.min(reconnectAttempt, delays.length - 1)];
-      reconnectAttempt += 1;
-      isConnecting.value = true;
-      status.value = `连接中断，正在重连 (${reconnectAttempt})...`;
-      console.warn('[WebRTC] Scheduling reconnect:', {
-        reason,
-        attempt: reconnectAttempt,
-        delayMs,
-        deviceId: deviceId.value,
-        tabKey: activeTabKey.value
-      });
-      pendingReconnectTimer = window.setTimeout(() => {
-        pendingReconnectTimer = null;
-        if (suppressAutoReconnect || !activeTab.value || !deviceId.value) {
-          return;
+      scheduleReconnectFlow(reason, {
+        state: connectionSchedulerState,
+        getActiveTabPresent: () => !!activeTab.value,
+        getDeviceId: () => deviceId.value,
+        getActiveTabKey: () => activeTabKey.value,
+        isConnecting,
+        status,
+        startConnection: () => {
+          void startConnection();
         }
-        void startConnection();
-      }, delayMs);
+      });
     };
 
     const enableAutoReconnect = () => {
-      suppressAutoReconnect = false;
+      enableAutoReconnectFlow(connectionSchedulerState);
     };
 
     const disableAutoReconnect = () => {
-      suppressAutoReconnect = true;
-      clearPendingReconnect();
-      clearPendingIceRestartFallback();
-      clearPendingVideoRecovery();
-      resetSignalingDetachState();
-      isIceRestartInFlight = false;
-      clearStartConnectionState();
+      disableAutoReconnectFlow({
+        state: connectionSchedulerState,
+        clearPendingReconnect,
+        clearPendingIceRestartFallback,
+        clearPendingVideoRecovery,
+        resetSignalingDetachState,
+        onIceRestartReset: () => {
+          isIceRestartInFlight = false;
+        }
+      });
     };
 
     const scheduleVideoRecovery = (connectionId: number, reason: string, delayMs = VIDEO_RECOVERY_TIMEOUT_MS) => {
       clearPendingVideoRecovery();
-      if (suppressAutoReconnect) {
+      if (connectionSchedulerState.suppressAutoReconnect) {
         return;
       }
     
       pendingVideoRecoveryTimer = window.setTimeout(() => {
         pendingVideoRecoveryTimer = null;
-        if (suppressAutoReconnect || connectionId !== activeConnectionId) {
+        if (connectionSchedulerState.suppressAutoReconnect || connectionId !== activeConnectionId) {
           return;
         }
     
@@ -1933,7 +1635,7 @@ export default defineComponent({
       clearPendingIceRestartFallback();
       pendingIceRestartFallbackTimer = window.setTimeout(() => {
         pendingIceRestartFallbackTimer = null;
-        if (suppressAutoReconnect || !activeTab.value || !deviceId.value) {
+        if (connectionSchedulerState.suppressAutoReconnect || !activeTab.value || !deviceId.value) {
           return;
         }
         if (isConnected.value) {
@@ -1976,7 +1678,7 @@ export default defineComponent({
     };
 
     const tryIceRestart = async (reason: string) => {
-      if (suppressAutoReconnect || !peerConnection || !ws || ws.readyState !== WebSocket.OPEN) {
+      if (connectionSchedulerState.suppressAutoReconnect || !peerConnection || !ws || ws.readyState !== WebSocket.OPEN) {
         return false;
       }
       if (peerConnection.signalingState !== 'stable') {
@@ -2014,10 +1716,7 @@ export default defineComponent({
     };
 
     const clearPendingStartConnection = () => {
-      if (pendingStartConnectionTimer != null) {
-        window.clearTimeout(pendingStartConnectionTimer);
-        pendingStartConnectionTimer = null;
-      }
+      clearPendingStartConnectionTimer(connectionSchedulerState);
     };
 
     const clearPendingDisplayResize = () => {
@@ -2095,32 +1794,18 @@ export default defineComponent({
     };
 
     const scheduleStartConnection = (delayMs = 0) => {
-      clearPendingStartConnection();
-      if (!deviceId.value) {
-        return;
-      }
-    
-      if (activeConnectionTargetKey === activeTabKey.value && (isStartConnectionInFlight || hasLiveConnection() || isConnecting.value)) {
-        return;
-      }
-    
-      enableAutoReconnect();
-    
-      if (delayMs <= 0) {
-        isStartConnectionInFlight = true;
-        activeConnectionTargetKey = activeTabKey.value;
-        void startConnection(true);
-        return;
-      }
-    
-      status.value = '正在准备 WebRTC 会话...';
-      isConnecting.value = true;
-      pendingStartConnectionTimer = window.setTimeout(() => {
-        pendingStartConnectionTimer = null;
-        isStartConnectionInFlight = true;
-        activeConnectionTargetKey = activeTabKey.value;
-        void startConnection(true);
-      }, delayMs);
+      scheduleStartConnectionFlow(delayMs, {
+        state: connectionSchedulerState,
+        getDeviceId: () => deviceId.value,
+        getActiveTabKey: () => activeTabKey.value,
+        hasLiveConnection,
+        isConnecting,
+        status,
+        enableAutoReconnect,
+        startConnection: () => {
+          void startConnection(true);
+        }
+      });
     };
 
     const syncVideoFrameSize = () => {
@@ -3059,7 +2744,7 @@ export default defineComponent({
           }
           persistCurrentConnection();
     
-          if (trackKind === 'video' && !suppressAutoReconnect) {
+          if (trackKind === 'video' && !connectionSchedulerState.suppressAutoReconnect) {
             console.warn('[WebRTC] Remote video track ended.', {
               deviceId: deviceId.value,
               tabKey: activeTabKey.value,
@@ -3144,7 +2829,7 @@ export default defineComponent({
         clearPendingReconnect();
         clearPendingIceRestartFallback();
         isIceRestartInFlight = false;
-        reconnectAttempt = 0;
+        connectionSchedulerState.reconnectAttempt = 0;
         startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
         startVideoFrameMonitor(connectionId);
         scheduleDisplayResize(150);
@@ -3296,7 +2981,9 @@ export default defineComponent({
       if (!targetTabKey) {
         return;
       }
-      if (!bypassStartGuard && activeConnectionTargetKey === targetTabKey && (isStartConnectionInFlight || hasLiveConnection())) {
+      if (!bypassStartGuard
+        && connectionSchedulerState.activeConnectionTargetKey === targetTabKey
+        && (connectionSchedulerState.isStartConnectionInFlight || hasLiveConnection())) {
         return;
       }
     
@@ -3316,8 +3003,8 @@ export default defineComponent({
       stopConnection();
       enableAutoReconnect();
       resetSignalingDetachState();
-      isStartConnectionInFlight = true;
-      activeConnectionTargetKey = targetTabKey;
+      connectionSchedulerState.isStartConnectionInFlight = true;
+      connectionSchedulerState.activeConnectionTargetKey = targetTabKey;
       isConnecting.value = true;
       status.value = '正在连接设备...';
       pendingCandidates = [];
@@ -3414,8 +3101,8 @@ export default defineComponent({
       queuedPointerReleases.clear();
       pendingPointerMoves.clear();
       pendingPointerControlPayloads.length = 0;
-      isStartConnectionInFlight = false;
-      activeConnectionTargetKey = '';
+      connectionSchedulerState.isStartConnectionInFlight = false;
+      connectionSchedulerState.activeConnectionTargetKey = '';
       stopVideoFrameCaptureLoop();
       resetSignalingDetachState();
       stopPointerControlFlushLoop();
@@ -3466,8 +3153,8 @@ export default defineComponent({
       queuedPointerReleases.clear();
       pendingPointerMoves.clear();
       pendingPointerControlPayloads.length = 0;
-      isStartConnectionInFlight = false;
-      activeConnectionTargetKey = '';
+      connectionSchedulerState.isStartConnectionInFlight = false;
+      connectionSchedulerState.activeConnectionTargetKey = '';
       resetSignalingDetachState();
       stopPointerControlFlushLoop();
       stopPointerReleaseFlushLoop();
@@ -3543,8 +3230,7 @@ export default defineComponent({
       showLastFrameOverlayForTab(tab.key);
       persistTabs();
       await syncRouteToActiveTab();
-      await fetchDeviceName();
-      await fetchDeviceSettings();
+      await refreshDeviceContext();
       if (deviceId.value) {
         scheduleStartConnection();
       }
@@ -3584,42 +3270,8 @@ export default defineComponent({
       persistTabs();
       await syncRouteToActiveTab();
       if (nextTab) {
-        await fetchDeviceName();
-        await fetchDeviceSettings();
+        await refreshDeviceContext();
         scheduleStartConnection();
-      }
-    };
-
-    const loadPersistedTabs = () => {
-      try {
-        const rawTabs = sessionStorage.getItem(CAST_TABS_STORAGE_KEY);
-        const rawActiveTab = sessionStorage.getItem(CAST_ACTIVE_TAB_STORAGE_KEY) ?? '';
-        const parsedTabs = rawTabs ? JSON.parse(rawTabs) : [];
-        if (Array.isArray(parsedTabs)) {
-          castTabs.value = parsedTabs
-            .filter((item): item is CastTab => !!item && typeof item.key === 'string' && typeof item.deviceId === 'string')
-            .map((item) => ({
-              key: item.key,
-              deviceId: item.deviceId,
-              appPackageName: item.appPackageName ?? '',
-              appDisplayName: item.appDisplayName ?? '',
-              deviceName: item.deviceName ?? '设备投屏',
-              newDisplay: item.newDisplay === true
-            }));
-        }
-        activeTabKey.value = castTabs.value.some((item) => item.key === rawActiveTab)
-          ? rawActiveTab
-          : castTabs.value[0]?.key ?? '';
-        syncRefsFromActiveTab();
-        lastPersistedTabsSnapshot = JSON.stringify(castTabs.value);
-        lastPersistedActiveTabKey = activeTabKey.value;
-      } catch (error) {
-        console.warn('Failed to restore cast tabs:', error);
-        castTabs.value = [];
-        activeTabKey.value = '';
-        syncRefsFromActiveTab();
-        lastPersistedTabsSnapshot = JSON.stringify(castTabs.value);
-        lastPersistedActiveTabKey = activeTabKey.value;
       }
     };
 
@@ -4484,7 +4136,7 @@ export default defineComponent({
     watch(
       () => route.query,
       async () => {
-        await consumeIncomingTab();
+        await consumeIncomingTab(selectedDeviceName.value, '设备投屏', syncRefsFromActiveTab, handleTabOpened);
       }
     );
 
@@ -4520,7 +4172,7 @@ export default defineComponent({
 
     onMounted(async () => {
       enableAutoReconnect();
-      loadPersistedTabs();
+      loadPersistedTabs(syncRefsFromActiveTab, '设备投屏');
       loadPersistedMenuPlacement();
       initializeMenuPosition();
       attachPageEventListeners();
@@ -4531,7 +4183,7 @@ export default defineComponent({
         return;
       }
     
-      const consumed = await consumeIncomingTab();
+      const consumed = await consumeIncomingTab(selectedDeviceName.value, '设备投屏', syncRefsFromActiveTab, handleTabOpened);
       if (consumed) {
         hasUsedInitialConnectionWarmup = true;
         return;
@@ -4543,8 +4195,7 @@ export default defineComponent({
       }
     
       if (activeTab.value) {
-        await fetchDeviceName();
-        await fetchDeviceSettings();
+        await refreshDeviceContext();
         if (restorePersistedConnection()) {
           hasUsedInitialConnectionWarmup = true;
           return;
@@ -4568,14 +4219,13 @@ export default defineComponent({
       stopScrcpySessionHeartbeat();
       setupVideoContainerResizeObserver();
     
-      const consumed = await consumeIncomingTab();
+      const consumed = await consumeIncomingTab(selectedDeviceName.value, '设备投屏', syncRefsFromActiveTab, handleTabOpened);
       if (consumed) {
         return;
       }
     
       if (activeTab.value) {
-        await fetchDeviceName();
-        await fetchDeviceSettings();
+        await refreshDeviceContext();
         if (restorePersistedConnection()) {
           return;
         }
@@ -4585,10 +4235,7 @@ export default defineComponent({
 
     onDeactivated(() => {
       disableAutoReconnect();
-      if (pendingPersistTabsTimer != null) {
-        window.clearTimeout(pendingPersistTabsTimer);
-        flushPersistTabs();
-      }
+      cleanupPersistTabs();
       detachPageEventListeners();
       stopPointerMoveFlushLoop();
       stopPointerControlFlushLoop();
@@ -4605,10 +4252,7 @@ export default defineComponent({
 
     onUnmounted(() => {
       disableAutoReconnect();
-      if (pendingPersistTabsTimer != null) {
-        window.clearTimeout(pendingPersistTabsTimer);
-        flushPersistTabs();
-      }
+      cleanupPersistTabs();
       detachPageEventListeners();
       stopPointerMoveFlushLoop();
       stopPointerControlFlushLoop();
@@ -4738,13 +4382,10 @@ export default defineComponent({
       pointerMoveChannel,
       activeMousePointerId,
       lastVideoFrameSize,
-      pendingReconnectTimer,
-      pendingStartConnectionTimer,
-      scrcpySessionHeartbeatTimer,
+      connectionSchedulerState,
       pendingResumePlaybackTimer,
       pendingDisplayResizeTimer,
       flexDisplayHeartbeatTimer,
-      pendingPersistTabsTimer,
       pendingVideoRecoveryTimer,
       pendingSignalingDetachTimer,
       pendingIceRestartFallbackTimer,
@@ -4756,8 +4397,6 @@ export default defineComponent({
       videoFreezeWatchdogTimer,
       lastDisplayResizeRequest,
       videoContainerResizeObserver,
-      lastPersistedTabsSnapshot,
-      lastPersistedActiveTabKey,
       dragStartOffset,
       dragStartPoint,
       isDraggingMenu,
@@ -4776,11 +4415,7 @@ export default defineComponent({
       pointerReleaseFlushHandle,
       pointerControlFlushHandle,
       lastPointerMoveFlushAt,
-      reconnectAttempt,
-      suppressAutoReconnect,
       isIceRestartInFlight,
-      isStartConnectionInFlight,
-      activeConnectionTargetKey,
       detachedSignalingConnectionId,
       expectedSignalingCloseConnectionId,
       currentScrcpySessionId,

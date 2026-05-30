@@ -1,15 +1,8 @@
 import { readSessionJson, removeSessionValue, writeSessionJson } from '../core/storage/browserStorage';
 import { buildWorkspacePendingOpenKey } from '../core/storage/keys';
+import type { WorkspaceOpenRequest, WorkspaceTarget } from '../types/workspace';
 
-export type WorkspaceTarget = 'files' | 'apps' | 'screencast' | 'terminal';
-
-export interface WorkspaceOpenRequest {
-  deviceId: string;
-  deviceName?: string;
-  appPackageName?: string;
-  appDisplayName?: string;
-  newDisplay?: boolean;
-}
+export type { WorkspaceOpenRequest, WorkspaceTarget } from '../types/workspace';
 
 const keyForTarget = (target: WorkspaceTarget) => buildWorkspacePendingOpenKey(target);
 

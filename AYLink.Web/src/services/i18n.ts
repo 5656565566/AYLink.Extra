@@ -1,4 +1,6 @@
 import { readonly, ref } from 'vue';
+import { readLocalString, writeLocalString } from '../core/storage/browserStorage';
+import { storageKeys } from '../core/storage/keys';
 import { getAccessToken } from './auth';
 import { apiFetch } from '../utils/api';
 
@@ -21,10 +23,10 @@ type LanguagePayload = {
 
 type MessageTree = Record<string, unknown>;
 
-const LANGUAGE_STORAGE_KEY = 'aylink.ui.language';
+const LANGUAGE_STORAGE_KEY = storageKeys.app.language;
 const DEFAULT_LOCALE = 'zh-CN';
 
-const currentLocale = ref(localStorage.getItem(LANGUAGE_STORAGE_KEY) || DEFAULT_LOCALE);
+const currentLocale = ref(readLocalString(LANGUAGE_STORAGE_KEY) || DEFAULT_LOCALE);
 const messages = ref<MessageTree>({});
 const languages = ref<LanguageOption[]>([]);
 const isLoadingLanguage = ref(false);
@@ -69,7 +71,7 @@ export async function setLocale(locale: string, persistToServer = true) {
 
   await loadLocaleMessages(locale);
   currentLocale.value = locale;
-  localStorage.setItem(LANGUAGE_STORAGE_KEY, locale);
+  writeLocalString(LANGUAGE_STORAGE_KEY, locale);
   updateDocumentTitle(locale);
 
   if (persistToServer) {

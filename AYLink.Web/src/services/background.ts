@@ -1,6 +1,8 @@
 import { ref } from 'vue';
+import { readLocalBoolean, writeLocalBoolean } from '../core/storage/browserStorage';
+import { storageKeys } from '../core/storage/keys';
 
-const BACKGROUND_ENABLED_KEY = 'aylink.settings.backgroundEnabled';
+const BACKGROUND_ENABLED_KEY = storageKeys.app.backgroundEnabled;
 
 export interface BackgroundImage {
   id: string;
@@ -24,7 +26,7 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export const backgroundEnabled = ref(localStorage.getItem(BACKGROUND_ENABLED_KEY) === 'true');
+export const backgroundEnabled = ref(readLocalBoolean(BACKGROUND_ENABLED_KEY));
 export const backgroundImages = ref<BackgroundImage[]>([]);
 export const currentBackgroundImage = ref<string | null>(null);
 
@@ -87,7 +89,7 @@ export async function removeBackgroundImage(id: string) {
 
 export function setBackgroundEnabled(enabled: boolean) {
   backgroundEnabled.value = enabled;
-  localStorage.setItem(BACKGROUND_ENABLED_KEY, String(enabled));
+  writeLocalBoolean(BACKGROUND_ENABLED_KEY, enabled);
   updateCurrentBackgroundImage();
 }
 

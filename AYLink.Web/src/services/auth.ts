@@ -1,9 +1,11 @@
 import { computed, ref } from 'vue';
+import { readLocalJson, readLocalString, removeLocalValue, writeLocalJson, writeLocalString } from '../core/storage/browserStorage';
+import { storageKeys } from '../core/storage/keys';
 
-const ACCESS_TOKEN_KEY = 'aylink.auth.accessToken';
-const REFRESH_TOKEN_KEY = 'aylink.auth.refreshToken';
-const USER_KEY = 'aylink.auth.user';
-const PERMISSIONS_KEY = 'aylink.auth.permissions';
+const ACCESS_TOKEN_KEY = storageKeys.auth.accessToken;
+const REFRESH_TOKEN_KEY = storageKeys.auth.refreshToken;
+const USER_KEY = storageKeys.auth.user;
+const PERMISSIONS_KEY = storageKeys.auth.permissions;
 
 export interface RoleSummary {
   Id: number;
@@ -29,8 +31,8 @@ interface AuthResponsePayload {
   permissions?: string[];
 }
 
-const accessToken = ref<string>(localStorage.getItem(ACCESS_TOKEN_KEY) || '');
-const refreshToken = ref<string>(localStorage.getItem(REFRESH_TOKEN_KEY) || '');
+const accessToken = ref<string>(readLocalString(ACCESS_TOKEN_KEY) || '');
+const refreshToken = ref<string>(readLocalString(REFRESH_TOKEN_KEY) || '');
 const currentUser = ref<AuthUser | null>(readStoredUser());
 const permissions = ref<string[]>(readStoredPermissions());
 const initialized = ref(false);
@@ -38,6 +40,7 @@ const initialized = ref(false);
 let initializePromise: Promise<void> | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let storageSyncInitialized = false;
+const trackedStorageKeys: readonly string[] = [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY, PERMISSIONS_KEY];
 
 export function useAuth() {
   return {
@@ -111,10 +114,10 @@ export function applyAuthResponse(payload: AuthResponsePayload) {
   currentUser.value = payload.user || null;
   permissions.value = payload.permissions || payload.user?.Permissions || [];
 
-  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken.value);
-  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken.value);
-  localStorage.setItem(USER_KEY, JSON.stringify(currentUser.value));
-  localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions.value));
+  writeLocalString(ACCESS_TOKEN_KEY, accessToken.value);
+  writeLocalString(REFRESH_TOKEN_KEY, refreshToken.value);
+  writeLocalJson(USER_KEY, currentUser.value);
+  writeLocalJson(PERMISSIONS_KEY, permissions.value);
   initialized.value = true;
 }
 
@@ -189,8 +192,8 @@ export async function fetchMe() {
     const payload = await response.json() as { user?: AuthUser; permissions?: string[] };
     currentUser.value = payload.user || null;
     permissions.value = payload.permissions || payload.user?.Permissions || [];
-    localStorage.setItem(USER_KEY, JSON.stringify(currentUser.value));
-    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions.value));
+    writeLocalJson(USER_KEY, currentUser.value);
+    writeLocalJson(PERMISSIONS_KEY, permissions.value);
     return true;
   } catch {
     return false;
@@ -213,6 +216,7 @@ export async function logout() {
       });
     }
   } catch {
+    // Ignore logout request failures because local session cleanup must still complete.
   } finally {
     clearSession();
   }
@@ -223,10 +227,10 @@ export function clearSession() {
   refreshToken.value = '';
   currentUser.value = null;
   permissions.value = [];
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-  localStorage.removeItem(PERMISSIONS_KEY);
+  removeLocalValue(ACCESS_TOKEN_KEY);
+  removeLocalValue(REFRESH_TOKEN_KEY);
+  removeLocalValue(USER_KEY);
+  removeLocalValue(PERMISSIONS_KEY);
 }
 
 export function hasActiveAccessToken() {
@@ -234,8 +238,8 @@ export function hasActiveAccessToken() {
 }
 
 export function syncSessionFromStorage() {
-  accessToken.value = localStorage.getItem(ACCESS_TOKEN_KEY) || '';
-  refreshToken.value = localStorage.getItem(REFRESH_TOKEN_KEY) || '';
+  accessToken.value = readLocalString(ACCESS_TOKEN_KEY) || '';
+  refreshToken.value = readLocalString(REFRESH_TOKEN_KEY) || '';
   currentUser.value = readStoredUser();
   permissions.value = readStoredPermissions();
 }
@@ -247,7 +251,7 @@ function ensureStorageSync() {
 
   storageSyncInitialized = true;
   window.addEventListener('storage', (event) => {
-    if (![ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY, PERMISSIONS_KEY].includes(event.key ?? '')) {
+    if (!trackedStorageKeys.includes(event.key ?? '')) {
       return;
     }
 
@@ -256,19 +260,9 @@ function ensureStorageSync() {
 }
 
 function readStoredUser() {
-  try {
-    const raw = localStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) as AuthUser : null;
-  } catch {
-    return null;
-  }
+  return readLocalJson<AuthUser>(USER_KEY);
 }
 
 function readStoredPermissions() {
-  try {
-    const raw = localStorage.getItem(PERMISSIONS_KEY);
-    return raw ? JSON.parse(raw) as string[] : [];
-  } catch {
-    return [];
-  }
+  return readLocalJson<string[]>(PERMISSIONS_KEY) || [];
 }

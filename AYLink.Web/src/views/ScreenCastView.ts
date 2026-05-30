@@ -93,9 +93,18 @@ export default defineComponent({
       onSent?: () => void;
     }
 
+    interface PersistedFloatingMenuPlacement {
+      isDocked?: boolean;
+      dockedEdge?: DockedEdge;
+      relativeRight?: number;
+      relativeTop?: number;
+    }
+
     const CAST_TABS_STORAGE_KEY = 'aylink_cast_tabs';
 
     const CAST_ACTIVE_TAB_STORAGE_KEY = 'aylink_cast_active_tab';
+
+    const CAST_MENU_PLACEMENT_STORAGE_KEY = 'aylink_cast_menu_placement';
 
     const POINTER_MOVE_BUFFER_LIMIT = 64 * 1024;
 
@@ -140,6 +149,8 @@ export default defineComponent({
     const MENU_EXPANDED_LENGTH = MENU_BUTTON_SIZE + 6 + (MENU_ITEM_COUNT * MENU_ITEM_SIZE) + ((MENU_ITEM_COUNT - 1) * MENU_ITEM_GAP) + 12;
 
     const MENU_COLLAPSED_VISIBLE_WIDTH = 18;
+
+    const MENU_EXPAND_DIRECTION_SWITCH_RATIO = 0.75;
 
     const CLIPBOARD_WINDOW_MARGIN = 16;
 
@@ -345,7 +356,7 @@ export default defineComponent({
 
     const menuY = ref(0);
 
-    const menuRelativeX = ref(1);
+    const menuRelativeX = ref(0);
 
     const menuRelativeY = ref(0.5);
 
@@ -1341,7 +1352,15 @@ export default defineComponent({
       }
     
       if (leftEnough && rightEnough) {
-        return centerRatio <= 0.5 ? 'right' : 'left';
+        if (centerRatio <= (1 - MENU_EXPAND_DIRECTION_SWITCH_RATIO)) {
+          return 'right';
+        }
+
+        if (centerRatio >= MENU_EXPAND_DIRECTION_SWITCH_RATIO) {
+          return 'left';
+        }
+
+        return currentMenuExpandDirection;
       }
     
       return availableRight >= availableLeft ? 'right' : 'left';
@@ -1412,29 +1431,15 @@ export default defineComponent({
       dockedEdge.value = currentMenuExpandDirection === 'left' ? 'right' : 'left';
     };
 
-    const shouldCollapseExpandedMenuWhileDragging = (rawX: number, rawY: number, clampedX: number, clampedY: number) => {
+    const shouldCollapseExpandedMenuWhileDragging = (_event: PointerEvent, _rawX: number, rawY: number, _clampedX: number, clampedY: number) => {
       if (!wasMenuExpandedAtDragStart) {
         return false;
       }
-    
-      const bounds = getStageBounds();
-      const frame = getMenuFrameAt(clampedX, clampedY, true);
-      const minFrameX = bounds.offsetLeft + MENU_MARGIN;
-      const maxFrameX = Math.max(minFrameX, bounds.offsetLeft + bounds.width - frame.width - MENU_MARGIN);
-      const minFrameY = bounds.offsetTop + MENU_MARGIN;
-      const maxFrameY = Math.max(minFrameY, bounds.offsetTop + bounds.height - frame.height - MENU_MARGIN);
-      const hittingLeftEdge = frame.x <= minFrameX;
-      const hittingRightEdge = frame.x >= maxFrameX;
-      const hittingBottomEdge = frame.y >= maxFrameY;
-      const pushingHorizontal = frame.horizontal && (
-        (frame.direction === 'right' && hittingLeftEdge && rawX < clampedX)
-        || (frame.direction === 'left' && hittingRightEdge && rawX > clampedX)
-      );
-      const pushingVertical = !frame.horizontal
-        && hittingBottomEdge
+
+      const wasClampedVertically = Math.abs(rawY - clampedY) > 0.5;
+      return wasClampedVertically
+        && doesVerticalLayoutOverflowAt(rawY)
         && rawY > clampedY;
-    
-      return pushingHorizontal || pushingVertical;
     };
 
     const updateMenuRelativePosition = () => {
@@ -1445,8 +1450,22 @@ export default defineComponent({
       const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH);
       const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
     
-      menuRelativeX.value = maxX <= minX ? 0 : (clamped.x - minX) / (maxX - minX);
+      menuRelativeX.value = maxX <= minX ? 0 : (maxX - clamped.x) / (maxX - minX);
       menuRelativeY.value = maxY <= minY ? 0 : (clamped.y - minY) / (maxY - minY);
+    };
+
+    const persistMenuPlacement = () => {
+      try {
+        const placement: PersistedFloatingMenuPlacement = {
+          isDocked: isDocked.value,
+          dockedEdge: dockedEdge.value,
+          relativeRight: menuRelativeX.value,
+          relativeTop: menuRelativeY.value
+        };
+        localStorage.setItem(CAST_MENU_PLACEMENT_STORAGE_KEY, JSON.stringify(placement));
+      } catch {
+        // ignore local persistence failures
+      }
     };
 
     const setMenuPosition = (x: number, y: number, syncRelative = true) => {
@@ -1462,6 +1481,7 @@ export default defineComponent({
       if (syncRelative) {
         updateMenuRelativePosition();
       }
+      persistMenuPlacement();
     };
 
     const restoreMenuPositionFromRelative = () => {
@@ -1472,10 +1492,42 @@ export default defineComponent({
       const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
     
       setMenuPosition(
-        minX + (maxX - minX) * menuRelativeX.value,
+        maxX - (maxX - minX) * menuRelativeX.value,
         minY + (maxY - minY) * menuRelativeY.value,
         false
       );
+    };
+
+    const loadPersistedMenuPlacement = () => {
+      try {
+        const raw = localStorage.getItem(CAST_MENU_PLACEMENT_STORAGE_KEY);
+        if (!raw) {
+          return;
+        }
+
+        const parsed = JSON.parse(raw) as PersistedFloatingMenuPlacement | null;
+        if (!parsed || typeof parsed !== 'object') {
+          return;
+        }
+
+        if (typeof parsed.relativeRight === 'number' && Number.isFinite(parsed.relativeRight)) {
+          menuRelativeX.value = Math.min(Math.max(parsed.relativeRight, 0), 1);
+        }
+
+        if (typeof parsed.relativeTop === 'number' && Number.isFinite(parsed.relativeTop)) {
+          menuRelativeY.value = Math.min(Math.max(parsed.relativeTop, 0), 1);
+        }
+
+        if (parsed.dockedEdge === 'left' || parsed.dockedEdge === 'right' || parsed.dockedEdge === 'none') {
+          dockedEdge.value = parsed.dockedEdge;
+        }
+
+        if (typeof parsed.isDocked === 'boolean') {
+          isDocked.value = parsed.isDocked;
+        }
+      } catch {
+        // ignore local persistence failures
+      }
     };
 
     const applyDockPosition = (edge: DockedEdge) => {
@@ -1493,7 +1545,7 @@ export default defineComponent({
         setMenuPosition(bounds.offsetLeft + MENU_MARGIN, centeredY);
       } else if (edge === 'right') {
         setMenuPosition(
-          Math.max(bounds.offsetLeft + MENU_MARGIN, bounds.offsetLeft + bounds.width - menuBounds.width - MENU_MARGIN),
+          Math.max(bounds.offsetLeft + MENU_MARGIN, bounds.offsetLeft + bounds.width - MENU_BUTTON_SIZE - MENU_MARGIN),
           centeredY
         );
       }
@@ -1509,10 +1561,11 @@ export default defineComponent({
 
     const resolveDockEdge = () => {
       const bounds = getStageBounds();
-      const menuBounds = getMenuBoundsAt(menuY.value);
+      const leftDockX = bounds.offsetLeft + MENU_MARGIN;
+      const rightDockX = Math.max(leftDockX, bounds.offsetLeft + bounds.width - MENU_BUTTON_SIZE - MENU_MARGIN);
       const distances = [
-        { edge: 'left' as DockedEdge, value: Math.abs(menuX.value - (bounds.offsetLeft + MENU_MARGIN)) },
-        { edge: 'right' as DockedEdge, value: Math.abs(bounds.offsetLeft + bounds.width - (menuX.value + menuBounds.width)) }
+        { edge: 'left' as DockedEdge, value: Math.abs(menuX.value - leftDockX) },
+        { edge: 'right' as DockedEdge, value: Math.abs(menuX.value - rightDockX) }
       ].sort((a, b) => a.value - b.value);
 
       const nearest = distances[0];
@@ -1525,6 +1578,7 @@ export default defineComponent({
         isDocked.value = false;
         setMenuPosition(menuX.value, menuY.value);
       }
+      persistMenuPlacement();
     };
 
     const buildTabKey = (tab: Pick<CastTab, 'deviceId' | 'appPackageName' | 'newDisplay'>) => {
@@ -4060,7 +4114,7 @@ export default defineComponent({
     
       if (isMenuExpanded.value) {
         const expandedPosition = clampExpandedMenuPosition(rawX, rawY);
-        if (shouldCollapseExpandedMenuWhileDragging(rawX, rawY, expandedPosition.x, expandedPosition.y)) {
+        if (shouldCollapseExpandedMenuWhileDragging(event, rawX, rawY, expandedPosition.x, expandedPosition.y)) {
           isMenuExpanded.value = false;
           isMenuHorizontalLocked.value = false;
           setMenuPosition(rawX, rawY);
@@ -4257,8 +4311,6 @@ export default defineComponent({
         initializeMenuPosition();
       } else if (isDocked.value && dockedEdge.value !== 'none') {
         applyDockPosition(dockedEdge.value);
-      } else if (isMenuExpanded.value) {
-        setMenuPosition(menuX.value, menuY.value);
       } else {
         restoreMenuPositionFromRelative();
       }
@@ -4469,6 +4521,7 @@ export default defineComponent({
     onMounted(async () => {
       enableAutoReconnect();
       loadPersistedTabs();
+      loadPersistedMenuPlacement();
       initializeMenuPosition();
       attachPageEventListeners();
       syncBackgroundMuteState();
@@ -4510,6 +4563,7 @@ export default defineComponent({
       enableAutoReconnect();
       attachPageEventListeners();
       syncBackgroundMuteState();
+      loadPersistedMenuPlacement();
       initializeMenuPosition();
       stopScrcpySessionHeartbeat();
       setupVideoContainerResizeObserver();

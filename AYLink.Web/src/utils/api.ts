@@ -13,7 +13,7 @@ type ApiErrorObject = {
 };
 
 function isApiErrorObject(value: unknown): value is ApiErrorObject {
-  return value != null && typeof value === 'object';
+  return value !== null && typeof value === 'object';
 }
 
 export function resolveApiErrorMessage(payload: unknown, fallback: string): string {
@@ -29,7 +29,7 @@ export function resolveApiErrorMessage(payload: unknown, fallback: string): stri
     return payload.error;
   }
 
-  if (payload.error != null && payload.error !== payload) {
+  if (payload.error !== null && payload.error !== undefined && payload.error !== payload) {
     const nestedMessage = resolveApiErrorMessage(payload.error, '');
     if (nestedMessage) {
       return nestedMessage;

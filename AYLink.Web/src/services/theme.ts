@@ -1,9 +1,11 @@
 import { readonly, ref } from 'vue';
+import { readLocalString, removeLocalValue, writeLocalString } from '../core/storage/browserStorage';
+import { storageKeys } from '../core/storage/keys';
 
 export type ThemeMode = 'system' | 'dark' | 'light';
 
-const THEME_MODE_KEY = 'aylink.theme.mode';
-const ACCENT_COLOR_KEY = 'aylink.theme.accentColor';
+const THEME_MODE_KEY = storageKeys.app.themeMode;
+const ACCENT_COLOR_KEY = storageKeys.app.accentColor;
 const DEFAULT_THEME_MODE: ThemeMode = 'system';
 const DEFAULT_ACCENT_COLOR = '#8A2BE2';
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
@@ -41,7 +43,7 @@ export function useTheme() {
 
 function setThemeMode(mode: ThemeMode) {
   themeMode.value = mode;
-  localStorage.setItem(THEME_MODE_KEY, mode);
+  writeLocalString(THEME_MODE_KEY, mode);
   applyTheme();
 }
 
@@ -51,25 +53,25 @@ function setAccentColor(color: string) {
   }
 
   accentColor.value = color.toUpperCase();
-  localStorage.setItem(ACCENT_COLOR_KEY, accentColor.value);
+  writeLocalString(ACCENT_COLOR_KEY, accentColor.value);
   applyTheme();
 }
 
 function resetTheme() {
   themeMode.value = DEFAULT_THEME_MODE;
   accentColor.value = DEFAULT_ACCENT_COLOR;
-  localStorage.removeItem(THEME_MODE_KEY);
-  localStorage.removeItem(ACCENT_COLOR_KEY);
+  removeLocalValue(THEME_MODE_KEY);
+  removeLocalValue(ACCENT_COLOR_KEY);
   applyTheme();
 }
 
 function loadThemeMode(): ThemeMode {
-  const savedMode = localStorage.getItem(THEME_MODE_KEY);
+  const savedMode = readLocalString(THEME_MODE_KEY);
   return isThemeMode(savedMode) ? savedMode : DEFAULT_THEME_MODE;
 }
 
 function loadAccentColor() {
-  const savedColor = localStorage.getItem(ACCENT_COLOR_KEY);
+  const savedColor = readLocalString(ACCENT_COLOR_KEY);
   return savedColor && HEX_COLOR_PATTERN.test(savedColor)
     ? savedColor.toUpperCase()
     : DEFAULT_ACCENT_COLOR;

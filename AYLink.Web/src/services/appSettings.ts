@@ -1,8 +1,10 @@
 import { readonly, ref } from 'vue';
+import { readLocalBoolean, readLocalString, writeLocalBoolean, writeLocalString } from '../core/storage/browserStorage';
+import { storageKeys } from '../core/storage/keys';
 
-const BACKGROUND_MUTE_KEY = 'aylink.settings.backgroundMute';
-const NEW_DISPLAY_DPI_MODE_KEY = 'aylink.settings.newDisplayDpiMode';
-const NEW_DISPLAY_DPI_VALUE_KEY = 'aylink.settings.newDisplayDpiValue';
+const BACKGROUND_MUTE_KEY = storageKeys.app.backgroundMute;
+const NEW_DISPLAY_DPI_MODE_KEY = storageKeys.app.newDisplayDpiMode;
+const NEW_DISPLAY_DPI_VALUE_KEY = storageKeys.app.newDisplayDpiValue;
 
 export type NewDisplayDpiMode = 'disabled' | 'auto' | 'custom';
 
@@ -23,11 +25,11 @@ export function useAppSettings() {
 
 function setBackgroundMute(enabled: boolean) {
   backgroundMute.value = enabled;
-  localStorage.setItem(BACKGROUND_MUTE_KEY, String(enabled));
+  writeLocalBoolean(BACKGROUND_MUTE_KEY, enabled);
 }
 
 function loadBackgroundMute() {
-  return localStorage.getItem(BACKGROUND_MUTE_KEY) === 'true';
+  return readLocalBoolean(BACKGROUND_MUTE_KEY);
 }
 
 function setNewDisplayDpiMode(mode: NewDisplayDpiMode) {
@@ -38,17 +40,17 @@ function setNewDisplayDpiMode(mode: NewDisplayDpiMode) {
   } else {
     newDisplayDpiMode.value = 'disabled';
   }
-  localStorage.setItem(NEW_DISPLAY_DPI_MODE_KEY, newDisplayDpiMode.value);
+  writeLocalString(NEW_DISPLAY_DPI_MODE_KEY, newDisplayDpiMode.value);
 }
 
 function setNewDisplayDpiValue(value: number) {
   const normalized = normalizeNewDisplayDpiValue(value);
   newDisplayDpiValue.value = normalized;
-  localStorage.setItem(NEW_DISPLAY_DPI_VALUE_KEY, String(normalized));
+  writeLocalString(NEW_DISPLAY_DPI_VALUE_KEY, String(normalized));
 }
 
 function loadNewDisplayDpiMode(): NewDisplayDpiMode {
-  const value = localStorage.getItem(NEW_DISPLAY_DPI_MODE_KEY);
+  const value = readLocalString(NEW_DISPLAY_DPI_MODE_KEY);
   if (value === 'custom') {
     return 'custom';
   }
@@ -59,7 +61,7 @@ function loadNewDisplayDpiMode(): NewDisplayDpiMode {
 }
 
 function loadNewDisplayDpiValue() {
-  return normalizeNewDisplayDpiValue(Number(localStorage.getItem(NEW_DISPLAY_DPI_VALUE_KEY) ?? 320));
+  return normalizeNewDisplayDpiValue(Number(readLocalString(NEW_DISPLAY_DPI_VALUE_KEY) ?? 320));
 }
 
 function normalizeNewDisplayDpiValue(value: number) {

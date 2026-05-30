@@ -1,5 +1,8 @@
-const LOCAL_WEBRTC_OVERRIDE_ENABLED_KEY = 'aylink.webrtc.override.enabled';
-const LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY = 'aylink.webrtc.override.config';
+import { readLocalBoolean, readLocalJson, removeLocalValue, writeLocalBoolean, writeLocalJson } from '../core/storage/browserStorage';
+import { buildScopedStorageKey, storageKeys } from '../core/storage/keys';
+
+const LOCAL_WEBRTC_OVERRIDE_ENABLED_KEY = storageKeys.webrtc.overrideEnabled;
+const LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY = storageKeys.webrtc.overrideConfig;
 
 export interface WebRtcIceServerPayload {
   Urls?: string[];
@@ -19,35 +22,22 @@ export interface WebRtcNetworkSettingsPayload {
   SinglePortMuxPublishPort?: number | null;
 }
 
-function buildScopedKey(baseKey: string, scope = 'anonymous') {
-  return `${baseKey}.${scope}`;
-}
-
 export function loadLocalWebRtcOverrideEnabled(scope?: string) {
-  return localStorage.getItem(buildScopedKey(LOCAL_WEBRTC_OVERRIDE_ENABLED_KEY, scope)) === 'true';
+  return readLocalBoolean(buildScopedStorageKey(LOCAL_WEBRTC_OVERRIDE_ENABLED_KEY, scope));
 }
 
 export function setLocalWebRtcOverrideEnabled(enabled: boolean, scope?: string) {
-  localStorage.setItem(buildScopedKey(LOCAL_WEBRTC_OVERRIDE_ENABLED_KEY, scope), String(enabled));
+  writeLocalBoolean(buildScopedStorageKey(LOCAL_WEBRTC_OVERRIDE_ENABLED_KEY, scope), enabled);
 }
 
 export function loadLocalWebRtcOverrideConfig(scope?: string): WebRtcNetworkSettingsPayload | null {
-  const raw = localStorage.getItem(buildScopedKey(LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY, scope));
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw) as WebRtcNetworkSettingsPayload;
-  } catch {
-    return null;
-  }
+  return readLocalJson<WebRtcNetworkSettingsPayload>(buildScopedStorageKey(LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY, scope));
 }
 
 export function saveLocalWebRtcOverrideConfig(payload: WebRtcNetworkSettingsPayload, scope?: string) {
-  localStorage.setItem(buildScopedKey(LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY, scope), JSON.stringify(payload));
+  writeLocalJson(buildScopedStorageKey(LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY, scope), payload);
 }
 
 export function clearLocalWebRtcOverrideConfig(scope?: string) {
-  localStorage.removeItem(buildScopedKey(LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY, scope));
+  removeLocalValue(buildScopedStorageKey(LOCAL_WEBRTC_OVERRIDE_CONFIG_KEY, scope));
 }

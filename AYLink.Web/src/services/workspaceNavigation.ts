@@ -1,3 +1,6 @@
+import { readSessionJson, removeSessionValue, writeSessionJson } from '../core/storage/browserStorage';
+import { buildWorkspacePendingOpenKey } from '../core/storage/keys';
+
 export type WorkspaceTarget = 'files' | 'apps' | 'screencast' | 'terminal';
 
 export interface WorkspaceOpenRequest {
@@ -8,38 +11,29 @@ export interface WorkspaceOpenRequest {
   newDisplay?: boolean;
 }
 
-const keyForTarget = (target: WorkspaceTarget) => `aylink_pending_${target}_open`;
+const keyForTarget = (target: WorkspaceTarget) => buildWorkspacePendingOpenKey(target);
 
 export function requestWorkspaceOpen(target: WorkspaceTarget, request: WorkspaceOpenRequest) {
-  sessionStorage.setItem(keyForTarget(target), JSON.stringify({
+  writeSessionJson(keyForTarget(target), {
     ...request,
     createdAt: Date.now(),
-  }));
+  });
 }
 
 export function consumeWorkspaceOpen(target: WorkspaceTarget): WorkspaceOpenRequest | null {
   const key = keyForTarget(target);
-  const raw = sessionStorage.getItem(key);
-  sessionStorage.removeItem(key);
+  const parsed = readSessionJson<WorkspaceOpenRequest>(key);
+  removeSessionValue(key);
 
-  if (!raw) {
+  if (!parsed || !parsed.deviceId) {
     return null;
   }
 
-  try {
-    const parsed = JSON.parse(raw) as WorkspaceOpenRequest;
-    if (!parsed || !parsed.deviceId) {
-      return null;
-    }
-
-    return {
-      deviceId: String(parsed.deviceId),
-      deviceName: parsed.deviceName ? String(parsed.deviceName) : undefined,
-      appPackageName: parsed.appPackageName ? String(parsed.appPackageName) : undefined,
-      appDisplayName: parsed.appDisplayName ? String(parsed.appDisplayName) : undefined,
-      newDisplay: parsed.newDisplay === true,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    deviceId: String(parsed.deviceId),
+    deviceName: parsed.deviceName ? String(parsed.deviceName) : undefined,
+    appPackageName: parsed.appPackageName ? String(parsed.appPackageName) : undefined,
+    appDisplayName: parsed.appDisplayName ? String(parsed.appDisplayName) : undefined,
+    newDisplay: parsed.newDisplay === true,
+  };
 }

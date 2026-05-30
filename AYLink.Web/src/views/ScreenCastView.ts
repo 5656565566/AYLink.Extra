@@ -33,6 +33,9 @@ import { useCastDeviceContext } from '../features/screencast/useCastDeviceContex
 import { useCastTabs } from '../features/screencast/useCastTabs';
 import { useCastSessionPersistence } from '../features/screencast/useCastSessionPersistence';
 import type { CastTab } from '../types/screencast';
+import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
+import { createLatestRequestController } from '../lib/async/latestRequest';
+import { isAbortError } from '../lib/async/abort';
 
 declare global {
   interface Window {
@@ -234,6 +237,12 @@ export default defineComponent({
     const audioElement = ref<HTMLAudioElement | null>(null);
 
     const videoContainer = ref<HTMLDivElement | null>(null);
+
+    let isPageEventListenersAttached = false;
+
+    let attachedVideoElement: HTMLVideoElement | null = null;
+    const rtcConfigRequest = createLatestRequestController();
+    const clipboardRequest = createLatestRequestController();
 
     const clipboardFloatElement = ref<HTMLDivElement | null>(null);
 
@@ -625,22 +634,34 @@ export default defineComponent({
     };
 
     const loadRtcConfiguration = async (): Promise<RTCConfiguration> => {
+      const { requestId, signal } = rtcConfigRequest.begin();
       const localOverrideEnabled = loadLocalWebRtcOverrideEnabled(localWebRtcScope.value);
       const localOverrideConfig = loadLocalWebRtcOverrideConfig(localWebRtcScope.value);
       if (localOverrideEnabled && localOverrideConfig) {
+        rtcConfigRequest.finalize(requestId);
         return getRtcConfigurationFromSettings(localOverrideConfig);
       }
     
       try {
-        const response = await apiFetch('/api/control/webrtc-network');
+        const response = await apiFetch('/api/control/webrtc-network', {
+          signal,
+          timeoutMs: 15000,
+        });
+        if (!rtcConfigRequest.isLatest(requestId)) {
+          return getDefaultRtcConfiguration();
+        }
         if (!response.ok) {
           return getDefaultRtcConfiguration();
         }
     
         return getRtcConfigurationFromSettings(await response.json());
       } catch (error) {
-        console.warn('Failed to load WebRTC network settings:', error);
+        if (!isAbortError(error)) {
+          console.warn('Failed to load WebRTC network settings:', error);
+        }
         return getDefaultRtcConfiguration();
+      } finally {
+        rtcConfigRequest.finalize(requestId);
       }
     };
 
@@ -1057,6 +1078,12 @@ export default defineComponent({
       }
     
       if ((persisted.ws && persisted.ws.readyState >= WebSocket.CLOSING) || persisted.peerConnection.connectionState === 'closed') {
+        console.warn('[WebRTC] Discarding stale persisted connection snapshot.', {
+          tabKey,
+          deviceId: persisted.deviceId,
+          hasSocket: !!persisted.ws,
+          peerConnectionState: persisted.peerConnection.connectionState
+        });
         disposePersistedConnection(tabKey);
         return false;
       }
@@ -1437,7 +1464,8 @@ export default defineComponent({
     const {
       fetchDeviceName,
       fetchDeviceSettings,
-      refreshDeviceContext
+      refreshDeviceContext,
+      cancelDeviceContextRequests
     } = useCastDeviceContext({
       deviceId,
       isNewDisplayMode,
@@ -2507,8 +2535,11 @@ export default defineComponent({
     };
 
     const readClipboard = async () => {
-      if (!deviceId.value) {
+      const { requestId, signal } = clipboardRequest.begin();
+      const targetDeviceId = normalizeDeviceId(deviceId.value);
+      if (!targetDeviceId) {
         clipboardStatusText.value = '未选中设备';
+        clipboardRequest.finalize(requestId);
         return;
       }
     
@@ -2516,7 +2547,13 @@ export default defineComponent({
       clipboardStatusText.value = '正在读取...';
     
       try {
-        const response = await apiFetch(`/api/devices/${deviceId.value}/clipboard`);
+        const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
+          signal,
+          timeoutMs: 15000,
+        });
+        if (!clipboardRequest.isLatest(requestId)) {
+          return;
+        }
         if (!response.ok) {
           clipboardStatusText.value = await readApiErrorMessage(response, '读取失败');
           return;
@@ -2526,16 +2563,27 @@ export default defineComponent({
         applyRemoteClipboardText(String(payload.text ?? ''));
         clipboardStatusText.value = '读取成功';
       } catch (error) {
-        console.error('Failed to load remote clipboard:', error);
-        clipboardStatusText.value = '读取失败';
+        if (!isAbortError(error)) {
+          console.error('Failed to load remote clipboard:', {
+            deviceId: targetDeviceId,
+            error
+          });
+          clipboardStatusText.value = '读取失败';
+        }
       } finally {
-        isClipboardLoading.value = false;
+        if (clipboardRequest.isLatest(requestId)) {
+          isClipboardLoading.value = false;
+        }
+        clipboardRequest.finalize(requestId);
       }
     };
 
     const syncClipboard = async () => {
-      if (!deviceId.value) {
+      const { requestId, signal } = clipboardRequest.begin();
+      const targetDeviceId = normalizeDeviceId(deviceId.value);
+      if (!targetDeviceId) {
         clipboardStatusText.value = '未选中设备';
+        clipboardRequest.finalize(requestId);
         return;
       }
     
@@ -2543,8 +2591,10 @@ export default defineComponent({
       clipboardStatusText.value = '正在同步...';
     
       try {
-        const response = await apiFetch(`/api/devices/${deviceId.value}/clipboard`, {
+        const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
           method: 'PUT',
+          signal,
+          timeoutMs: 15000,
           headers: {
             'Content-Type': 'application/json'
           },
@@ -2552,22 +2602,36 @@ export default defineComponent({
             text: clipboardText.value
           })
         });
+        if (!clipboardRequest.isLatest(requestId)) {
+          return;
+        }
         if (!response.ok) {
           clipboardStatusText.value = await readApiErrorMessage(response, '同步失败');
           return;
         }
         clipboardStatusText.value = '已同步';
       } catch (error) {
-        console.error('Failed to save remote clipboard:', error);
-        clipboardStatusText.value = '同步失败';
+        if (!isAbortError(error)) {
+          console.error('Failed to save remote clipboard:', {
+            deviceId: targetDeviceId,
+            error
+          });
+          clipboardStatusText.value = '同步失败';
+        }
       } finally {
-        isClipboardSaving.value = false;
+        if (clipboardRequest.isLatest(requestId)) {
+          isClipboardSaving.value = false;
+        }
+        clipboardRequest.finalize(requestId);
       }
     };
 
     const pasteClipboard = async () => {
-      if (!deviceId.value) {
+      const { requestId, signal } = clipboardRequest.begin();
+      const targetDeviceId = normalizeDeviceId(deviceId.value);
+      if (!targetDeviceId) {
         clipboardStatusText.value = '未选中设备';
+        clipboardRequest.finalize(requestId);
         return;
       }
     
@@ -2575,8 +2639,10 @@ export default defineComponent({
       clipboardStatusText.value = '正在粘贴...';
     
       try {
-        const response = await apiFetch(`/api/devices/${deviceId.value}/clipboard`, {
+        const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
           method: 'POST',
+          signal,
+          timeoutMs: 15000,
           headers: {
             'Content-Type': 'application/json'
           },
@@ -2584,16 +2650,27 @@ export default defineComponent({
             text: clipboardText.value
           })
         });
+        if (!clipboardRequest.isLatest(requestId)) {
+          return;
+        }
         if (!response.ok) {
           clipboardStatusText.value = await readApiErrorMessage(response, '粘贴失败');
           return;
         }
         clipboardStatusText.value = '已发送粘贴';
       } catch (error) {
-        console.error('Failed to paste remote clipboard:', error);
-        clipboardStatusText.value = '粘贴失败';
+        if (!isAbortError(error)) {
+          console.error('Failed to paste remote clipboard:', {
+            deviceId: targetDeviceId,
+            error
+          });
+          clipboardStatusText.value = '粘贴失败';
+        }
       } finally {
-        isClipboardSaving.value = false;
+        if (clipboardRequest.isLatest(requestId)) {
+          isClipboardSaving.value = false;
+        }
+        clipboardRequest.finalize(requestId);
       }
     };
 
@@ -3015,12 +3092,17 @@ export default defineComponent({
         const host = window.location.host;
         let wsUrl = import.meta.env.DEV ? 'ws://127.0.0.1:5501/webrtc' : `${protocol}//${host}/webrtc`;
         const initialNewDisplaySize = isNewDisplayMode.value ? buildAdaptiveDisplaySize() : null;
+        const normalizedDeviceId = normalizeDeviceId(deviceId.value);
+        const normalizedAppPackage = normalizePackageName(appPackageName.value);
+        if (!normalizedDeviceId) {
+          throw new Error('invalid device id for screencast connection');
+        }
         const ticketResponse = await apiFetch('/api/webrtc-ticket', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              deviceId: deviceId.value,
-              appPackage: appPackageName.value || undefined,
+              deviceId: normalizedDeviceId,
+              appPackage: normalizedAppPackage || undefined,
               appName: appDisplayName.value || undefined,
               newDisplay: isNewDisplayMode.value,
               newDisplayWidth: initialNewDisplaySize?.width,
@@ -3987,6 +4069,19 @@ export default defineComponent({
     };
 
     const attachPageEventListeners = () => {
+      if (isPageEventListenersAttached) {
+        if (attachedVideoElement !== videoElement.value) {
+          attachedVideoElement?.removeEventListener('loadedmetadata', handleVideoMetadataLoaded);
+          attachedVideoElement?.removeEventListener('resize', handleVideoResize);
+          attachedVideoElement?.removeEventListener('timeupdate', handleVideoTimeUpdate);
+          attachedVideoElement = videoElement.value;
+          attachedVideoElement?.addEventListener('loadedmetadata', handleVideoMetadataLoaded);
+          attachedVideoElement?.addEventListener('resize', handleVideoResize);
+          attachedVideoElement?.addEventListener('timeupdate', handleVideoTimeUpdate);
+        }
+        return;
+      }
+
       window.addEventListener('pointermove', handleWindowPointerMove);
       window.addEventListener('pointerup', handleWindowPointerUp);
       window.addEventListener('pointercancel', handleWindowPointerCancel);
@@ -4002,12 +4097,18 @@ export default defineComponent({
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('pointerlockchange', handlePointerLockChange);
       window.addEventListener('resize', handleWindowResize);
-      videoElement.value?.addEventListener('loadedmetadata', handleVideoMetadataLoaded);
-      videoElement.value?.addEventListener('resize', handleVideoResize);
-      videoElement.value?.addEventListener('timeupdate', handleVideoTimeUpdate);
+      attachedVideoElement = videoElement.value;
+      attachedVideoElement?.addEventListener('loadedmetadata', handleVideoMetadataLoaded);
+      attachedVideoElement?.addEventListener('resize', handleVideoResize);
+      attachedVideoElement?.addEventListener('timeupdate', handleVideoTimeUpdate);
+      isPageEventListenersAttached = true;
     };
 
     const detachPageEventListeners = () => {
+      if (!isPageEventListenersAttached && !attachedVideoElement) {
+        return;
+      }
+
       window.removeEventListener('pointermove', handleWindowPointerMove);
       window.removeEventListener('pointerup', handleWindowPointerUp);
       window.removeEventListener('pointercancel', handleWindowPointerCancel);
@@ -4023,9 +4124,11 @@ export default defineComponent({
       window.removeEventListener('pageshow', handlePageShow);
       document.removeEventListener('pointerlockchange', handlePointerLockChange);
       window.removeEventListener('resize', handleWindowResize);
-      videoElement.value?.removeEventListener('loadedmetadata', handleVideoMetadataLoaded);
-      videoElement.value?.removeEventListener('resize', handleVideoResize);
-      videoElement.value?.removeEventListener('timeupdate', handleVideoTimeUpdate);
+      attachedVideoElement?.removeEventListener('loadedmetadata', handleVideoMetadataLoaded);
+      attachedVideoElement?.removeEventListener('resize', handleVideoResize);
+      attachedVideoElement?.removeEventListener('timeupdate', handleVideoTimeUpdate);
+      attachedVideoElement = null;
+      isPageEventListenersAttached = false;
     };
 
     const setupVideoContainerResizeObserver = () => {
@@ -4170,6 +4273,32 @@ export default defineComponent({
       }
     );
 
+    const cleanupCastViewResources = (preserveForBackground: boolean) => {
+      rtcConfigRequest.dispose();
+      clipboardRequest.dispose();
+      cancelDeviceContextRequests();
+      disableAutoReconnect();
+      cleanupPersistTabs();
+      detachPageEventListeners();
+      stopPointerMoveFlushLoop();
+      stopPointerControlFlushLoop();
+      stopPointerReleaseFlushLoop();
+      teardownVideoContainerResizeObserver();
+      stopFlexDisplayHeartbeat();
+      void releaseMouseLock();
+      releaseAllPointers('cancel');
+      stopScrcpySessionHeartbeat();
+
+      if (!preserveForBackground) {
+        void postScrcpySessionAction('release', deviceId.value, currentScrcpySessionId);
+      }
+
+      stopConnection(preserveForBackground);
+      if (preserveForBackground) {
+        showLastFrameOverlayForTab();
+      }
+    };
+
     onMounted(async () => {
       enableAutoReconnect();
       loadPersistedTabs(syncRefsFromActiveTab, '设备投屏');
@@ -4234,36 +4363,11 @@ export default defineComponent({
     });
 
     onDeactivated(() => {
-      disableAutoReconnect();
-      cleanupPersistTabs();
-      detachPageEventListeners();
-      stopPointerMoveFlushLoop();
-      stopPointerControlFlushLoop();
-      stopPointerReleaseFlushLoop();
-      teardownVideoContainerResizeObserver();
-      stopFlexDisplayHeartbeat();
-      void releaseMouseLock();
-      releaseAllPointers('cancel');
-      captureCurrentVideoFrame();
-      stopScrcpySessionHeartbeat();
-      stopConnection(true);
-      showLastFrameOverlayForTab();
+      cleanupCastViewResources(true);
     });
 
     onUnmounted(() => {
-      disableAutoReconnect();
-      cleanupPersistTabs();
-      detachPageEventListeners();
-      stopPointerMoveFlushLoop();
-      stopPointerControlFlushLoop();
-      stopPointerReleaseFlushLoop();
-      teardownVideoContainerResizeObserver();
-      stopFlexDisplayHeartbeat();
-      void releaseMouseLock();
-      releaseAllPointers('cancel');
-      stopScrcpySessionHeartbeat();
-      void postScrcpySessionAction('release', deviceId.value, currentScrcpySessionId);
-      stopConnection();
+      cleanupCastViewResources(false);
     });
 
     return {

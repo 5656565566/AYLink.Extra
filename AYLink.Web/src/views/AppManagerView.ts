@@ -11,6 +11,8 @@ import { useNotification } from '../services/notification';
 import type { AppDetails, AppInfo } from '../types/apps';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
+import { triggerBlobDownload, writeClipboardText } from '../lib/browser/operations';
+import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
 
 export default defineComponent({
   name: 'AppManagerView',
@@ -150,6 +152,7 @@ export default defineComponent({
     };
 
     const activeDeviceId = computed(() => deviceId.value);
+    const normalizedActiveDeviceId = computed(() => normalizeDeviceId(activeDeviceId.value));
 
     const showSuccess = (message: string) => {
       notifications.show({
@@ -180,10 +183,15 @@ export default defineComponent({
     };
 
     const installApk = async (file: File) => {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+
       const formData = new FormData();
       formData.append('file', file, file.name);
 
-      const response = await apiFetch(`/api/devices/${activeDeviceId.value}/apps/install`, {
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/install`, {
         method: 'POST',
         body: formData
       });
@@ -211,31 +219,42 @@ export default defineComponent({
     };
 
     const downloadApp = async (app: AppInfo) => {
-      const response = await apiFetch(`/api/devices/${activeDeviceId.value}/apps/download`, {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      const packageName = normalizePackageName(app.PackageName);
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+      if (!packageName) {
+        throw new Error(t('AppPage.InvalidPackageName', '无效的应用包名'));
+      }
+
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageName: app.PackageName })
+        body: JSON.stringify({ packageName })
       });
       if (!response.ok) {
         throw new Error(await getResponseErrorMessage(response, t('AppPage.DownloadFailed', 'APK 下载失败')));
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `${app.PackageName || 'app'}.apk`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+      triggerBlobDownload(blob, `${packageName}.apk`, 'app.apk');
     };
 
     const launchApp = async (app: AppInfo) => {
-      const response = await apiFetch(`/api/devices/${activeDeviceId.value}/apps/launch`, {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      const packageName = normalizePackageName(app.PackageName);
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+      if (!packageName) {
+        throw new Error(t('AppPage.InvalidPackageName', '无效的应用包名'));
+      }
+
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/launch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageName: app.PackageName })
+        body: JSON.stringify({ packageName })
       });
       if (!response.ok) {
         throw new Error(await getResponseErrorMessage(response, t('AppPage.LaunchFailed', '应用启动失败')));
@@ -253,10 +272,19 @@ export default defineComponent({
         return;
       }
 
-      const response = await apiFetch(`/api/devices/${activeDeviceId.value}/apps/uninstall`, {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      const packageName = normalizePackageName(app.PackageName);
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+      if (!packageName) {
+        throw new Error(t('AppPage.InvalidPackageName', '无效的应用包名'));
+      }
+
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/uninstall`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageName: app.PackageName })
+        body: JSON.stringify({ packageName })
       });
       if (!response.ok) {
         throw new Error(await getResponseErrorMessage(response, t('AppPage.UninstallFailed', '应用卸载失败')));
@@ -268,6 +296,15 @@ export default defineComponent({
     };
 
     const openAppInfo = async (app: AppInfo) => {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      const packageName = normalizePackageName(app.PackageName);
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+      if (!packageName) {
+        throw new Error(t('AppPage.InvalidPackageName', '无效的应用包名'));
+      }
+
       appInfoDialog.value = {
         show: true,
         loading: true,
@@ -276,10 +313,10 @@ export default defineComponent({
       };
 
       try {
-        const response = await apiFetch(`/api/devices/${activeDeviceId.value}/apps/info`, {
+        const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/info`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packageName: app.PackageName })
+          body: JSON.stringify({ packageName })
         });
         if (!response.ok) {
           throw new Error(await getResponseErrorMessage(response, t('AppPage.InfoLoadFailed', '应用信息加载失败')));
@@ -337,7 +374,7 @@ export default defineComponent({
               showSuccess(t('AppPage.DownloadSuccess', 'APK 下载已开始'));
               break;
             case 'copy-pkg':
-              await navigator.clipboard.writeText(app.PackageName);
+              await writeClipboardText(normalizePackageName(app.PackageName));
               showSuccess(t('AppPage.CopyPkgSuccess', '包名已复制'));
               break;
             case 'uninstall':

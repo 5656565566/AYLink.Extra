@@ -1,6 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from '../../composables/useI18n';
 import { persistSessionTabs, restoreSessionTabs } from '../workspace/sessionTabs';
@@ -8,12 +8,15 @@ import { getAccessToken } from '../../services/auth';
 import { useTheme } from '../../services/theme';
 import { consumeWorkspaceOpen, type WorkspaceOpenRequest } from '../../services/workspaceNavigation';
 import type { PersistedTerminalTab, TerminalTab } from '../../types/terminal';
+import { normalizeDeviceId } from '../../lib/input/normalize';
 
 interface TerminalRuntime {
   term: Terminal;
   fitAddon: FitAddon;
   socket: WebSocket | null;
   pingTimer: number | null;
+  inputSubscription: { dispose: () => void };
+  resizeSubscription: { dispose: () => void };
 }
 
 const STORAGE_KEY = 'aylink_terminal_tabs';
@@ -36,6 +39,7 @@ export function useTerminalWorkspace() {
   const activeTabKey = ref('');
   const terminalHosts = new Map<string, HTMLDivElement | null>();
   const runtimes = new Map<string, TerminalRuntime>();
+  let isWindowResizeAttached = false;
 
   const isTerminalRouteActive = computed(() => route.name === 'terminal');
   const activeTab = computed(() => tabs.value.find((tab) => tab.key === activeTabKey.value) ?? null);
@@ -116,11 +120,46 @@ export function useTerminalWorkspace() {
 
     if (runtime.pingTimer !== null) {
       window.clearInterval(runtime.pingTimer);
+      runtime.pingTimer = null;
     }
 
     runtime.socket?.close();
+    if (runtime.socket) {
+      runtime.socket.onopen = null;
+      runtime.socket.onmessage = null;
+      runtime.socket.onerror = null;
+      runtime.socket.onclose = null;
+      runtime.socket = null;
+    }
+
+    runtime.inputSubscription.dispose();
+    runtime.resizeSubscription.dispose();
     runtime.term.dispose();
     runtimes.delete(key);
+  };
+
+  const clearAllRuntimes = () => {
+    for (const key of [...runtimes.keys()]) {
+      clearRuntime(key);
+    }
+  };
+
+  const attachWindowResizeListener = () => {
+    if (isWindowResizeAttached) {
+      return;
+    }
+
+    window.addEventListener('resize', fitActiveTab);
+    isWindowResizeAttached = true;
+  };
+
+  const detachWindowResizeListener = () => {
+    if (!isWindowResizeAttached) {
+      return;
+    }
+
+    window.removeEventListener('resize', fitActiveTab);
+    isWindowResizeAttached = false;
   };
 
   const sendSocketMessage = (key: string, payload: Record<string, unknown>) => {
@@ -145,10 +184,11 @@ export function useTerminalWorkspace() {
   };
 
   const buildWebSocketUrl = (deviceId: string) => {
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
     const token = getAccessToken();
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const query = token ? `?token=${encodeURIComponent(token)}` : '';
-    return `${protocol}//${window.location.host}/api/devices/${encodeURIComponent(deviceId)}/terminal/ws${query}`;
+    return `${protocol}//${window.location.host}/api/devices/${encodeURIComponent(normalizedDeviceId)}/terminal/ws${query}`;
   };
 
   const ensureSessionForTab = (key: string) => {
@@ -183,19 +223,17 @@ export function useTerminalWorkspace() {
       term,
       fitAddon,
       socket: null,
-      pingTimer: null
+      pingTimer: null,
+      inputSubscription: term.onData((data) => {
+        sendSocketMessage(key, { type: 'input', data });
+      }),
+      resizeSubscription: term.onResize(({ cols, rows }) => {
+        sendSocketMessage(key, { type: 'resize', cols, rows });
+      })
     };
 
     runtimes.set(key, runtime);
     setTerminalStatus(key, 'connecting');
-
-    term.onData((data) => {
-      sendSocketMessage(key, { type: 'input', data });
-    });
-
-    term.onResize(({ cols, rows }) => {
-      sendSocketMessage(key, { type: 'resize', cols, rows });
-    });
 
     const socket = new WebSocket(buildWebSocketUrl(tab.deviceId));
     runtime.socket = socket;
@@ -380,11 +418,13 @@ export function useTerminalWorkspace() {
       fitTerminal(activeTabKey.value);
     }
 
-    window.addEventListener('resize', fitActiveTab);
+    attachWindowResizeListener();
   });
 
   onActivated(async () => {
     if (!isTerminalRouteActive.value) return;
+
+    attachWindowResizeListener();
 
     const consumed = await consumeIncomingTab();
     if (!consumed && activeTabKey.value) {
@@ -394,11 +434,14 @@ export function useTerminalWorkspace() {
     }
   });
 
+  onDeactivated(() => {
+    detachWindowResizeListener();
+    clearAllRuntimes();
+  });
+
   onUnmounted(() => {
-    window.removeEventListener('resize', fitActiveTab);
-    for (const key of [...runtimes.keys()]) {
-      clearRuntime(key);
-    }
+    detachWindowResizeListener();
+    clearAllRuntimes();
   });
 
   return {
@@ -424,6 +467,7 @@ export function useTerminalWorkspace() {
     setTerminalStatus,
     setTerminalHost,
     clearRuntime,
+    clearAllRuntimes,
     sendSocketMessage,
     fitTerminal,
     buildWebSocketUrl,

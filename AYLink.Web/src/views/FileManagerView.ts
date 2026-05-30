@@ -9,6 +9,8 @@ import { useDialog } from '../services/dialog';
 import { useNotification } from '../services/notification';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
+import { triggerBlobDownload, writeClipboardText } from '../lib/browser/operations';
+import { normalizeDeviceId, normalizeRemotePath } from '../lib/input/normalize';
 
 export default defineComponent({
   name: 'FileManagerView',
@@ -64,10 +66,11 @@ export default defineComponent({
 
     const visibleEntries = computed(() => entries.value.filter((entry) => entry.Name !== '.' && entry.Name !== '..'));
     const activeDeviceId = computed(() => activeTab.value?.deviceId ?? '');
+    const normalizedActiveDeviceId = computed(() => normalizeDeviceId(activeDeviceId.value));
 
     const getEntryPath = (entry: FileEntry) => {
       const path = `${normalizePath(currentPath.value)}${entry.Name}`;
-      return entry.IsDirectory ? normalizePath(path) : path.replace(/\/+/g, '/');
+      return entry.IsDirectory ? normalizePath(path) : normalizeRemotePath(path);
     };
 
     const getResponseErrorMessage = async (response: Response, fallback: string) => {
@@ -77,7 +80,14 @@ export default defineComponent({
     const loadFiles = async () => {
       const { requestId, signal } = filesRequest.begin();
       const tab = activeTab.value;
+      const targetDeviceId = normalizeDeviceId(tab?.deviceId ?? '');
       if (!tab) {
+        entries.value = [];
+        filesRequest.finalize(requestId);
+        return;
+      }
+      if (!targetDeviceId) {
+        errorMessage.value = t('Common.InvalidDevice', '无效的设备标识');
         entries.value = [];
         filesRequest.finalize(requestId);
         return;
@@ -86,10 +96,10 @@ export default defineComponent({
       loading.value = true;
       errorMessage.value = '';
       try {
-        const response = await apiFetch(`/api/devices/${tab.deviceId}/files/list`, {
+        const response = await apiFetch(`/api/devices/${targetDeviceId}/files/list`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: tab.path }),
+          body: JSON.stringify({ path: normalizePath(tab.path) }),
           signal,
           timeoutMs: 15000,
         });
@@ -161,7 +171,12 @@ export default defineComponent({
     };
 
     const downloadEntry = async (entry: FileEntry) => {
-      const response = await apiFetch(`/api/devices/${activeDeviceId.value}/files/download`, {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/files/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: getEntryPath(entry) })
@@ -171,14 +186,7 @@ export default defineComponent({
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = entry.Name || 'download.bin';
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+      triggerBlobDownload(blob, entry.Name || 'download.bin', 'download.bin');
     };
 
     const renameEntry = async (entry: FileEntry) => {
@@ -194,7 +202,12 @@ export default defineComponent({
         return;
       }
 
-      const response = await apiFetch(`/api/devices/${activeDeviceId.value}/files/rename`, {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/files/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -220,7 +233,12 @@ export default defineComponent({
         return;
       }
 
-      const response = await apiFetch(`/api/devices/${activeDeviceId.value}/files/delete`, {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/files/delete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: getEntryPath(entry) })
@@ -243,7 +261,7 @@ export default defineComponent({
             await openEntry(entry);
             break;
           case 'copy-path':
-            await navigator.clipboard.writeText(getEntryPath(entry));
+            await writeClipboardText(getEntryPath(entry));
             break;
           case 'download':
             await downloadEntry(entry);

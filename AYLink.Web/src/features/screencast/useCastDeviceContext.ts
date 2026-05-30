@@ -1,6 +1,9 @@
 import type { Ref } from 'vue';
 import { apiFetch } from '../../utils/api';
 import type { CastTab } from '../../types/screencast';
+import { isAbortError } from '../../lib/async/abort';
+import { createLatestRequestController } from '../../lib/async/latestRequest';
+import { normalizeDeviceId } from '../../lib/input/normalize';
 
 interface UseCastDeviceContextOptions {
   deviceId: Ref<string>;
@@ -24,40 +27,64 @@ export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
     activeTab,
     upsertTab
   } = options;
+  const deviceNameRequest = createLatestRequestController();
+  const deviceSettingsRequest = createLatestRequestController();
 
   const fetchDeviceName = async () => {
-    if (!deviceId.value) {
+    const normalizedDeviceId = normalizeDeviceId(deviceId.value);
+    if (!normalizedDeviceId) {
       selectedDeviceName.value = '设备投屏';
       return;
     }
 
+    const { requestId, signal } = deviceNameRequest.begin();
+
     try {
-      const response = await apiFetch('/api/devices');
+      const response = await apiFetch('/api/devices', {
+        signal,
+        timeoutMs: 15000,
+      });
+      if (!deviceNameRequest.isLatest(requestId)) {
+        return;
+      }
       if (!response.ok) return;
 
       const devices = await response.json();
       const target = Array.isArray(devices)
-        ? devices.find((item: any) => String(item.Id ?? item.id) === String(deviceId.value))
+        ? devices.find((item: any) => String(item.Id ?? item.id) === normalizedDeviceId)
         : null;
       selectedDeviceName.value = target?.Name ?? target?.name ?? target?.Serial ?? target?.serial ?? '设备投屏';
       if (activeTab.value) {
         upsertTab({ ...activeTab.value, deviceName: selectedDeviceName.value });
       }
     } catch (error) {
-      console.warn('Failed to load device name:', error);
+      if (!isAbortError(error)) {
+        console.warn('Failed to load device name:', error);
+      }
+    } finally {
+      deviceNameRequest.finalize(requestId);
     }
   };
 
   const fetchDeviceSettings = async () => {
-    if (!deviceId.value) {
+    const normalizedDeviceId = normalizeDeviceId(deviceId.value);
+    if (!normalizedDeviceId) {
       isFlexDisplayEnabled.value = false;
       isHidKeyboardEnabled.value = false;
       isHidMouseEnabled.value = false;
       return;
     }
 
+    const { requestId, signal } = deviceSettingsRequest.begin();
+
     try {
-      const response = await apiFetch(`/api/devices/${deviceId.value}/settings`);
+      const response = await apiFetch(`/api/devices/${normalizedDeviceId}/settings`, {
+        signal,
+        timeoutMs: 15000,
+      });
+      if (!deviceSettingsRequest.isLatest(requestId)) {
+        return;
+      }
       if (!response.ok) {
         return;
       }
@@ -67,10 +94,14 @@ export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
       isHidKeyboardEnabled.value = settings?.HidKeyboard === true;
       isHidMouseEnabled.value = settings?.HidMouse === true;
     } catch (error) {
-      console.warn('Failed to load device settings:', error);
-      isFlexDisplayEnabled.value = false;
-      isHidKeyboardEnabled.value = false;
-      isHidMouseEnabled.value = false;
+      if (!isAbortError(error)) {
+        console.warn('Failed to load device settings:', error);
+        isFlexDisplayEnabled.value = false;
+        isHidKeyboardEnabled.value = false;
+        isHidMouseEnabled.value = false;
+      }
+    } finally {
+      deviceSettingsRequest.finalize(requestId);
     }
   };
 
@@ -82,6 +113,10 @@ export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
   return {
     fetchDeviceName,
     fetchDeviceSettings,
-    refreshDeviceContext
+    refreshDeviceContext,
+    cancelDeviceContextRequests: () => {
+      deviceNameRequest.dispose();
+      deviceSettingsRequest.dispose();
+    }
   };
 }

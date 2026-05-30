@@ -1,4 +1,4 @@
-// 统一管理本地持久化 Key，避免字符串散落在各功能模块。
+// 统一管理本地持久化 Key 避免字符串散落在各功能模块
 
 export const storageKeys = {
   auth: {

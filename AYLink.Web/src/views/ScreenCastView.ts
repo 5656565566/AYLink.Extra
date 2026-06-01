@@ -95,6 +95,15 @@ export default defineComponent({
       onSent?: () => void;
     }
 
+    interface SignalErrorMessagePayload {
+      type: 'error';
+      code?: string;
+      messageKey: string;
+      message?: string;
+      detail?: string;
+      retryable?: boolean;
+    }
+
     interface PersistedFloatingMenuPlacement {
       isDocked?: boolean;
       dockedEdge?: DockedEdge;
@@ -208,7 +217,7 @@ export default defineComponent({
 
     const appDisplayName = ref('');
 
-    const selectedDeviceName = ref('设备投屏');
+    const selectedDeviceName = ref(t('Screencast.DefaultTabTitle', '设备投屏'));
 
     const isNewDisplayMode = ref(false);
 
@@ -238,7 +247,7 @@ export default defineComponent({
 
     const isConnecting = ref(false);
 
-    const status = ref('未连接');
+    const status = ref(t('Screencast.StatusDisconnected', '未连接'));
 
     const lastFrameOverlayUrl = ref('');
 
@@ -446,8 +455,16 @@ export default defineComponent({
     }
 
     const getTabTitle = (tab: CastTab) => {
-      const baseTitle = tab.deviceName || '设备投屏';
+      const baseTitle = tab.deviceName || t('Screencast.DefaultTabTitle', '设备投屏');
       return tab.appDisplayName ? `${baseTitle} · ${tab.appDisplayName}` : baseTitle;
+    };
+
+    const isSignalErrorMessagePayload = (payload: unknown): payload is SignalErrorMessagePayload => {
+      return payload !== null &&
+        typeof payload === 'object' &&
+        (payload as { type?: unknown }).type === 'error' &&
+        typeof (payload as { messageKey?: unknown }).messageKey === 'string' &&
+        (payload as { messageKey: string }).messageKey.length > 0;
     };
 
     const {
@@ -820,7 +837,7 @@ export default defineComponent({
         if (requested) {
           lastVideoFreezeRecoveryAt = now;
           lastVideoFreezeRecoveryConnectionId = connectionId;
-          status.value = '画面冻结，正在请求关键帧恢复...';
+          status.value = t('Screencast.StatusVideoFrozen', '画面冻结，正在请求关键帧恢复...');
           return;
         }
       }
@@ -1120,10 +1137,10 @@ export default defineComponent({
       isConnected.value = restoredPeerConnection.connectionState === 'connected';
       isConnecting.value = restoredPeerConnection.connectionState === 'connecting';
       status.value = isConnected.value
-        ? '已连接'
+        ? t('Screencast.StatusConnected', '已连接')
         : isConnecting.value
-          ? '正在恢复连接...'
-          : `WebRTC 状态: ${restoredPeerConnection.connectionState}`;
+          ? t('Screencast.StatusReconnecting', '正在恢复连接...')
+          : t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', restoredPeerConnection.connectionState);
       hideLastFrameOverlay();
       scheduleResumeMediaPlayback(0);
       startVideoFrameMonitor(connectionId);
@@ -1441,7 +1458,7 @@ export default defineComponent({
       deviceId.value = tab?.deviceId ?? '';
       appPackageName.value = tab?.appPackageName ?? '';
       appDisplayName.value = tab?.appDisplayName ?? '';
-      selectedDeviceName.value = tab?.deviceName || '设备投屏';
+      selectedDeviceName.value = tab?.deviceName || t('Screencast.DefaultTabTitle', '设备投屏');
       isNewDisplayMode.value = tab?.newDisplay === true;
     };
 
@@ -1454,6 +1471,7 @@ export default defineComponent({
       deviceId,
       isNewDisplayMode,
       selectedDeviceName,
+      getDefaultDeviceName: () => t('Screencast.DefaultTabTitle', '设备投屏'),
       isFlexDisplayEnabled,
       isHidKeyboardEnabled,
       isHidMouseEnabled,
@@ -1488,7 +1506,7 @@ export default defineComponent({
       dataChannel.bufferedAmountLowThreshold = Math.floor(CONTROL_CHANNEL_BUFFER_LIMIT / 2);
       persistCurrentConnection();
       dataChannel.onopen = () => {
-        status.value = '控制通道已连接';
+        status.value = t('Screencast.StatusControlConnected', '控制通道已连接');
         flushPendingPointerControlPayloads();
         flushPendingPointerReleases();
         initializeHidDevices();
@@ -1587,6 +1605,7 @@ export default defineComponent({
         getActiveTabKey: () => activeTabKey.value,
         isConnecting,
         status,
+        getReconnectStatusMessage: (attempt) => t('Screencast.StatusReconnectAttempt', '连接中断，正在重连 ({0})...', attempt),
         startConnection: () => {
           void startConnection();
         }
@@ -1703,7 +1722,7 @@ export default defineComponent({
       isIceRestartInFlight = true;
       isConnecting.value = true;
       isConnected.value = false;
-      status.value = '网络波动，正在尝试恢复连接...';
+      status.value = t('Screencast.StatusNetworkRecovering', '网络波动，正在尝试恢复连接...');
       console.warn('[WebRTC] Attempting ICE restart:', {
         reason,
         deviceId: deviceId.value,
@@ -1813,6 +1832,7 @@ export default defineComponent({
         hasLiveConnection,
         isConnecting,
         status,
+        getPreparingStatusMessage: () => t('Screencast.StatusPreparingSession', '正在准备 WebRTC 会话...'),
         enableAutoReconnect,
         startConnection: () => {
           void startConnection(true);
@@ -1831,7 +1851,7 @@ export default defineComponent({
     
       lastVideoFrameSize = { width, height };
       if (isConnected.value) {
-        status.value = `画面尺寸已更新: ${width}x${height}`;
+        status.value = t('Screencast.StatusResolutionUpdated', '画面尺寸已更新: {0}x{1}', width, height);
       }
     };
 
@@ -2247,13 +2267,13 @@ export default defineComponent({
           await element.play();
         }
     
-        status.value = '已连接'
+        status.value = t('Screencast.StatusConnected', '已连接')
       } catch (error: any) {
         if (error.name === 'AbortError') {
           console.log('Play request aborted due to new load, ignoring.');
         } else {
           console.warn('Media play failed:', error);
-          status.value = '已连接，点击播放按钮恢复音频';
+          status.value = t('Screencast.StatusConnectedResumeAudio', '已连接，点击播放按钮恢复音频');
         }
       }
     };
@@ -2274,13 +2294,13 @@ export default defineComponent({
       const { requestId, signal } = clipboardRequest.begin();
       const targetDeviceId = normalizeDeviceId(deviceId.value);
       if (!targetDeviceId) {
-        clipboardStatusText.value = '未选中设备';
+        clipboardStatusText.value = t('Screencast.NoDeviceSelected', '未选中设备');
         clipboardRequest.finalize(requestId);
         return;
       }
     
       isClipboardLoading.value = true;
-      clipboardStatusText.value = '正在读取...';
+      clipboardStatusText.value = t('Screencast.ClipboardReading', '正在读取...');
     
       try {
         const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
@@ -2291,20 +2311,20 @@ export default defineComponent({
           return;
         }
         if (!response.ok) {
-          clipboardStatusText.value = await readApiErrorMessage(response, '读取失败');
+          clipboardStatusText.value = await readApiErrorMessage(response, t('Screencast.ClipboardReadFailed', '读取失败'));
           return;
         }
     
         const payload = await response.json() as { text?: string };
         applyRemoteClipboardText(String(payload.text ?? ''));
-        clipboardStatusText.value = '读取成功';
+        clipboardStatusText.value = t('Screencast.ClipboardReadSuccess', '读取成功');
       } catch (error) {
         if (!isAbortError(error)) {
           console.error('Failed to load remote clipboard:', {
             deviceId: targetDeviceId,
             error
           });
-          clipboardStatusText.value = '读取失败';
+          clipboardStatusText.value = t('Screencast.ClipboardReadFailed', '读取失败');
         }
       } finally {
         if (clipboardRequest.isLatest(requestId)) {
@@ -2318,13 +2338,13 @@ export default defineComponent({
       const { requestId, signal } = clipboardRequest.begin();
       const targetDeviceId = normalizeDeviceId(deviceId.value);
       if (!targetDeviceId) {
-        clipboardStatusText.value = '未选中设备';
+        clipboardStatusText.value = t('Screencast.NoDeviceSelected', '未选中设备');
         clipboardRequest.finalize(requestId);
         return;
       }
     
       isClipboardSaving.value = true;
-      clipboardStatusText.value = '正在同步...';
+      clipboardStatusText.value = t('Screencast.ClipboardSyncing', '正在同步...');
     
       try {
         const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
@@ -2342,17 +2362,17 @@ export default defineComponent({
           return;
         }
         if (!response.ok) {
-          clipboardStatusText.value = await readApiErrorMessage(response, '同步失败');
+          clipboardStatusText.value = await readApiErrorMessage(response, t('Screencast.ClipboardSyncFailed', '同步失败'));
           return;
         }
-        clipboardStatusText.value = '已同步';
+        clipboardStatusText.value = t('Screencast.ClipboardSyncSuccess', '已同步');
       } catch (error) {
         if (!isAbortError(error)) {
           console.error('Failed to save remote clipboard:', {
             deviceId: targetDeviceId,
             error
           });
-          clipboardStatusText.value = '同步失败';
+          clipboardStatusText.value = t('Screencast.ClipboardSyncFailed', '同步失败');
         }
       } finally {
         if (clipboardRequest.isLatest(requestId)) {
@@ -2366,13 +2386,13 @@ export default defineComponent({
       const { requestId, signal } = clipboardRequest.begin();
       const targetDeviceId = normalizeDeviceId(deviceId.value);
       if (!targetDeviceId) {
-        clipboardStatusText.value = '未选中设备';
+        clipboardStatusText.value = t('Screencast.NoDeviceSelected', '未选中设备');
         clipboardRequest.finalize(requestId);
         return;
       }
     
       isClipboardSaving.value = true;
-      clipboardStatusText.value = '正在粘贴...';
+      clipboardStatusText.value = t('Screencast.ClipboardPasting', '正在粘贴...');
     
       try {
         const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
@@ -2390,17 +2410,17 @@ export default defineComponent({
           return;
         }
         if (!response.ok) {
-          clipboardStatusText.value = await readApiErrorMessage(response, '粘贴失败');
+          clipboardStatusText.value = await readApiErrorMessage(response, t('Screencast.ClipboardPasteFailed', '粘贴失败'));
           return;
         }
-        clipboardStatusText.value = '已发送粘贴';
+        clipboardStatusText.value = t('Screencast.ClipboardPasteSuccess', '已发送粘贴');
       } catch (error) {
         if (!isAbortError(error)) {
           console.error('Failed to paste remote clipboard:', {
             deviceId: targetDeviceId,
             error
           });
-          clipboardStatusText.value = '粘贴失败';
+          clipboardStatusText.value = t('Screencast.ClipboardPasteFailed', '粘贴失败');
         }
       } finally {
         if (clipboardRequest.isLatest(requestId)) {
@@ -2630,7 +2650,7 @@ export default defineComponent({
         if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
           return;
         }
-        status.value = `WebRTC 状态: ${peerConnection.connectionState}`;
+        status.value = t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', peerConnection.connectionState);
         isConnected.value = peerConnection.connectionState === 'connected';
         console.debug('[WebRTC] Peer connection state changed:', peerConnection.connectionState, {
           deviceId: deviceId.value,
@@ -2719,6 +2739,29 @@ export default defineComponent({
           return;
         }
         const message = JSON.parse(event.data);
+        if ((message as { type?: unknown })?.type === 'error') {
+          if (!isSignalErrorMessagePayload(message)) {
+            status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
+            isConnecting.value = false;
+            console.warn('[WebRTC] Received invalid signaling error payload:', message);
+            return;
+          }
+
+          status.value = t(
+            message.messageKey,
+            typeof message.message === 'string' && message.message ? message.message : t('Screencast.StatusSignalingClosed', '信令连接已断开')
+          );
+          isConnecting.value = false;
+          if (message.detail) {
+            console.warn('[WebRTC] Signaling error detail:', {
+              code: message.code || '',
+              messageKey: message.messageKey,
+              retryable: message.retryable === true,
+              detail: message.detail
+            });
+          }
+          return;
+        }
         if (message?.candidate && peerConnection) {
           const candidate = normalizeIceCandidate(message);
           if (candidate) {
@@ -2753,7 +2796,7 @@ export default defineComponent({
         if (connectionId !== activeConnectionId || ws !== targetSocket) {
           return;
         }
-        status.value = 'WebSocket 连接出错';
+        status.value = t('Screencast.StatusWebSocketError', 'WebSocket 连接出错');
         isConnecting.value = false;
       };
     
@@ -2768,7 +2811,9 @@ export default defineComponent({
         const currentState = peerConnection?.connectionState;
         if (currentState === 'connected' || currentState === 'connecting') {
           detachedSignalingConnectionId = connectionId;
-          status.value = wasIntentionalDetach ? '媒体已直连，信令已断开' : '信令连接已断开，媒体链路继续运行';
+          status.value = wasIntentionalDetach
+            ? t('Screencast.StatusMediaDirect', '媒体已直连，信令已断开')
+            : t('Screencast.StatusSignalingDetached', '信令连接已断开，媒体链路继续运行');
           console.warn('[WebRTC] Signaling websocket closed while peer connection is still active.', {
             deviceId: deviceId.value,
             tabKey: activeTabKey.value,
@@ -2779,7 +2824,7 @@ export default defineComponent({
         }
     
         detachedSignalingConnectionId = 0;
-        status.value = '信令连接已断开';
+        status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
         stopConnection();
         scheduleReconnect('websocket_closed');
       };
@@ -2819,7 +2864,7 @@ export default defineComponent({
       connectionSchedulerState.isStartConnectionInFlight = true;
       connectionSchedulerState.activeConnectionTargetKey = targetTabKey;
       isConnecting.value = true;
-      status.value = '正在连接设备...';
+      status.value = t('Screencast.StatusConnectingDevice', '正在连接设备...');
       pendingCandidates = [];
       const connectionId = ++activeConnectionId;
     
@@ -2848,7 +2893,7 @@ export default defineComponent({
           });
     
         if (!ticketResponse.ok) {
-          status.value = '创建连接凭据失败';
+          status.value = t('Screencast.StatusCreateCredentialFailed', '创建连接凭据失败');
           isConnecting.value = false;
           clearStartConnectionState();
           scheduleReconnect(`ticket_${ticketResponse.status}`);
@@ -2866,7 +2911,7 @@ export default defineComponent({
             return;
           }
           clearStartConnectionState();
-          status.value = '正在创建 WebRTC 会话...';
+          status.value = t('Screencast.StatusCreatingSession', '正在创建 WebRTC 会话...');
           startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
     
           try {
@@ -2886,7 +2931,7 @@ export default defineComponent({
             ws?.send(JSON.stringify(peerConnection.localDescription));
           } catch (error) {
             console.error('Failed to create WebRTC offer:', error);
-            status.value = '创建 Offer 失败';
+            status.value = t('Screencast.StatusCreateOfferFailed', '创建 Offer 失败');
             isConnecting.value = false;
             clearStartConnectionState();
             stopConnection();
@@ -2899,7 +2944,7 @@ export default defineComponent({
         persistCurrentConnection();
       } catch (error) {
         console.error('Failed to start WebRTC connection:', error);
-        status.value = '连接初始化失败，准备重试...';
+        status.value = t('Screencast.StatusInitRetry', '连接初始化失败，准备重试...');
         isConnecting.value = false;
         clearStartConnectionState();
         stopConnection();
@@ -2943,7 +2988,7 @@ export default defineComponent({
       lastDisplayResizeRequest = null;
       isConnected.value = false;
       isConnecting.value = false;
-      status.value = '未连接';
+      status.value = t('Screencast.StatusDisconnected', '未连接');
       showLastFrameOverlayForTab();
     
       if (videoElement.value) {
@@ -3022,7 +3067,7 @@ export default defineComponent({
       lastDisplayResizeRequest = null;
       isConnected.value = false;
       isConnecting.value = false;
-      status.value = '未连接';
+      status.value = t('Screencast.StatusDisconnected', '未连接');
     };
 
     const activateTab = async (tabKey: string) => {
@@ -3975,7 +4020,7 @@ export default defineComponent({
     watch(
       () => route.query,
       async () => {
-        await consumeIncomingTab(selectedDeviceName.value, '设备投屏', syncRefsFromActiveTab, handleTabOpened);
+        await consumeIncomingTab(selectedDeviceName.value, t('Screencast.DefaultTabTitle', '设备投屏'), syncRefsFromActiveTab, handleTabOpened);
       }
     );
 
@@ -4037,7 +4082,7 @@ export default defineComponent({
 
     onMounted(async () => {
       enableAutoReconnect();
-      loadPersistedTabs(syncRefsFromActiveTab, '设备投屏');
+      loadPersistedTabs(syncRefsFromActiveTab, t('Screencast.DefaultTabTitle', '设备投屏'));
       loadPersistedMenuPlacement();
       initializeMenuPosition();
       attachPageEventListeners();
@@ -4048,7 +4093,7 @@ export default defineComponent({
         return;
       }
     
-      const consumed = await consumeIncomingTab(selectedDeviceName.value, '设备投屏', syncRefsFromActiveTab, handleTabOpened);
+      const consumed = await consumeIncomingTab(selectedDeviceName.value, t('Screencast.DefaultTabTitle', '设备投屏'), syncRefsFromActiveTab, handleTabOpened);
       if (consumed) {
         hasUsedInitialConnectionWarmup = true;
         return;
@@ -4084,7 +4129,7 @@ export default defineComponent({
       stopScrcpySessionHeartbeat();
       setupVideoContainerResizeObserver();
     
-      const consumed = await consumeIncomingTab(selectedDeviceName.value, '设备投屏', syncRefsFromActiveTab, handleTabOpened);
+      const consumed = await consumeIncomingTab(selectedDeviceName.value, t('Screencast.DefaultTabTitle', '设备投屏'), syncRefsFromActiveTab, handleTabOpened);
       if (consumed) {
         return;
       }

@@ -21,7 +21,7 @@ export default defineComponent({
 
     const deviceId = computed(() => String(route.params.id || '').trim());
 
-    const deviceName = ref('设备设置');
+    const deviceName = ref(t('DeviceSettings.Title', '设备设置'));
 
     const loading = ref(true);
 
@@ -208,7 +208,7 @@ export default defineComponent({
         });    
         
         if (!res.ok) {    
-          throw new Error(await readApiErrorMessage(res, '重置失败'));    
+          throw new Error(await readApiErrorMessage(res, t('DeviceSettings.ResetFailed', '重置失败')));
         }    
         
         const payload = await res.json();    
@@ -222,7 +222,7 @@ export default defineComponent({
 
     const loadSettings = async () => {    
       if (!deviceId.value) {    
-        deviceName.value = '设备设置';    
+        deviceName.value = t('DeviceSettings.Title', '设备设置');
         applySettings();    
         loading.value = false;    
         return;    
@@ -230,7 +230,7 @@ export default defineComponent({
         
       const currentDeviceId = deviceId.value;    
       loading.value = true;    
-      deviceName.value = '设备设置';    
+      deviceName.value = t('DeviceSettings.Title', '设备设置');
       applySettings();    
       try {    
         const res = await apiFetch('/api/devices');    
@@ -238,7 +238,7 @@ export default defineComponent({
           const devices = await res.json();    
           const target = devices.find((d: any) => String(d.Id) === currentDeviceId);    
           if (target) {    
-            deviceName.value = target.Name || target.Serial || '设备设置';    
+            deviceName.value = target.Name || target.Serial || t('DeviceSettings.Title', '设备设置');
           }    
         }    
         
@@ -276,7 +276,7 @@ export default defineComponent({
         });    
         
         if (!res.ok) {    
-          throw new Error(await readApiErrorMessage(res, '保存失败'));    
+          throw new Error(await readApiErrorMessage(res, t('Common.SaveFailed', '保存失败')));
         }    
         
         const payload = await res.json();    

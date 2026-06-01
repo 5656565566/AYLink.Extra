@@ -41,6 +41,15 @@ type managedRuntime struct {
 	lastUsedAt  time.Time
 }
 
+type SignalErrorPayload struct {
+	Type       string `json:"type"`
+	Code       string `json:"code,omitempty"`
+	MessageKey string `json:"messageKey,omitempty"`
+	Message    string `json:"message"`
+	Detail     string `json:"detail,omitempty"`
+	Retryable  bool   `json:"retryable,omitempty"`
+}
+
 func NewWebRTCHandler(service WebRTCService, settings SettingsService, scrcpy ScrcpyService) *WebRTCHandler {
 	handler := &WebRTCHandler{
 		service:  service,
@@ -268,11 +277,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	h.service.MarkSessionStarted(ticket.DeviceID, ticket.SessionID)
 	deviceID, err := strconv.Atoi(ticket.DeviceID)
 	if err != nil {
-		_ = conn.WriteJSON(map[string]any{
-			"type":    "error",
-			"message": "设备 ID 无效",
-			"detail":  err.Error(),
-		})
+		writeSignalError(conn, "INVALID_DEVICE_ID", "WebRTC.InvalidDeviceId", "设备 ID 无效", err, false)
 		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "invalid device id"))
 		return
 	}
@@ -287,11 +292,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	runtime, created, err := h.acquireRuntime(r.Context(), ticket.DeviceID, ticket.SessionID, deviceID, options)
 	if err != nil {
-		_ = conn.WriteJSON(map[string]any{
-			"type":    "error",
-			"message": "启动 scrcpy 会话失败",
-			"detail":  err.Error(),
-		})
+		writeSignalError(conn, "SCRCPY_START_FAILED", "WebRTC.ScrcpyStartFailed", "启动 scrcpy 会话失败", err, false)
 		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "scrcpy start failed"))
 		return
 	}
@@ -303,11 +304,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	if created {
 		if packageName := strings.TrimSpace(ticket.AppPackage); packageName != "" {
 			if err := h.launchProjectedApp(runtime, packageName); err != nil {
-				_ = conn.WriteJSON(map[string]any{
-					"type":    "error",
-					"message": "启动投屏应用失败",
-					"detail":  err.Error(),
-				})
+				writeSignalError(conn, "PROJECTED_APP_LAUNCH_FAILED", "WebRTC.ProjectedAppLaunchFailed", "启动投屏应用失败", err, false)
 				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "app launch failed"))
 				return
 			}
@@ -315,11 +312,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.HandleSignalWebSocket(r.Context(), ticket.DeviceID, ticket.SessionID, conn, h.settings, runtime); err != nil {
-		_ = conn.WriteJSON(map[string]any{
-			"type":    "error",
-			"message": "WebRTC 信令处理失败",
-			"detail":  err.Error(),
-		})
+		writeSignalError(conn, "SIGNAL_HANDLE_FAILED", "WebRTC.SignalHandleFailed", "WebRTC 信令处理失败", err, true)
 	}
 }
 
@@ -574,4 +567,30 @@ func (h *WebRTCHandler) launchProjectedApp(runtime domainscrcpy.Runtime, package
 		return err
 	}
 	return nil
+}
+
+func writeSignalError(
+	conn *websocket.Conn,
+	code string,
+	messageKey string,
+	message string,
+	err error,
+	retryable bool,
+) {
+	if conn == nil {
+		return
+	}
+
+	payload := SignalErrorPayload{
+		Type:       "error",
+		Code:       code,
+		MessageKey: messageKey,
+		Message:    message,
+		Retryable:  retryable,
+	}
+	if err != nil {
+		payload.Detail = err.Error()
+	}
+
+	_ = conn.WriteJSON(payload)
 }

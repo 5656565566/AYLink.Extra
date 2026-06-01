@@ -33,6 +33,12 @@ var (
 	ErrUsernameExists     = errors.New("username already exists")
 	ErrRoleExists         = errors.New("role already exists")
 	ErrPasswordEmpty      = errors.New("password is required")
+	ErrUsernameRequired   = errors.New("username is required")
+	ErrCurrentUserLocked  = errors.New("You cannot disable the account that is currently signed in")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrCurrentPassword    = errors.New("Current password is incorrect")
+	ErrRoleNameRequired   = errors.New("role name is required")
+	ErrRoleNotFound       = errors.New("role not found")
 )
 
 var AllPermissions = []string{
@@ -208,7 +214,7 @@ func (s *Service) GetUsers(ctx context.Context) ([]domainauth.User, error) {
 
 func (s *Service) CreateUser(ctx context.Context, username, password string, roleIds []int) (*domainauth.User, error) {
 	if strings.TrimSpace(username) == "" {
-		return nil, errors.New("username is required")
+		return nil, ErrUsernameRequired
 	}
 	if strings.TrimSpace(password) == "" {
 		return nil, ErrPasswordEmpty
@@ -233,7 +239,7 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 
 func (s *Service) UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, actingUserID *int) (*domainauth.User, error) {
 	if actingUserID != nil && *actingUserID == userID && !isActive {
-		return nil, errors.New("You cannot disable the account that is currently signed in")
+		return nil, ErrCurrentUserLocked
 	}
 
 	trimmedUsername := strings.TrimSpace(username)
@@ -290,11 +296,11 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID int, currentPass
 		return err
 	}
 	if user == nil {
-		return errors.New("user not found")
+		return ErrUserNotFound
 	}
 
 	if !verifyPassword(currentPassword, user.PasswordSalt, user.PasswordHash) {
-		return errors.New("Current password is incorrect")
+		return ErrCurrentPassword
 	}
 
 	trimmedNewPassword := strings.TrimSpace(newPassword)
@@ -317,7 +323,7 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID int, currentPass
 
 func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive bool, actingUserID *int) error {
 	if actingUserID != nil && *actingUserID == userID && !isActive {
-		return errors.New("You cannot disable the account that is currently signed in")
+		return ErrCurrentUserLocked
 	}
 
 	user, err := s.repo.GetUserByID(ctx, userID)
@@ -325,7 +331,7 @@ func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive b
 		return err
 	}
 	if user == nil {
-		return errors.New("user not found")
+		return ErrUserNotFound
 	}
 
 	// 通过保持角色不变复用 UpdateUser 从而去设置 Active 状态
@@ -353,7 +359,7 @@ func (s *Service) GetRoles(ctx context.Context) ([]domainauth.Role, error) {
 func (s *Service) CreateRole(ctx context.Context, name, description string, permissions []string) (*domainauth.Role, error) {
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
-		return nil, errors.New("role name is required")
+		return nil, ErrRoleNameRequired
 	}
 
 	existing, err := s.repo.GetRoleByName(ctx, trimmedName)
@@ -375,7 +381,7 @@ func (s *Service) CreateRole(ctx context.Context, name, description string, perm
 func (s *Service) UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string) (*domainauth.Role, error) {
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
-		return nil, errors.New("role name is required")
+		return nil, ErrRoleNameRequired
 	}
 
 	existingNameCheck, err := s.repo.GetRoleByName(ctx, trimmedName)
@@ -391,7 +397,7 @@ func (s *Service) UpdateRole(ctx context.Context, roleID int, name, description 
 		return nil, err
 	}
 	if existingRole == nil {
-		return nil, errors.New("role not found")
+		return nil, ErrRoleNotFound
 	}
 
 	var normalizedPerms []string

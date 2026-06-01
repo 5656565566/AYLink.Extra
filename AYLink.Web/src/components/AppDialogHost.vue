@@ -29,10 +29,10 @@
           type="button"
           @click="cancelDialog"
         >
-          {{ currentDialog.cancelText || '取消' }}
+          {{ currentDialog.cancelText || t('Common.Cancel', '取消') }}
         </button>
         <button class="primary" type="button" @click="confirmDialog">
-          {{ currentDialog.confirmText || '确定' }}
+          {{ currentDialog.confirmText || t('Common.Confirm', '确定') }}
         </button>
       </div>
     </div>

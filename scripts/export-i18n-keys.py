@@ -9,6 +9,8 @@ Supported patterns:
   t('Settings.Language', '语言')
   i18n.t("Settings.Language", "语言")
   getString("Settings.Language", "语言")
+  WriteError(w, status, "CODE", "Errors.Key", "错误文案")
+  "messageKey": "Errors.Key", "message": "错误文案"
 
 Usage:
   python scripts/export-i18n-keys.py
@@ -25,10 +27,30 @@ from pathlib import Path
 
 DEFAULT_SCAN_PATHS = ["./AYLink.Web/src", "./AYLink.Agent"]
 DEFAULT_OUTPUT = "./AYLink.Agent/Language/template.json"
-SOURCE_EXTENSIONS = {".vue", ".ts", ".tsx", ".js", ".jsx", ".cs"}
+SOURCE_EXTENSIONS = {".vue", ".ts", ".tsx", ".js", ".jsx", ".cs", ".go"}
 
 CALL_PATTERN = re.compile(
     r"""(?:\b(?:i18n\.)?t|\bgetString)\(\s*(['"])([A-Za-z0-9_.]+)\1\s*,\s*(['"])((?:\\.|(?!\3).)*)\3""",
+    re.MULTILINE,
+)
+GO_WRITE_ERROR_PATTERN = re.compile(
+    r"""WriteError\(\s*[^,]+,\s*[^,]+,\s*(['"])(?:\\.|(?!\1).)*\1\s*,\s*(['"])([A-Za-z0-9_.]+)\2\s*,\s*(['"])((?:\\.|(?!\4).)*)\4""",
+    re.MULTILINE,
+)
+GO_WRITE_ERROR_KEY_PATTERN = re.compile(
+    r"""WriteError\(\s*[^,]+,\s*[^,]+,\s*(['"])(?:\\.|(?!\1).)*\1\s*,\s*(['"])([A-Za-z0-9_.]+)\2""",
+    re.MULTILINE,
+)
+GO_AUTH_SERVICE_ERROR_PATTERN = re.compile(
+    r"""writeAuthServiceError\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*(['"])(?:\\.|(?!\1).)*\1\s*,\s*(['"])([A-Za-z0-9_.]+)\2\s*,\s*(['"])((?:\\.|(?!\4).)*)\4""",
+    re.MULTILINE,
+)
+GO_SIGNAL_ERROR_PATTERN = re.compile(
+    r"""writeSignalError\(\s*[^,]+,\s*(['"])(?:\\.|(?!\1).)*\1\s*,\s*(['"])([A-Za-z0-9_.]+)\2\s*,\s*(['"])((?:\\.|(?!\4).)*)\4""",
+    re.MULTILINE,
+)
+GO_MESSAGE_KEY_PATTERN = re.compile(
+    r"""["']messageKey["']\s*:\s*(['"])([A-Za-z0-9_.]+)\1\s*,\s*["']message["']\s*:\s*(['"])((?:\\.|(?!\3).)*)\3""",
     re.MULTILINE,
 )
 
@@ -62,6 +84,35 @@ def extract_keys(content: str) -> dict[str, str]:
         default_text = unescape_text(match.group(4))
         if key not in keys or (not keys[key] and default_text):
             keys[key] = default_text
+
+    for match in GO_WRITE_ERROR_PATTERN.finditer(content):
+        key = match.group(3)
+        default_text = unescape_text(match.group(5))
+        if key not in keys or (not keys[key] and default_text):
+            keys[key] = default_text
+
+    for match in GO_WRITE_ERROR_KEY_PATTERN.finditer(content):
+        key = match.group(3)
+        keys.setdefault(key, "")
+
+    for match in GO_AUTH_SERVICE_ERROR_PATTERN.finditer(content):
+        key = match.group(3)
+        default_text = unescape_text(match.group(5))
+        if key not in keys or (not keys[key] and default_text):
+            keys[key] = default_text
+
+    for match in GO_SIGNAL_ERROR_PATTERN.finditer(content):
+        key = match.group(3)
+        default_text = unescape_text(match.group(5))
+        if key not in keys or (not keys[key] and default_text):
+            keys[key] = default_text
+
+    for match in GO_MESSAGE_KEY_PATTERN.finditer(content):
+        key = match.group(2)
+        default_text = unescape_text(match.group(4))
+        if key not in keys or (not keys[key] and default_text):
+            keys[key] = default_text
+
     return keys
 
 
@@ -120,8 +171,8 @@ def merge_language_file(template: OrderedDict, lang_file: Path) -> None:
     lang_file.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     template_keys = set(flatten_nested_dict(template))
-    existing_keys = set(flatten_nested_dict(existing))
-    stale_keys = sorted(existing_keys - template_keys)
+    merged_keys = set(flatten_nested_dict(merged))
+    stale_keys = sorted(merged_keys - template_keys)
     print(f"  Synced: {lang_file.name}")
     if stale_keys:
         print(f"  Warning: {lang_file.name} contains {len(stale_keys)} stale keys")

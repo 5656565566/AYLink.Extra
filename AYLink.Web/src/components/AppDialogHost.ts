@@ -1,9 +1,11 @@
 import { defineComponent, nextTick, ref, watch } from 'vue';
+import { useI18n } from '../composables/useI18n';
 import { useDialog } from '../services/dialog';
 
 export default defineComponent({
   name: 'AppDialogHost',
   setup() {
+    const { t } = useI18n();
     const { currentDialog, resolveDialog } = useDialog();
     const inputValue = ref('');
     const inputElement = ref<HTMLInputElement | null>(null);
@@ -78,6 +80,7 @@ export default defineComponent({
 
     return {
       currentDialog,
+      t,
       inputValue,
       inputElement,
       confirmDialog,

@@ -9,6 +9,7 @@ interface UseCastDeviceContextOptions {
   deviceId: Ref<string>;
   isNewDisplayMode: Ref<boolean>;
   selectedDeviceName: Ref<string>;
+  getDefaultDeviceName?: () => string;
   isFlexDisplayEnabled: Ref<boolean>;
   isHidKeyboardEnabled: Ref<boolean>;
   isHidMouseEnabled: Ref<boolean>;
@@ -21,6 +22,7 @@ export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
     deviceId,
     isNewDisplayMode,
     selectedDeviceName,
+    getDefaultDeviceName,
     isFlexDisplayEnabled,
     isHidKeyboardEnabled,
     isHidMouseEnabled,
@@ -33,7 +35,7 @@ export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
   const fetchDeviceName = async () => {
     const normalizedDeviceId = normalizeDeviceId(deviceId.value);
     if (!normalizedDeviceId) {
-      selectedDeviceName.value = '设备投屏';
+      selectedDeviceName.value = getDefaultDeviceName ? getDefaultDeviceName() : '设备投屏';
       return;
     }
 
@@ -53,7 +55,7 @@ export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
       const target = Array.isArray(devices)
         ? devices.find((item: any) => String(item.Id ?? item.id) === normalizedDeviceId)
         : null;
-      selectedDeviceName.value = target?.Name ?? target?.name ?? target?.Serial ?? target?.serial ?? '设备投屏';
+      selectedDeviceName.value = target?.Name ?? target?.name ?? target?.Serial ?? target?.serial ?? (getDefaultDeviceName ? getDefaultDeviceName() : '设备投屏');
       if (activeTab.value) {
         upsertTab({ ...activeTab.value, deviceName: selectedDeviceName.value });
       }

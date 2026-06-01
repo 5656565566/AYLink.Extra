@@ -12,8 +12,8 @@
 
     <div class="content-area">
       <div class="empty-state">
-        <p>任务标签页已就绪</p>
-        <p class="subtle">当前标签：{{ activeTab?.title || '空标签页' }}</p>
+        <p>{{ t('TasksView.Ready', '任务标签页已就绪') }}</p>
+        <p class="subtle">{{ t('TasksView.CurrentTab', '当前标签：{0}', activeTab?.title || t('Common.EmptyTabs', '空标签页')) }}</p>
       </div>
     </div>
   </div>

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	domainauth "aylink-agent/internal/domain/auth"
+	authservice "aylink-agent/internal/service/auth"
 	"aylink-agent/internal/transport/http/middleware"
 )
 
@@ -140,7 +141,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.ChangeOwnPassword(r.Context(), identity.UserID, payload.CurrentPassword, payload.NewPassword); err != nil {
-		WriteError(w, http.StatusBadRequest, "CHANGE_PASSWORD_FAILED", "Errors.ChangePasswordFailed", err.Error())
+		writeAuthServiceError(w, err, http.StatusBadRequest, "CHANGE_PASSWORD_FAILED", "Errors.ChangePasswordFailed", "修改密码失败")
 		return
 	}
 
@@ -174,7 +175,7 @@ func (h *AuthHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 
 	users, err := h.service.GetUsers(r.Context())
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "", err.Error())
+		WriteError(w, http.StatusInternalServerError, "ACCOUNT_DATA_LOAD_FAILED", "Errors.AccountDataLoadFailed", "加载账户数据失败")
 		return
 	}
 	if users == nil {
@@ -183,7 +184,7 @@ func (h *AuthHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 
 	roles, err := h.service.GetRoles(r.Context())
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "", err.Error())
+		WriteError(w, http.StatusInternalServerError, "ACCOUNT_DATA_LOAD_FAILED", "Errors.AccountDataLoadFailed", "加载账户数据失败")
 		return
 	}
 	if roles == nil {
@@ -221,7 +222,7 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.service.CreateUser(r.Context(), payload.Username, payload.Password, payload.RoleIds)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "CREATE_USER_FAILED", "Errors.CreateUserFailed", err.Error())
+		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_USER_FAILED", "Errors.CreateUserFailed", "创建用户失败")
 		return
 	}
 
@@ -263,7 +264,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.service.UpdateUser(r.Context(), userID, payload.Username, isActive, payload.RoleIds, actingUserID)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "UPDATE_USER_FAILED", "Errors.UpdateUserFailed", err.Error())
+		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_USER_FAILED", "Errors.UpdateUserFailed", "更新用户失败")
 		return
 	}
 
@@ -298,7 +299,7 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	password, err := h.service.ResetPassword(r.Context(), userID, payload.NewPassword)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "RESET_PASSWORD_FAILED", "Errors.ResetPasswordFailed", err.Error())
+		writeAuthServiceError(w, err, http.StatusBadRequest, "RESET_PASSWORD_FAILED", "Errors.ResetPasswordFailed", "重置密码失败")
 		return
 	}
 
@@ -328,7 +329,7 @@ func (h *AuthHandler) SetUserActive(w http.ResponseWriter, r *http.Request, isAc
 	}
 
 	if err := h.service.SetUserActiveState(r.Context(), userID, isActive, actingUserID); err != nil {
-		WriteError(w, http.StatusBadRequest, "SET_ACTIVE_FAILED", "Errors.SetActiveFailed", err.Error())
+		writeAuthServiceError(w, err, http.StatusBadRequest, "SET_ACTIVE_FAILED", "Errors.SetActiveFailed", "更新账号状态失败")
 		return
 	}
 
@@ -343,7 +344,7 @@ func (h *AuthHandler) GetRoles(w http.ResponseWriter, r *http.Request) {
 
 	roles, err := h.service.GetRoles(r.Context())
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "", err.Error())
+		WriteError(w, http.StatusInternalServerError, "ACCOUNT_DATA_LOAD_FAILED", "Errors.AccountDataLoadFailed", "加载账户数据失败")
 		return
 	}
 	if roles == nil {
@@ -380,7 +381,7 @@ func (h *AuthHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 
 	role, err := h.service.CreateRole(r.Context(), payload.Name, payload.Description, payload.Permissions)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "CREATE_ROLE_FAILED", "Errors.CreateRoleFailed", err.Error())
+		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_ROLE_FAILED", "Errors.CreateRoleFailed", "创建角色失败")
 		return
 	}
 
@@ -412,7 +413,7 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 
 	role, err := h.service.UpdateRole(r.Context(), roleID, payload.Name, payload.Description, payload.Permissions)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "UPDATE_ROLE_FAILED", "Errors.UpdateRoleFailed", err.Error())
+		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_ROLE_FAILED", "Errors.UpdateRoleFailed", "更新角色失败")
 		return
 	}
 
@@ -453,4 +454,36 @@ func decodeOptionalJSONBody(r *http.Request, target any) error {
 		return nil
 	}
 	return err
+}
+
+func writeAuthServiceError(
+	w http.ResponseWriter,
+	err error,
+	statusCode int,
+	code string,
+	defaultKey string,
+	defaultMessage string,
+) {
+	switch {
+	case errors.Is(err, authservice.ErrUsernameRequired):
+		WriteError(w, statusCode, code, "Errors.UsernameRequired", "用户名不能为空")
+	case errors.Is(err, authservice.ErrPasswordEmpty):
+		WriteError(w, statusCode, code, "Errors.PasswordRequired", "密码不能为空")
+	case errors.Is(err, authservice.ErrUsernameExists):
+		WriteError(w, statusCode, code, "Errors.UsernameExists", "用户名已存在")
+	case errors.Is(err, authservice.ErrCurrentUserLocked):
+		WriteError(w, statusCode, code, "Errors.CurrentUserDisableForbidden", "不能禁用当前登录账号")
+	case errors.Is(err, authservice.ErrUserNotFound):
+		WriteError(w, statusCode, code, "Errors.UserNotFound", "用户不存在")
+	case errors.Is(err, authservice.ErrCurrentPassword):
+		WriteError(w, statusCode, code, "Errors.CurrentPasswordIncorrect", "当前密码不正确")
+	case errors.Is(err, authservice.ErrRoleNameRequired):
+		WriteError(w, statusCode, code, "Errors.RoleNameRequired", "角色名称不能为空")
+	case errors.Is(err, authservice.ErrRoleExists):
+		WriteError(w, statusCode, code, "Errors.RoleExists", "角色名称已存在")
+	case errors.Is(err, authservice.ErrRoleNotFound):
+		WriteError(w, statusCode, code, "Errors.RoleNotFound", "角色不存在")
+	default:
+		WriteError(w, statusCode, code, defaultKey, defaultMessage)
+	}
 }

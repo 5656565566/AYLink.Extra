@@ -12,7 +12,7 @@
 
     <div class="toolbar">
       <div class="path-bar">
-        <button class="icon-button" type="button" :disabled="!canGoUp || loading" title="返回上级" @click="goUp">
+        <button class="icon-button" type="button" :disabled="!canGoUp || loading" :title="t('FilePage.GoUp', '返回上级')" @click="goUp">
           <svg viewBox="0 0 16 16" fill="none">
             <path d="M8 3.5L3.5 8M3.5 8L8 12.5M3.5 8H13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>

@@ -16,6 +16,7 @@ interface ScheduleReconnectOptions {
   getActiveTabKey: () => string;
   isConnecting: Ref<boolean>;
   status: Ref<string>;
+  getReconnectStatusMessage?: (attempt: number) => string;
   startConnection: () => void;
   logger?: Pick<Console, 'warn'>;
 }
@@ -36,6 +37,7 @@ interface ScheduleStartConnectionOptions {
   hasLiveConnection: () => boolean;
   isConnecting: Ref<boolean>;
   status: Ref<string>;
+  getPreparingStatusMessage?: () => string;
   enableAutoReconnect: () => void;
   startConnection: () => void;
 }
@@ -101,6 +103,7 @@ export function scheduleReconnect(reason: string, options: ScheduleReconnectOpti
     getActiveTabKey,
     isConnecting,
     status,
+    getReconnectStatusMessage,
     startConnection,
     logger = console
   } = options;
@@ -119,7 +122,9 @@ export function scheduleReconnect(reason: string, options: ScheduleReconnectOpti
   const delayMs = delays[Math.min(state.reconnectAttempt, delays.length - 1)];
   state.reconnectAttempt += 1;
   isConnecting.value = true;
-  status.value = `连接中断，正在重连 (${state.reconnectAttempt})...`;
+  status.value = getReconnectStatusMessage
+    ? getReconnectStatusMessage(state.reconnectAttempt)
+    : `连接中断，正在重连 (${state.reconnectAttempt})...`;
   logger.warn('[WebRTC] Scheduling reconnect:', {
     reason,
     attempt: state.reconnectAttempt,
@@ -145,6 +150,7 @@ export function scheduleStartConnection(delayMs: number, options: ScheduleStartC
     hasLiveConnection,
     isConnecting,
     status,
+    getPreparingStatusMessage,
     enableAutoReconnect: enableReconnect,
     startConnection
   } = options;
@@ -169,7 +175,7 @@ export function scheduleStartConnection(delayMs: number, options: ScheduleStartC
     return;
   }
 
-  status.value = '正在准备 WebRTC 会话...';
+  status.value = getPreparingStatusMessage ? getPreparingStatusMessage() : '正在准备 WebRTC 会话...';
   isConnecting.value = true;
   state.pendingStartConnectionTimer = window.setTimeout(() => {
     state.pendingStartConnectionTimer = null;

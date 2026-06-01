@@ -132,7 +132,7 @@ export function useHomeDevices() {
 
   const addDevice = async () => {
     if (!newDeviceIp.value.trim()) {
-      addError.value = '请输入 IP 地址';
+      addError.value = t('Devices.IPRequired', '请输入 IP 地址');
       return;
     }
 
@@ -221,7 +221,7 @@ export function useHomeDevices() {
 
     const nextName = renameDeviceName.value.trim();
     if (!nextName) {
-      renameError.value = '请输入设备名称';
+      renameError.value = t('Devices.NameRequired', '请输入设备名称');
       return;
     }
 
@@ -267,13 +267,13 @@ export function useHomeDevices() {
     return device.Name || device.Serial || fallback;
   };
 
-  const openScreencast = (device: DeviceSummary) => {
+    const openScreencast = (device: DeviceSummary) => {
     activeMenuDeviceId.value = null;
     if (!ensureDeviceInteractive(device)) return;
 
     requestWorkspaceOpen('screencast', {
       deviceId: String(device.Id),
-      deviceName: buildWorkspaceDeviceName(device, '设备投屏')
+      deviceName: buildWorkspaceDeviceName(device, t('Screencast.DefaultTabTitle', '设备投屏'))
     });
     router.push({ name: 'screencast' });
   };
@@ -284,7 +284,7 @@ export function useHomeDevices() {
 
     requestWorkspaceOpen('screencast', {
       deviceId: String(device.Id),
-      deviceName: buildWorkspaceDeviceName(device, '设备投屏'),
+      deviceName: buildWorkspaceDeviceName(device, t('Screencast.DefaultTabTitle', '设备投屏')),
       newDisplay: true
     });
     router.push({ name: 'screencast' });
@@ -296,7 +296,7 @@ export function useHomeDevices() {
 
     requestWorkspaceOpen('terminal', {
       deviceId: String(device.Id),
-      deviceName: buildWorkspaceDeviceName(device, '设备终端')
+      deviceName: buildWorkspaceDeviceName(device, t('TerminalPage.Title', '终端'))
     });
     router.push({ name: 'terminal' });
   };
@@ -307,7 +307,7 @@ export function useHomeDevices() {
 
     requestWorkspaceOpen('files', {
       deviceId: String(device.Id),
-      deviceName: buildWorkspaceDeviceName(device, '文件管理')
+      deviceName: buildWorkspaceDeviceName(device, t('FilePage.Title', '文件管理'))
     });
     router.push({ name: 'files' });
   };
@@ -318,7 +318,7 @@ export function useHomeDevices() {
 
     requestWorkspaceOpen('apps', {
       deviceId: String(device.Id),
-      deviceName: buildWorkspaceDeviceName(device, '应用管理')
+      deviceName: buildWorkspaceDeviceName(device, t('AppPage.Title', '应用管理'))
     });
     router.push({ name: 'apps' });
   };
@@ -328,7 +328,7 @@ export function useHomeDevices() {
     activeMenuDeviceId.value = null;
     fetchingEncoders.value = true;
     showEncodersDialog.value = true;
-    encodersDeviceName.value = buildWorkspaceDeviceName(device, '未知设备');
+    encodersDeviceName.value = buildWorkspaceDeviceName(device, t('Devices.UnknownDevice', '未知设备'));
     deviceEncoders.value = [];
 
     try {

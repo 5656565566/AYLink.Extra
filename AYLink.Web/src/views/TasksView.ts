@@ -1,6 +1,7 @@
 import { defineComponent } from 'vue';
 import { computed, onMounted, ref } from 'vue';
 import WorkspaceTabs from '../components/WorkspaceTabs.vue';
+import { useI18n } from '../composables/useI18n';
 import { persistSessionTabs, restoreSessionTabs } from '../features/workspace/sessionTabs';
 import type { SessionTabItem } from '../types/workspace';
 
@@ -10,6 +11,8 @@ export default defineComponent({
     WorkspaceTabs
   },
   setup() {
+    const { t } = useI18n();
+
     interface SimpleTab extends SessionTabItem {
       title: string;
     }
@@ -36,7 +39,7 @@ export default defineComponent({
 
     const ensureDefaultTab = () => {
       if (tabs.value.length === 0) {
-        tabs.value = [{ key: 'tasks-default', title: '任务管理' }];
+        tabs.value = [{ key: 'tasks-default', title: t('Nav.Tasks', '任务管理') }];
         activeTabKey.value = 'tasks-default';
         persistTabs();
       }
@@ -72,6 +75,7 @@ export default defineComponent({
     return {
       STORAGE_KEY,
       ACTIVE_KEY,
+      t,
       tabs,
       activeTabKey,
       activeTab,

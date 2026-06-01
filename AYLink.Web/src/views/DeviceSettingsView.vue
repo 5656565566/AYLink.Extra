@@ -11,7 +11,7 @@
         <h2 class="title">{{ deviceName }}</h2>
       </div>
     </div>
-    
+
     <div class="content-area">
       <div v-if="loading" class="empty-state">
         <div class="spinner"></div>
@@ -100,7 +100,7 @@
             </select>
           </SettingItem>
         </SettingSection>
-        
+
         <SettingSection title="电源与交互">
           <SettingItem
             title="保持设备唤醒"
@@ -155,7 +155,7 @@
           </SettingItem>
           <SettingItem
             title="鼠标 HID 输入"
-            description="使用虚拟 HID 鼠标设备进行输入（需要 Android 12+）"
+            description="使用虚拟 HID 鼠标设备进行输入（需要 Android 12+）投屏页面按下 ALT 锁定鼠标"
           >
             <div class="toggle-switch" :class="{ active: settings.HidMouse }" @click="toggleSetting('HidMouse')">
               <div class="toggle-knob"></div>

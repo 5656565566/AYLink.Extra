@@ -34,6 +34,24 @@ import { useCastTabs } from '../features/screencast/useCastTabs';
 import { useCastSessionPersistence } from '../features/screencast/useCastSessionPersistence';
 import type { CastTab } from '../types/screencast';
 import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
+import {
+  buildHidKeyboardReport,
+  buildHidMouseReport,
+  buildUhidCreateMessage,
+  buildUhidDestroyMessage,
+  buildUhidInputMessage,
+  clampSignedByte,
+  KEYBOARD_REPORT_DESC,
+  mapBrowserCodeToHidKey,
+  mapMouseButtonToHidMask,
+  RELATIVE_MOUSE_REPORT_DESC,
+  SCRCPY_HID_KEYBOARD_ID,
+  SCRCPY_HID_MOUSE_ID,
+  SCRCPY_MSG_UHID_CREATE,
+  SCRCPY_MSG_UHID_DESTROY,
+  SCRCPY_MSG_UHID_INPUT
+} from '../lib/input/hidProtocol';
+import { createHidSession } from '../lib/input/hidSession';
 import { createLatestRequestController } from '../lib/async/latestRequest';
 import { isAbortError } from '../lib/async/abort';
 
@@ -146,12 +164,6 @@ export default defineComponent({
 
     const SCRCPY_MSG_SET_SCREEN_POWER_MODE = 10;
 
-    const SCRCPY_MSG_UHID_CREATE = 12;
-
-    const SCRCPY_MSG_UHID_INPUT = 13;
-
-    const SCRCPY_MSG_UHID_DESTROY = 14;
-
     const SCRCPY_MSG_RESIZE_DISPLAY = 21;
 
     const LOCAL_META_CONTROL_PREFIX = 0xff;
@@ -163,10 +175,6 @@ export default defineComponent({
     const SCRCPY_ACTION_UP = 1;
 
     const SCRCPY_ACTION_MOVE = 2;
-
-    const SCRCPY_HID_MOUSE_ID = 1;
-
-    const SCRCPY_HID_KEYBOARD_ID = 2;
 
     const ANDROID_KEYCODE_BACK = 4;
 
@@ -183,26 +191,6 @@ export default defineComponent({
     const ANDROID_KEYCODE_VOLUME_DOWN = 25;
 
     const ANDROID_KEYCODE_MUTE = 164;
-
-    const RELATIVE_MOUSE_REPORT_DESC = new Uint8Array([
-      0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x09, 0x01, 0xA1, 0x00,
-      0x05, 0x09, 0x19, 0x01, 0x29, 0x05, 0x15, 0x00, 0x25, 0x01,
-      0x95, 0x05, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01, 0x75, 0x03,
-      0x81, 0x01, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x09, 0x38,
-      0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x03, 0x81, 0x06,
-      0x05, 0x0C, 0x0A, 0x38, 0x02, 0x15, 0x81, 0x25, 0x7F, 0x75,
-      0x08, 0x95, 0x01, 0x81, 0x06, 0xC0, 0xC0
-    ]);
-
-    const KEYBOARD_REPORT_DESC = new Uint8Array([
-      0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07, 0x19, 0xE0,
-      0x29, 0xE7, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x08,
-      0x81, 0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x01, 0x95, 0x05,
-      0x75, 0x01, 0x05, 0x08, 0x19, 0x01, 0x29, 0x05, 0x91, 0x02,
-      0x95, 0x01, 0x75, 0x03, 0x91, 0x01, 0x95, 0x06, 0x75, 0x08,
-      0x15, 0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00, 0x29, 0x65,
-      0x81, 0x00, 0xC0
-    ]);
 
     const { t } = useI18n();
 
@@ -421,10 +409,6 @@ export default defineComponent({
     let nextScrcpyPointerId = 0n;
 
     const scrcpyPointerIds = new Map<number, bigint>();
-
-    let currentHidMouseButtons = 0;
-
-    const pressedHidKeys = new Set<number>();
 
     let lastTouchPointerAt = 0;
 
@@ -1984,6 +1968,16 @@ export default defineComponent({
       sendBinaryControlMessage(payload, getMetaControlChannel());
     };
 
+    const hidSession = createHidSession({
+      getIsKeyboardEnabled: () => isHidKeyboardEnabled.value,
+      getIsMouseEnabled: () => isHidMouseEnabled.value,
+      sendBinaryControlMessage,
+      sendMetaControlMessage,
+      getPointerMoveChannel: () => pointerMoveChannel,
+      getDefaultControlChannel: () => dataChannel,
+      pointerMoveBufferLimit: POINTER_MOVE_BUFFER_LIMIT
+    });
+
     const writeUInt16BE = (view: DataView, offset: number, value: number) => {
       view.setUint16(offset, Math.max(0, Math.min(0xffff, value)), false);
     };
@@ -2032,34 +2026,6 @@ export default defineComponent({
       return payload;
     };
 
-    const buildUhidCreateMessage = (id: number, reportDesc: Uint8Array) => {
-      const buffer = new ArrayBuffer(1 + 2 + 2 + reportDesc.length);
-      const view = new DataView(buffer);
-      view.setUint8(0, SCRCPY_MSG_UHID_CREATE);
-      writeUInt16BE(view, 1, id);
-      writeUInt16BE(view, 3, reportDesc.length);
-      new Uint8Array(buffer, 5).set(reportDesc);
-      return new Uint8Array(buffer);
-    };
-
-    const buildUhidInputMessage = (id: number, data: Uint8Array) => {
-      const buffer = new ArrayBuffer(1 + 2 + 2 + data.length);
-      const view = new DataView(buffer);
-      view.setUint8(0, SCRCPY_MSG_UHID_INPUT);
-      writeUInt16BE(view, 1, id);
-      writeUInt16BE(view, 3, data.length);
-      new Uint8Array(buffer, 5).set(data);
-      return new Uint8Array(buffer);
-    };
-
-    const buildUhidDestroyMessage = (id: number) => {
-      const buffer = new ArrayBuffer(3);
-      const view = new DataView(buffer);
-      view.setUint8(0, SCRCPY_MSG_UHID_DESTROY);
-      writeUInt16BE(view, 1, id);
-      return new Uint8Array(buffer);
-    };
-
     const buildResizeDisplayMessage = (width: number, height: number) => {
       const buffer = new ArrayBuffer(5);
       const view = new DataView(buffer);
@@ -2067,37 +2033,6 @@ export default defineComponent({
       writeUInt16BE(view, 1, width);
       writeUInt16BE(view, 3, height);
       return new Uint8Array(buffer);
-    };
-
-    const buildHidMouseReport = (buttons: number, dx: number, dy: number, vWheel: number, hWheel: number) => {
-      return new Uint8Array([
-        buttons & 0xff,
-        dx & 0xff,
-        dy & 0xff,
-        vWheel & 0xff,
-        hWheel & 0xff
-      ]);
-    };
-
-    const buildHidKeyboardReport = () => {
-      const report = new Uint8Array(8);
-      let modifiers = 0;
-      let keyIndex = 2;
-    
-      for (const key of pressedHidKeys) {
-        if (key >= 0xe0 && key <= 0xe7) {
-          modifiers |= 1 << (key - 0xe0);
-          continue;
-        }
-    
-        if (keyIndex < 8) {
-          report[keyIndex] = key;
-          keyIndex += 1;
-        }
-      }
-    
-      report[0] = modifiers;
-      return report;
     };
 
     const buildTouchMessage = (
@@ -2197,141 +2132,16 @@ export default defineComponent({
       return 0;
     };
 
-    const mapBrowserCodeToHidKey = (code: string) => {
-      switch (code) {
-        case 'KeyA': return 0x04;
-        case 'KeyB': return 0x05;
-        case 'KeyC': return 0x06;
-        case 'KeyD': return 0x07;
-        case 'KeyE': return 0x08;
-        case 'KeyF': return 0x09;
-        case 'KeyG': return 0x0a;
-        case 'KeyH': return 0x0b;
-        case 'KeyI': return 0x0c;
-        case 'KeyJ': return 0x0d;
-        case 'KeyK': return 0x0e;
-        case 'KeyL': return 0x0f;
-        case 'KeyM': return 0x10;
-        case 'KeyN': return 0x11;
-        case 'KeyO': return 0x12;
-        case 'KeyP': return 0x13;
-        case 'KeyQ': return 0x14;
-        case 'KeyR': return 0x15;
-        case 'KeyS': return 0x16;
-        case 'KeyT': return 0x17;
-        case 'KeyU': return 0x18;
-        case 'KeyV': return 0x19;
-        case 'KeyW': return 0x1a;
-        case 'KeyX': return 0x1b;
-        case 'KeyY': return 0x1c;
-        case 'KeyZ': return 0x1d;
-        case 'Digit1': return 0x1e;
-        case 'Digit2': return 0x1f;
-        case 'Digit3': return 0x20;
-        case 'Digit4': return 0x21;
-        case 'Digit5': return 0x22;
-        case 'Digit6': return 0x23;
-        case 'Digit7': return 0x24;
-        case 'Digit8': return 0x25;
-        case 'Digit9': return 0x26;
-        case 'Digit0': return 0x27;
-        case 'Enter':
-        case 'NumpadEnter': return 0x28;
-        case 'Escape': return 0x29;
-        case 'Backspace': return 0x2a;
-        case 'Tab': return 0x2b;
-        case 'Space': return 0x2c;
-        case 'Minus': return 0x2d;
-        case 'Equal': return 0x2e;
-        case 'BracketLeft': return 0x2f;
-        case 'BracketRight': return 0x30;
-        case 'Backslash': return 0x31;
-        case 'Semicolon': return 0x33;
-        case 'Quote': return 0x34;
-        case 'Backquote': return 0x35;
-        case 'Comma': return 0x36;
-        case 'Period': return 0x37;
-        case 'Slash': return 0x38;
-        case 'CapsLock': return 0x39;
-        case 'F1': return 0x3a;
-        case 'F2': return 0x3b;
-        case 'F3': return 0x3c;
-        case 'F4': return 0x3d;
-        case 'F5': return 0x3e;
-        case 'F6': return 0x3f;
-        case 'F7': return 0x40;
-        case 'F8': return 0x41;
-        case 'F9': return 0x42;
-        case 'F10': return 0x43;
-        case 'F11': return 0x44;
-        case 'F12': return 0x45;
-        case 'ArrowRight': return 0x4f;
-        case 'ArrowLeft': return 0x50;
-        case 'ArrowDown': return 0x51;
-        case 'ArrowUp': return 0x52;
-        case 'ControlLeft': return 0xe0;
-        case 'ShiftLeft': return 0xe1;
-        case 'AltLeft': return 0xe2;
-        case 'MetaLeft': return 0xe3;
-        case 'ControlRight': return 0xe4;
-        case 'ShiftRight': return 0xe5;
-        case 'AltRight': return 0xe6;
-        case 'MetaRight': return 0xe7;
-        default:
-          return 0;
-      }
-    };
-
-    const mapMouseButtonToHidMask = (button: number) => {
-      switch (button) {
-        case 0: return 0x01;
-        case 1: return 0x04;
-        case 2: return 0x02;
-        case 3: return 0x08;
-        case 4: return 0x10;
-        default: return 0;
-      }
-    };
-
-    const clampSignedByte = (value: number) => Math.max(-127, Math.min(127, value)) | 0;
-
     const initializeHidDevices = () => {
-      if (isHidMouseEnabled.value) {
-        sendMetaControlMessage(buildUhidCreateMessage(SCRCPY_HID_MOUSE_ID, RELATIVE_MOUSE_REPORT_DESC));
-        currentHidMouseButtons = 0;
-      }
-    
-      if (isHidKeyboardEnabled.value) {
-        sendMetaControlMessage(buildUhidCreateMessage(SCRCPY_HID_KEYBOARD_ID, KEYBOARD_REPORT_DESC));
-        pressedHidKeys.clear();
-      }
+      hidSession.initializeDevices();
     };
 
     const resetHidInputs = () => {
-      if (isHidMouseEnabled.value) {
-        currentHidMouseButtons = 0;
-        sendBinaryControlMessage(buildUhidInputMessage(SCRCPY_HID_MOUSE_ID, buildHidMouseReport(0, 0, 0, 0, 0)));
-      }
-    
-      if (isHidKeyboardEnabled.value) {
-        pressedHidKeys.clear();
-        sendBinaryControlMessage(buildUhidInputMessage(SCRCPY_HID_KEYBOARD_ID, buildHidKeyboardReport()));
-      }
+      hidSession.resetInputs();
     };
 
     const releaseHidDevices = () => {
-      resetHidInputs();
-    
-      if (isHidMouseEnabled.value) {
-        sendMetaControlMessage(buildUhidDestroyMessage(SCRCPY_HID_MOUSE_ID));
-      }
-    
-      if (isHidKeyboardEnabled.value) {
-        sendMetaControlMessage(buildUhidDestroyMessage(SCRCPY_HID_KEYBOARD_ID));
-      }
-    
-      currentHidMouseButtons = 0;
-      pressedHidKeys.clear();
+      hidSession.releaseDevices();
     };
 
     const sendAndroidCommand = (action: string) => {
@@ -2351,19 +2161,7 @@ export default defineComponent({
     };
 
     const sendKeyboardEvent = (phase: 'down' | 'up', event: KeyboardEvent) => {
-      if (isHidKeyboardEnabled.value) {
-        const hidKey = mapBrowserCodeToHidKey(event.code);
-        if (!hidKey) {
-          return;
-        }
-    
-        if (phase === 'down') {
-          pressedHidKeys.add(hidKey);
-        } else {
-          pressedHidKeys.delete(hidKey);
-        }
-    
-        sendBinaryControlMessage(buildUhidInputMessage(SCRCPY_HID_KEYBOARD_ID, buildHidKeyboardReport()));
+      if (hidSession.sendKeyboardEvent(phase, event)) {
         return;
       }
     
@@ -2382,71 +2180,7 @@ export default defineComponent({
     };
 
     const sendHidMouseEvent = (payload: { phase: 'down' | 'up' | 'move' | 'wheel'; button?: number; dx?: number; dy?: number; wheelX?: number; wheelY?: number }) => {
-      if (!isHidMouseEnabled.value) {
-        return;
-      }
-    
-      const highFrequencyChannel =
-        pointerMoveChannel?.readyState === 'open'
-          ? pointerMoveChannel
-          : dataChannel;
-    
-      switch (payload.phase) {
-        case 'down':
-        case 'up': {
-          const mask = mapMouseButtonToHidMask(payload.button ?? 0);
-          if (!mask) {
-            return;
-          }
-    
-          if (payload.phase === 'down') {
-            currentHidMouseButtons |= mask;
-          } else {
-            currentHidMouseButtons &= ~mask;
-          }
-    
-          sendBinaryControlMessage(
-            buildUhidInputMessage(SCRCPY_HID_MOUSE_ID, buildHidMouseReport(currentHidMouseButtons, 0, 0, 0, 0))
-          );
-          return;
-        }
-        case 'move':
-          if (highFrequencyChannel?.bufferedAmount && highFrequencyChannel.bufferedAmount > POINTER_MOVE_BUFFER_LIMIT) {
-            return;
-          }
-          sendBinaryControlMessage(
-            buildUhidInputMessage(
-              SCRCPY_HID_MOUSE_ID,
-              buildHidMouseReport(
-                currentHidMouseButtons,
-                clampSignedByte(payload.dx ?? 0),
-                clampSignedByte(payload.dy ?? 0),
-                0,
-                0
-              )
-            ),
-            highFrequencyChannel
-          );
-          return;
-        case 'wheel':
-          if (highFrequencyChannel?.bufferedAmount && highFrequencyChannel.bufferedAmount > POINTER_MOVE_BUFFER_LIMIT) {
-            return;
-          }
-          sendBinaryControlMessage(
-            buildUhidInputMessage(
-              SCRCPY_HID_MOUSE_ID,
-              buildHidMouseReport(
-                currentHidMouseButtons,
-                0,
-                0,
-                clampSignedByte(-(payload.wheelY ?? 0)),
-                clampSignedByte(payload.wheelX ?? 0)
-              )
-            ),
-            highFrequencyChannel
-          );
-          return;
-      }
+      hidSession.sendMouseEvent(payload);
     };
 
     const syncPointerLockState = () => {
@@ -2486,6 +2220,8 @@ export default defineComponent({
     
       await requestMouseLock();
     };
+
+    const isAltToggleKey = (event: KeyboardEvent) => event.code === 'AltLeft' || event.code === 'AltRight';
 
     const clearPendingResumePlayback = () => {
       if (pendingResumePlaybackTimer != null) {
@@ -3989,7 +3725,7 @@ export default defineComponent({
         return;
       }
     
-      if (isHidMouseEnabled.value && !event.repeat && (event.code === 'AltLeft' || event.code === 'AltRight')) {
+      if (isHidMouseEnabled.value && !event.repeat && isAltToggleKey(event)) {
         event.preventDefault();
         void toggleMouseLock();
         return;
@@ -4004,7 +3740,7 @@ export default defineComponent({
         return;
       }
     
-      if (isHidMouseEnabled.value && (event.code === 'AltLeft' || event.code === 'AltRight')) {
+      if (isHidMouseEnabled.value && isAltToggleKey(event)) {
         event.preventDefault();
         return;
       }
@@ -4511,8 +4247,8 @@ export default defineComponent({
       clipboardDragStartOffset,
       nextScrcpyPointerId,
       scrcpyPointerIds,
-      currentHidMouseButtons,
-      pressedHidKeys,
+      currentHidMouseButtons: hidSession.getCurrentMouseButtons(),
+      pressedHidKeys: hidSession.getPressedKeys(),
       lastTouchPointerAt,
       pointerMoveFlushHandle,
       pointerMoveSampleTimer,

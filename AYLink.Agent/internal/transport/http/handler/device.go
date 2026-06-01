@@ -15,14 +15,14 @@ import (
 )
 
 type DeviceHandler struct {
-	service         *deviceservice.Service
-	appService      *appservice.Service
-	fileService     *fileservice.Service
-	settingsService *deviceservice.SettingsService
-	scrcpyService   *scrcpyservice.Service
+	service         DeviceService
+	appService      AppService
+	fileService     FileService
+	settingsService DeviceSettingsService
+	scrcpyService   ScrcpyService
 }
 
-func NewDeviceHandler(service *deviceservice.Service, appService *appservice.Service, fileService *fileservice.Service, settingsService *deviceservice.SettingsService, scrcpyService *scrcpyservice.Service) *DeviceHandler {
+func NewDeviceHandler(service DeviceService, appService AppService, fileService FileService, settingsService DeviceSettingsService, scrcpyService ScrcpyService) *DeviceHandler {
 	return &DeviceHandler{
 		service:         service,
 		appService:      appService,

@@ -4,14 +4,13 @@ import (
 	"net/http"
 
 	domainsettings "aylink-agent/internal/domain/settings"
-	settingsservice "aylink-agent/internal/service/settings"
 )
 
 type SettingsHandler struct {
-	service *settingsservice.Service
+	service SettingsService
 }
 
-func NewSettingsHandler(service *settingsservice.Service) *SettingsHandler {
+func NewSettingsHandler(service SettingsService) *SettingsHandler {
 	return &SettingsHandler{service: service}
 }
 

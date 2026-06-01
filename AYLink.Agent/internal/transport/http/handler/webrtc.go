@@ -12,7 +12,6 @@ import (
 
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
-	settingsservice "aylink-agent/internal/service/settings"
 	webrtcservice "aylink-agent/internal/service/webrtc"
 
 	"github.com/gorilla/websocket"
@@ -21,9 +20,9 @@ import (
 const runtimeJanitorInterval = 5 * time.Second
 
 type WebRTCHandler struct {
-	service  *webrtcservice.Service
-	settings *settingsservice.Service
-	scrcpy   *scrcpyservice.Service
+	service  WebRTCService
+	settings SettingsService
+	scrcpy   ScrcpyService
 	upgrader websocket.Upgrader
 
 	runtimeMu sync.Mutex
@@ -42,7 +41,7 @@ type managedRuntime struct {
 	lastUsedAt  time.Time
 }
 
-func NewWebRTCHandler(service *webrtcservice.Service, settings *settingsservice.Service, scrcpy *scrcpyservice.Service) *WebRTCHandler {
+func NewWebRTCHandler(service WebRTCService, settings SettingsService, scrcpy ScrcpyService) *WebRTCHandler {
 	handler := &WebRTCHandler{
 		service:  service,
 		settings: settings,
@@ -315,7 +314,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.service.HandleSignalWebSocket(context.Background(), ticket.DeviceID, ticket.SessionID, conn, h.settings, runtime); err != nil {
+	if err := h.service.HandleSignalWebSocket(r.Context(), ticket.DeviceID, ticket.SessionID, conn, h.settings, runtime); err != nil {
 		_ = conn.WriteJSON(map[string]any{
 			"type":    "error",
 			"message": "WebRTC 信令处理失败",

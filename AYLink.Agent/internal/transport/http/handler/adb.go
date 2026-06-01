@@ -5,14 +5,13 @@ import (
 	"net/http"
 
 	adberrors "aylink-agent/internal/infra/adb"
-	adbservice "aylink-agent/internal/service/adb"
 )
 
 type ADBHandler struct {
-	service *adbservice.Service
+	service ADBService
 }
 
-func NewADBHandler(service *adbservice.Service) *ADBHandler {
+func NewADBHandler(service ADBService) *ADBHandler {
 	return &ADBHandler{service: service}
 }
 

@@ -1,20 +1,21 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
 	domainauth "aylink-agent/internal/domain/auth"
-	authservice "aylink-agent/internal/service/auth"
 	"aylink-agent/internal/transport/http/middleware"
 )
 
 type AuthHandler struct {
-	service *authservice.Service
+	service AuthService
 }
 
-func NewAuthHandler(service *authservice.Service) *AuthHandler {
+func NewAuthHandler(service AuthService) *AuthHandler {
 	return &AuthHandler{service: service}
 }
 
@@ -101,10 +102,16 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		RefreshToken string `json:"refreshToken"`
 	}
 
-	_ = decodeJSONBody(r, &payload)
+	if err := decodeOptionalJSONBody(r, &payload); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
 	accessToken := extractBearerToken(r)
 
-	_ = h.service.Logout(r.Context(), accessToken, payload.RefreshToken)
+	if err := h.service.Logout(r.Context(), accessToken, payload.RefreshToken); err != nil {
+		WriteError(w, http.StatusInternalServerError, "LOGOUT_FAILED", "Errors.LogoutFailed", "退出登录失败")
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 	})
@@ -152,7 +159,10 @@ func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.service.LogoutAll(r.Context(), identity.UserID)
+	if err := h.service.LogoutAll(r.Context(), identity.UserID); err != nil {
+		WriteError(w, http.StatusInternalServerError, "LOGOUT_ALL_FAILED", "Errors.LogoutAllFailed", "退出全部会话失败")
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
@@ -281,7 +291,10 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		NewPassword string `json:"newPassword"`
 	}
-	_ = decodeJSONBody(r, &payload) // 忽略 error 发生 密码为空将会随机生成
+	if err := decodeJSONBody(r, &payload); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
 
 	password, err := h.service.ResetPassword(r.Context(), userID, payload.NewPassword)
 	if err != nil {
@@ -428,4 +441,16 @@ func idFromPath(path, prefix string) (int, error) {
 		value = value[:index]
 	}
 	return strconv.Atoi(value)
+}
+
+func decodeOptionalJSONBody(r *http.Request, target any) error {
+	if r == nil || r.Body == nil || r.Body == http.NoBody {
+		return nil
+	}
+
+	err := decodeJSONBody(r, target)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
 }

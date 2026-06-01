@@ -13,7 +13,7 @@ import (
 	"aylink-agent/internal/infra/sqlite"
 	authservice "aylink-agent/internal/service/auth"
 	deviceservice "aylink-agent/internal/service/device"
-	httptransport "aylink-agent/internal/transport/http"
+	httprouter "aylink-agent/internal/transport/http/router"
 )
 
 type App struct {
@@ -46,9 +46,10 @@ func New() (*App, error) {
 	authSvc := authservice.NewService(authRepo, logger)
 	deviceRepo := sqlite.NewDeviceRepository(db)
 	deviceSvc := deviceservice.NewService(deviceRepo)
+	deviceSvc.SetLogger(logger)
 	deviceSvc.SetADBManager(adbManager)
 
-	router := httptransport.NewRouter(httptransport.Dependencies{
+	router := httprouter.New(httprouter.Dependencies{
 		Config:      cfg,
 		Logger:      logger,
 		ADB:         adbManager,

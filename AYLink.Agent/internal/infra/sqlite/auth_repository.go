@@ -74,7 +74,7 @@ func (r *AuthRepository) ListUsers(ctx context.Context) ([]domainauth.User, erro
 
 		users = append(users, user)
 	}
-	return users, nil
+	return users, rows.Err()
 }
 
 func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash, passwordSalt string, roleIds []int) (*domainauth.User, error) {
@@ -112,8 +112,14 @@ func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash,
 		return nil, err
 	}
 
-	roles, _ := r.GetRoleSummariesForUser(ctx, userId)
-	permissions, _ := r.GetPermissionsForUser(ctx, userId)
+	roles, err := r.GetRoleSummariesForUser(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+	permissions, err := r.GetPermissionsForUser(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
 
 	return &domainauth.User{
 		ID:          record.ID,
@@ -158,8 +164,14 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID int, username st
 		return nil, err
 	}
 
-	roles, _ := r.GetRoleSummariesForUser(ctx, userID)
-	permissions, _ := r.GetPermissionsForUser(ctx, userID)
+	roles, err := r.GetRoleSummariesForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	permissions, err := r.GetPermissionsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 
 	return &domainauth.User{
 		ID:          record.ID,
@@ -222,7 +234,10 @@ func (r *AuthRepository) GetRoleByName(ctx context.Context, name string) (*domai
 		return nil, err
 	}
 	role.Description = description.String
-	permissions, _ := r.getPermissionsForRole(ctx, role.ID)
+	permissions, err := r.getPermissionsForRole(ctx, role.ID)
+	if err != nil {
+		return nil, err
+	}
 	role.Permissions = permissions
 	return &role, nil
 }
@@ -241,7 +256,10 @@ func (r *AuthRepository) GetRoleByID(ctx context.Context, id int) (*domainauth.R
 		return nil, err
 	}
 	role.Description = description.String
-	permissions, _ := r.getPermissionsForRole(ctx, role.ID)
+	permissions, err := r.getPermissionsForRole(ctx, role.ID)
+	if err != nil {
+		return nil, err
+	}
 	role.Permissions = permissions
 	return &role, nil
 }
@@ -332,7 +350,7 @@ func (r *AuthRepository) getPermissionsForRole(ctx context.Context, roleID int) 
 		}
 		permissions = append(permissions, code)
 	}
-	return permissions, nil
+	return permissions, rows.Err()
 }
 
 func (r *AuthRepository) GetRefreshToken(ctx context.Context, tokenHash string) (*domainauth.TokenRecord, *domainauth.UserRecord, error) {

@@ -2,15 +2,13 @@ package handler
 
 import (
 	"net/http"
-
-	statusservice "aylink-agent/internal/service/status"
 )
 
 type StatusHandler struct {
-	service *statusservice.Service
+	service StatusService
 }
 
-func NewStatusHandler(service *statusservice.Service) *StatusHandler {
+func NewStatusHandler(service StatusService) *StatusHandler {
 	return &StatusHandler{service: service}
 }
 

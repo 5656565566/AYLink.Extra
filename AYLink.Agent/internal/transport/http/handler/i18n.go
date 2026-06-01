@@ -6,15 +6,14 @@ import (
 	"strings"
 
 	i18nservice "aylink-agent/internal/service/i18n"
-	settingsservice "aylink-agent/internal/service/settings"
 )
 
 type I18NHandler struct {
-	i18n     *i18nservice.Service
-	settings *settingsservice.Service
+	i18n     I18NService
+	settings SettingsService
 }
 
-func NewI18NHandler(i18n *i18nservice.Service, settings *settingsservice.Service) *I18NHandler {
+func NewI18NHandler(i18n I18NService, settings SettingsService) *I18NHandler {
 	return &I18NHandler{
 		i18n:     i18n,
 		settings: settings,

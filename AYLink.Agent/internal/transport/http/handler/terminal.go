@@ -14,7 +14,7 @@ import (
 )
 
 type TerminalHandler struct {
-	service  *terminalservice.Service
+	service  TerminalService
 	upgrader websocket.Upgrader
 }
 
@@ -26,7 +26,7 @@ type terminalMessage struct {
 	Rows    int    `json:"rows,omitempty"`
 }
 
-func NewTerminalHandler(service *terminalservice.Service) *TerminalHandler {
+func NewTerminalHandler(service TerminalService) *TerminalHandler {
 	return &TerminalHandler{
 		service: service,
 		upgrader: websocket.Upgrader{
@@ -87,7 +87,7 @@ func (h *TerminalHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *TerminalHandler) readClientMessages(ctx context.Context, conn *websocket.Conn, session *terminalservice.Session, errCh chan<- error) {
+func (h *TerminalHandler) readClientMessages(ctx context.Context, conn *websocket.Conn, session TerminalSession, errCh chan<- error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -118,7 +118,7 @@ func (h *TerminalHandler) readClientMessages(ctx context.Context, conn *websocke
 	}
 }
 
-func (h *TerminalHandler) pumpShellPackets(session *terminalservice.Session, writer *wsWriter, errCh chan<- error) {
+func (h *TerminalHandler) pumpShellPackets(session TerminalSession, writer *wsWriter, errCh chan<- error) {
 	for {
 		packet, err := session.ReadPacket()
 		if err != nil {

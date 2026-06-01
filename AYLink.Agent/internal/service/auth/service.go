@@ -32,6 +32,7 @@ var (
 	ErrUnauthorized       = errors.New("unauthorized")
 	ErrUsernameExists     = errors.New("username already exists")
 	ErrRoleExists         = errors.New("role already exists")
+	ErrPasswordEmpty      = errors.New("password is required")
 )
 
 var AllPermissions = []string{
@@ -67,8 +68,14 @@ func (s *Service) EnsureBootstrapAdmin(ctx context.Context) error {
 	}
 
 	username := "admin"
-	password := generateToken(24) // 生成初始随机密码
-	salt := createSalt()
+	password, err := generateToken(24) // 生成初始随机密码
+	if err != nil {
+		return err
+	}
+	salt, err := createSalt()
+	if err != nil {
+		return err
+	}
 	hash := hashPassword(password, salt)
 
 	// 需要 Administrator 角色的 ID
@@ -200,8 +207,11 @@ func (s *Service) GetUsers(ctx context.Context) ([]domainauth.User, error) {
 }
 
 func (s *Service) CreateUser(ctx context.Context, username, password string, roleIds []int) (*domainauth.User, error) {
-	if strings.TrimSpace(username) == "" || strings.TrimSpace(password) == "" {
-		return nil, errors.New("username and password are required")
+	if strings.TrimSpace(username) == "" {
+		return nil, errors.New("username is required")
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, ErrPasswordEmpty
 	}
 
 	existing, err := s.repo.GetUserByUsername(ctx, username)
@@ -212,7 +222,10 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 		return nil, ErrUsernameExists
 	}
 
-	salt := createSalt()
+	salt, err := createSalt()
+	if err != nil {
+		return nil, err
+	}
 	hash := hashPassword(password, salt)
 
 	return s.repo.CreateUser(ctx, strings.TrimSpace(username), hash, salt, normalizeIds(roleIds))
@@ -238,7 +251,9 @@ func (s *Service) UpdateUser(ctx context.Context, userID int, username string, i
 	}
 
 	if !isActive {
-		_ = s.LogoutAll(ctx, userID)
+		if err := s.LogoutAll(ctx, userID); err != nil {
+			return nil, err
+		}
 	}
 
 	return user, nil
@@ -246,17 +261,26 @@ func (s *Service) UpdateUser(ctx context.Context, userID int, username string, i
 
 func (s *Service) ResetPassword(ctx context.Context, userID int, newPassword string) (string, error) {
 	password := strings.TrimSpace(newPassword)
+	var err error
 	if password == "" {
-		password = generateToken(24)
+		password, err = generateToken(24)
+		if err != nil {
+			return "", err
+		}
 	}
-	salt := createSalt()
+	salt, err := createSalt()
+	if err != nil {
+		return "", err
+	}
 	hash := hashPassword(password, salt)
 
 	if err := s.repo.UpdateUserPassword(ctx, userID, hash, salt); err != nil {
 		return "", err
 	}
 
-	_ = s.LogoutAll(ctx, userID)
+	if err := s.LogoutAll(ctx, userID); err != nil {
+		return "", err
+	}
 	return password, nil
 }
 
@@ -273,15 +297,22 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID int, currentPass
 		return errors.New("Current password is incorrect")
 	}
 
-	salt := createSalt()
-	hash := hashPassword(strings.TrimSpace(newPassword), salt)
+	trimmedNewPassword := strings.TrimSpace(newPassword)
+	if trimmedNewPassword == "" {
+		return ErrPasswordEmpty
+	}
+
+	salt, err := createSalt()
+	if err != nil {
+		return err
+	}
+	hash := hashPassword(trimmedNewPassword, salt)
 
 	if err := s.repo.UpdateUserPassword(ctx, userID, hash, salt); err != nil {
 		return err
 	}
 
-	_ = s.LogoutAll(ctx, userID)
-	return nil
+	return s.LogoutAll(ctx, userID)
 }
 
 func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive bool, actingUserID *int) error {
@@ -309,7 +340,7 @@ func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive b
 
 	_, err = s.repo.UpdateUser(ctx, userID, user.Username, isActive, roleIds)
 	if err == nil && !isActive {
-		_ = s.LogoutAll(ctx, userID)
+		err = s.LogoutAll(ctx, userID)
 	}
 
 	return err
@@ -389,10 +420,18 @@ func (s *Service) GetAvailablePermissions() []domainauth.PermissionDescriptor {
 
 func (s *Service) createLoginResult(ctx context.Context, user domainauth.UserRecord) (*domainauth.LoginResult, error) {
 	now := time.Now().UTC()
+	accessToken, err := generateToken(32)
+	if err != nil {
+		return nil, err
+	}
+	refreshToken, err := generateToken(48)
+	if err != nil {
+		return nil, err
+	}
 	pair := domainauth.TokenPair{
-		AccessToken:           generateToken(32),
+		AccessToken:           accessToken,
 		AccessTokenExpiresAt:  now.Add(accessTokenTTL),
-		RefreshToken:          generateToken(48),
+		RefreshToken:          refreshToken,
 		RefreshTokenExpiresAt: now.Add(refreshTokenTTL),
 	}
 	if err := s.repo.CreateSession(ctx, user, pair); err != nil {
@@ -453,16 +492,20 @@ func verifyPassword(password, salt, expectedHash string) bool {
 	return subtle.ConstantTimeCompare([]byte(actual), []byte(expectedHash)) == 1
 }
 
-func generateToken(length int) string {
+func generateToken(length int) (string, error) {
 	bytes := make([]byte, length)
-	_, _ = rand.Read(bytes)
-	return strings.TrimRight(base64.StdEncoding.EncodeToString(bytes), "=")
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate token entropy: %w", err)
+	}
+	return strings.TrimRight(base64.StdEncoding.EncodeToString(bytes), "="), nil
 }
 
-func createSalt() string {
+func createSalt() (string, error) {
 	bytes := make([]byte, passwordSaltSize)
-	_, _ = rand.Read(bytes)
-	return base64.StdEncoding.EncodeToString(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate password salt entropy: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(bytes), nil
 }
 
 func hashPassword(password, salt string) string {

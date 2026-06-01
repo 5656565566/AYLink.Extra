@@ -12,6 +12,7 @@ import (
 
 	domainadb "aylink-agent/internal/domain/adb"
 	domaindevice "aylink-agent/internal/domain/device"
+	"aylink-agent/internal/infra/logging"
 )
 
 var (
@@ -45,16 +46,25 @@ type ADBManager interface {
 type Service struct {
 	repo            Repository
 	adb             ADBManager
+	logger          logging.Logger
 	reconnectMu     sync.Mutex
 	reconnectQueue  chan reconnectRequest
 	reconnectingIDs map[int]struct{}
 	reconnectOnce   sync.Once
 }
 
+type noopLogger struct{}
+
+func (noopLogger) Debug(string, ...any) {}
+func (noopLogger) Info(string, ...any)  {}
+func (noopLogger) Warn(string, ...any)  {}
+func (noopLogger) Error(string, ...any) {}
+
 type reconnectRequest struct {
-	ID   int
-	Host string
-	Port int
+	Context context.Context
+	ID      int
+	Host    string
+	Port    int
 }
 
 type CreateInput struct {
@@ -67,9 +77,18 @@ type CreateInput struct {
 func NewService(repo Repository) *Service {
 	return &Service{
 		repo:            repo,
+		logger:          noopLogger{},
 		reconnectQueue:  make(chan reconnectRequest, 64),
 		reconnectingIDs: make(map[int]struct{}),
 	}
+}
+
+func (s *Service) SetLogger(logger logging.Logger) {
+	if logger == nil {
+		s.logger = noopLogger{}
+		return
+	}
+	s.logger = logger
 }
 
 func (s *Service) SetADBManager(adb ADBManager) {
@@ -113,12 +132,16 @@ func (s *Service) List(ctx context.Context) ([]domaindevice.Device, error) {
 				device.Status = "online"
 				device.LastSeen = now
 				device.UpdatedAt = now
-				_ = s.repo.Update(ctx, device)
+				if err := s.repo.Update(ctx, device); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if device.Name != previousName {
 				device.UpdatedAt = now
-				_ = s.repo.Update(ctx, device)
+				if err := s.repo.Update(ctx, device); err != nil {
+					return nil, err
+				}
 			}
 			continue
 		}
@@ -126,15 +149,19 @@ func (s *Service) List(ctx context.Context) ([]domaindevice.Device, error) {
 		if s.shouldAutoReconnect(device, now) {
 			device.Status = "offline"
 			device.UpdatedAt = now
-			_ = s.repo.Update(ctx, device)
-			s.enqueueAutoReconnect(*device)
+			if err := s.repo.Update(ctx, device); err != nil {
+				return nil, err
+			}
+			s.enqueueAutoReconnect(ctx, *device)
 			continue
 		}
 
 		if !strings.EqualFold(device.Status, "offline") {
 			device.Status = "offline"
 			device.UpdatedAt = now
-			_ = s.repo.Update(ctx, device)
+			if err := s.repo.Update(ctx, device); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -168,20 +195,28 @@ func (s *Service) ResolveSerialForAccess(ctx context.Context, id int) (string, e
 			device.Status = "online"
 			device.LastSeen = now
 			device.UpdatedAt = now
-			_ = s.repo.Update(ctx, device)
+			if err := s.repo.Update(ctx, device); err != nil {
+				return "", err
+			}
 		}
 		return serial, nil
 	}
 
 	now := time.Now().UTC()
-	if s.tryAutoReconnect(ctx, device, now) {
+	reconnected, err := s.tryAutoReconnect(ctx, device, now)
+	if err != nil {
+		return "", err
+	}
+	if reconnected {
 		return serial, nil
 	}
 
 	if !strings.EqualFold(device.Status, "offline") {
 		device.Status = "offline"
 		device.UpdatedAt = now
-		_ = s.repo.Update(ctx, device)
+		if err := s.repo.Update(ctx, device); err != nil {
+			return "", err
+		}
 	}
 	return "", ErrDeviceOffline
 }
@@ -205,7 +240,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*domaindevice.
 			}
 		}
 
-		_ = s.adb.ConnectDevice(ctx, host, *port)
+		if err := s.adb.ConnectDevice(ctx, host, *port); err != nil {
+			return nil, fmt.Errorf("adb connection failed: %w", err)
+		}
 	}
 
 	if !s.isADBDeviceOnline(ctx, serial) {
@@ -406,26 +443,28 @@ func (s *Service) shouldAutoReconnect(device *domaindevice.Device, now time.Time
 	return now.Sub(device.UpdatedAt) >= autoReconnectInterval
 }
 
-func (s *Service) tryAutoReconnect(ctx context.Context, device *domaindevice.Device, now time.Time) bool {
+func (s *Service) tryAutoReconnect(ctx context.Context, device *domaindevice.Device, now time.Time) (bool, error) {
 	if s.adb == nil || !s.shouldAutoReconnect(device, now) {
-		return false
+		return false, nil
 	}
 
 	reconnectCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	err := s.adb.ConnectDevice(reconnectCtx, *device.IPAddress, *device.Port)
 	cancel()
 	if err != nil {
-		return false
+		return false, nil
 	}
 
 	device.Status = "online"
 	device.LastSeen = now
 	device.UpdatedAt = now
-	_ = s.repo.Update(ctx, device)
-	return true
+	if err := s.repo.Update(ctx, device); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-func (s *Service) enqueueAutoReconnect(device domaindevice.Device) {
+func (s *Service) enqueueAutoReconnect(ctx context.Context, device domaindevice.Device) {
 	if s.adb == nil || device.IPAddress == nil || device.Port == nil {
 		return
 	}
@@ -444,9 +483,10 @@ func (s *Service) enqueueAutoReconnect(device domaindevice.Device) {
 	s.reconnectMu.Unlock()
 
 	request := reconnectRequest{
-		ID:   device.ID,
-		Host: host,
-		Port: *device.Port,
+		Context: ctx,
+		ID:      device.ID,
+		Host:    host,
+		Port:    *device.Port,
 	}
 
 	select {
@@ -469,14 +509,20 @@ func (s *Service) processReconnect(request reconnectRequest) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	baseCtx := request.Context
+	if baseCtx == nil {
+		baseCtx = context.TODO()
+	}
+	baseCtx = context.WithoutCancel(baseCtx)
+
+	ctx, cancel := context.WithTimeout(baseCtx, 1500*time.Millisecond)
 	err := s.adb.ConnectDevice(ctx, request.Host, request.Port)
 	cancel()
 	if err != nil {
 		return
 	}
 
-	device, err := s.repo.GetByID(context.Background(), request.ID)
+	device, err := s.repo.GetByID(baseCtx, request.ID)
 	if err != nil || device == nil {
 		return
 	}
@@ -485,8 +531,10 @@ func (s *Service) processReconnect(request reconnectRequest) {
 	device.Status = "online"
 	device.LastSeen = now
 	device.UpdatedAt = now
-	s.refreshDefaultLikeName(context.Background(), device, device.Serial)
-	_ = s.repo.Update(context.Background(), device)
+	s.refreshDefaultLikeName(baseCtx, device, device.Serial)
+	if err := s.repo.Update(baseCtx, device); err != nil {
+		s.logger.Warn("background reconnect persisted device state failed", "deviceID", request.ID, "serial", device.Serial, "err", err)
+	}
 }
 
 func (s *Service) finishReconnect(deviceID int) {

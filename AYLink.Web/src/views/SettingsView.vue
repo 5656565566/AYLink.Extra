@@ -101,16 +101,18 @@
       </SettingSection>
 
       <SettingSection :title="t('Settings.About', '关于')">
-        <SettingItem :title="t('Settings.AppVersion', '应用版本')" description="1.0.0">
+        <SettingItem :title="t('Settings.AppVersion', '应用版本')" :description="appVersionDescription">
         </SettingItem>
         <SettingItem
           :title="t('Settings.CheckUpdates', '检查更新')"
           :description="t('Settings.CheckUpdatesDescription', '获取最新版本的应用程序')"
         >
-          <button class="fluent-btn">{{ t('Settings.CheckNow', '立即检查') }}</button>
+          <button class="fluent-btn" :disabled="isCheckingUpdates" @click="checkForUpdates">
+            {{ isCheckingUpdates ? t('Settings.CheckingUpdates', '检查中...') : t('Settings.CheckNow', '立即检查') }}
+          </button>
         </SettingItem>
         <SettingItem title="GitHub" description="https://github.com/5656565566/AYLink.Extra">
-          <button class="fluent-btn">{{ t('Settings.OpenGitHub', '打开 GitHub 仓库') }}</button>
+          <button class="fluent-btn" @click="openGitHubRepository">{{ t('Settings.OpenGitHub', '打开 GitHub 仓库') }}</button>
         </SettingItem>
         <SettingItem
           :title="t('Settings.RestoreDefaults', '恢复默认设置')"

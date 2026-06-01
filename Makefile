@@ -14,6 +14,10 @@ WEB_PATH        := ./AYLink.Web
 # 可执行文件名称
 AGENT_BINARY_NAME := AYLink-Agent
 
+# 应用版本
+APP_VERSION ?= 1.0.0
+APP_RELEASE_TAG ?= v$(APP_VERSION)
+
 
 # =============================================================================
 #  编译环境与工具链
@@ -32,6 +36,7 @@ BUILD_MODE ?= release
 # -w 移除 DWARF 调试信息
 LDFLAGS_RELEASE := -s -w
 LDFLAGS_DEBUG   :=
+LDFLAGS_VERSION := -X aylink-agent/internal/version.AgentVersion=$(APP_VERSION) -X aylink-agent/internal/version.WebVersion=$(APP_VERSION) -X aylink-agent/internal/version.ReleaseTag=$(APP_RELEASE_TAG)
 
 # 根据 BUILD_MODE 选择 LDFLAGS
 ifeq ($(BUILD_MODE), release)
@@ -41,7 +46,7 @@ else
 endif
 
 # 统一的 LDFLAGS
-LDFLAGS := -ldflags="$(LDFLAGS_VALUES)"
+LDFLAGS := -ldflags="$(LDFLAGS_VALUES) $(LDFLAGS_VERSION)"
 
 
 # =============================================================================
@@ -64,7 +69,7 @@ build: all
 web:
 	@echo "==> Building Web project..."
 	@cd $(WEB_PATH) && $(NPM) install
-	@cd $(WEB_PATH) && $(NPM) run build
+	@cd $(WEB_PATH) && AYLINK_VERSION=$(APP_VERSION) AYLINK_RELEASE_TAG=$(APP_RELEASE_TAG) $(NPM) run build
 	@echo "==> Web project build complete. Output directory: $(AGENT_PATH)/www"
 
 # 构建所有平台的 Agent 可执行文件 (依赖 Web 构建)

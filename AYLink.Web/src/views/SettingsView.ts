@@ -49,6 +49,16 @@ export default defineComponent({
 
     const canChangeOwnPassword = hasPermission('accounts.change-password');
 
+    const appVersionDescription = ref('1.0.0');
+
+    const currentAppVersion = ref('1.0.0');
+
+    const currentReleaseTag = ref('v1.0.0');
+
+    const latestReleaseUrl = ref('https://github.com/5656565566/AYLink.Extra/releases/latest');
+
+    const isCheckingUpdates = ref(false);
+
     function getLocalWebRtcScope() {
       return String(currentUser.value?.Id ?? 'anonymous');
     }
@@ -140,10 +150,10 @@ export default defineComponent({
       [webrtcTransportPolicy, webrtcServers, webrtcHostCandidateOverrideEnabled, webrtcHostCandidateOverrideIPsText, webrtcHostCandidatePortMin, webrtcHostCandidatePortMax, webrtcSinglePortMuxEnabled, webrtcSinglePortMuxBindPort, webrtcSinglePortMuxPublishPort],
       () => {
         if (isSettingInternally || !canManageRemoteSettings) return;
-        
+
         webrtcSaving.value = true;
         webrtcStatusMessage.value = t('Settings.Saving', '保存中...');
-        
+
         if (saveTimeout) window.clearTimeout(saveTimeout);
         saveTimeout = window.setTimeout(() => {
           void saveWebRtcSettings();
@@ -156,7 +166,7 @@ export default defineComponent({
       [useLocalWebRtcOverride, localWebrtcTransportPolicy, localWebrtcServers],
       () => {
         if (isLocalSettingInternally) return;
-    
+
         if (localSaveTimeout) window.clearTimeout(localSaveTimeout);
         localSaveTimeout = window.setTimeout(() => {
           saveLocalWebRtcSettings();
@@ -212,6 +222,39 @@ export default defineComponent({
       setNewDisplayDpiValue(Number((event.target as HTMLInputElement).value));
     }
 
+    function normalizeVersion(value: string) {
+      return value.trim().replace(/^[vV]/, '');
+    }
+
+    // 将 tag 版本拆成数字段 避免 1.10.0 被误判成小于 1.2.0
+    function compareVersions(left: string, right: string) {
+      const leftCore = normalizeVersion(left).split('-', 1)[0];
+      const rightCore = normalizeVersion(right).split('-', 1)[0];
+      const leftParts = leftCore.split('.').map((part) => Number.parseInt(part, 10) || 0);
+      const rightParts = rightCore.split('.').map((part) => Number.parseInt(part, 10) || 0);
+      const length = Math.max(leftParts.length, rightParts.length);
+
+      for (let index = 0; index < length; index += 1) {
+        const leftValue = leftParts[index] ?? 0;
+        const rightValue = rightParts[index] ?? 0;
+        if (leftValue === rightValue) {
+          continue;
+        }
+
+        return leftValue > rightValue ? 1 : -1;
+      }
+
+      return 0;
+    }
+
+    function openExternalUrl(url: string) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    function openGitHubRepository() {
+      openExternalUrl('https://github.com/5656565566/AYLink.Extra');
+    }
+
     async function handleUploadBackground(event: Event) {
       const input = event.target as HTMLInputElement;
       if (!input.files || input.files.length === 0) return;
@@ -232,7 +275,7 @@ export default defineComponent({
       const urlsText = urls.join('\n');
       const hasCredential = !!(server?.Username || server?.Credential);
       const isTurn = urls.some((u) => u.toLowerCase().startsWith('turn:')) || hasCredential;
-    
+
       return {
         id: createWebRtcServerFormId(),
         type: isTurn ? 'turn' : 'stun',
@@ -255,12 +298,12 @@ export default defineComponent({
       if (value == null || value === '') {
         return null;
       }
-    
+
       const numeric = typeof value === 'number' ? value : Number(value);
       if (!Number.isInteger(numeric) || numeric < 1 || numeric > 65535) {
         return null;
       }
-    
+
       return numeric;
     }
 
@@ -273,39 +316,39 @@ export default defineComponent({
             .map((url) => url.trim())
             .filter(Boolean)
             .filter((url, index, list) => list.findIndex((item) => item.toLowerCase() === url.toLowerCase()) === index);
-    
+
           if (urls.length === 0) {
             return null;
           }
-    
+
           const normalizedServer = {
             Urls: urls,
             Username: server.Username?.trim() || null,
             Credential: server.Credential || null
           };
-    
+
           const serverKey = `${[...urls].sort((a, b) => a.localeCompare(b)).join('\n')}||${normalizedServer.Username || ''}||${normalizedServer.Credential || ''}`;
           if (seenServers.has(serverKey)) {
             return null;
           }
-    
+
           seenServers.add(serverKey);
           return normalizedServer;
         })
         .filter((server): server is NonNullable<typeof server> => server != null);
-    
+
       const normalizedHostCandidateIPs = (payload?.HostCandidateOverrideIPs ?? [])
         .map((ip) => ip.trim())
         .filter(Boolean)
         .filter((ip, index, list) => list.findIndex((item) => item.toLowerCase() === ip.toLowerCase()) === index);
-    
+
       const normalizedPortMin = normalizeOptionalPort(payload?.HostCandidatePortMin);
       const normalizedPortMax = normalizeOptionalPort(payload?.HostCandidatePortMax);
       const hasValidPortRange = normalizedPortMin != null && normalizedPortMax != null && normalizedPortMin <= normalizedPortMax;
       const normalizedSinglePortMuxBindPort = normalizeOptionalPort(payload?.SinglePortMuxBindPort);
       const normalizedSinglePortMuxPublishPort = normalizeOptionalPort(payload?.SinglePortMuxPublishPort);
       const singlePortMuxEnabled = payload?.SinglePortMuxEnabled === true;
-    
+
       return {
         IceTransportPolicy: normalizedPolicy,
         IceServers: normalizedServers,
@@ -332,7 +375,7 @@ export default defineComponent({
       webrtcSinglePortMuxEnabled.value = normalizedPayload.SinglePortMuxEnabled === true;
       webrtcSinglePortMuxBindPort.value = normalizedPayload.SinglePortMuxBindPort != null ? String(normalizedPayload.SinglePortMuxBindPort) : '';
       webrtcSinglePortMuxPublishPort.value = normalizedPayload.SinglePortMuxPublishPort != null ? String(normalizedPayload.SinglePortMuxPublishPort) : '';
-    
+
       if (skipSaveTimer) window.clearTimeout(skipSaveTimer);
       skipSaveTimer = window.setTimeout(() => {
         isSettingInternally = false;
@@ -354,7 +397,7 @@ export default defineComponent({
       localWebrtcTransportPolicy.value = normalizedPayload.IceTransportPolicy === 'relay' ? 'relay' : 'all';
       const servers = normalizedPayload.IceServers?.map((server) => createWebRtcServerForm(server)) ?? [];
       localWebrtcServers.value = mergeServerDrafts(servers, localWebrtcServers.value);
-    
+
       if (localSkipSaveTimer) window.clearTimeout(localSkipSaveTimer);
       localSkipSaveTimer = window.setTimeout(() => {
         isLocalSettingInternally = false;
@@ -457,7 +500,7 @@ export default defineComponent({
         clearLocalWebRtcOverrideConfig(getLocalWebRtcScope());
         return;
       }
-    
+
       saveLocalWebRtcOverrideConfig(buildLocalWebRtcSettingsPayload(), getLocalWebRtcScope());
     }
 
@@ -485,16 +528,94 @@ export default defineComponent({
       router.push({ name: 'login' });
     }
 
+    async function loadAppVersion() {
+      const response = await apiFetch('/api/app/version', {
+        requiresAuth: false,
+        retryOnUnauthorized: false,
+        handleUnauthorized: false,
+        handleForbidden: false
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiErrorMessage(response, t('Settings.LoadVersionFailed', '加载版本信息失败')));
+      }
+
+      const payload = await response.json() as {
+        version?: string;
+        webVersion?: string;
+        releaseTag?: string;
+        latestReleaseUrl?: string;
+      };
+
+      const version = payload.webVersion ?? payload.version ?? '1.0.0';
+      currentAppVersion.value = version;
+      currentReleaseTag.value = payload.releaseTag ?? `v${version}`;
+      latestReleaseUrl.value = payload.latestReleaseUrl ?? latestReleaseUrl.value;
+      appVersionDescription.value = version;
+    }
+
+    async function checkForUpdates() {
+      if (isCheckingUpdates.value) {
+        return;
+      }
+
+      isCheckingUpdates.value = true;
+      try {
+        const response = await fetch('https://api.github.com/repos/5656565566/AYLink.Extra/releases/latest', {
+          headers: {
+            Accept: 'application/vnd.github+json'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(t('Settings.CheckUpdatesFailedMessage', '获取最新版本失败'));
+        }
+
+        const payload = await response.json() as {
+          html_url?: string;
+          tag_name?: string;
+        };
+
+        const latestTag = payload.tag_name ?? '';
+        const latestUrl = payload.html_url ?? latestReleaseUrl.value;
+        const compareResult = compareVersions(currentReleaseTag.value, latestTag);
+
+        if (compareResult < 0) {
+          notifications.show({
+            type: 'info',
+            title: t('Settings.UpdateAvailableTitle', '发现新版本'),
+            message: t('Settings.UpdateAvailableMessage', '当前版本 {0}，最新版本 {1}', currentAppVersion.value, normalizeVersion(latestTag))
+          });
+          openExternalUrl(latestUrl);
+          return;
+        }
+
+        notifications.show({
+          type: 'success',
+          title: t('Settings.UpToDateTitle', '已是最新版本'),
+          message: t('Settings.UpToDateMessage', '当前版本 {0} 已是最新版本', currentAppVersion.value)
+        });
+      } catch (error) {
+        notifications.show({
+          type: 'error',
+          title: t('Settings.CheckUpdatesFailedTitle', '检查更新失败'),
+          message: error instanceof Error ? error.message : t('Settings.CheckUpdatesFailedMessage', '获取最新版本失败')
+        });
+      } finally {
+        isCheckingUpdates.value = false;
+      }
+    }
+
     async function loadWebRtcSettings() {
       if (!canViewRemoteSettings) {
         return;
       }
-    
+
       const response = await apiFetch('/api/settings/webrtc-network');
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response, t('Settings.LoadFailed', '加载失败')));
       }
-    
+
       applyWebRtcSettings(await response.json());
     }
 
@@ -502,9 +623,9 @@ export default defineComponent({
       if (!canManageRemoteSettings) {
         return;
       }
-    
+
       webrtcSaving.value = true;
-    
+
       try {
         const response = await apiFetch('/api/settings/webrtc-network', {
           method: 'PUT',
@@ -513,14 +634,14 @@ export default defineComponent({
           },
           body: JSON.stringify(buildWebRtcSettingsPayload())
         });
-    
+
         if (!response.ok) {
           throw new Error(await readApiErrorMessage(response, t('Settings.SaveFailed', '保存失败')));
         }
-    
+
         applyWebRtcSettings(await response.json());
         webrtcStatusMessage.value = t('Settings.SaveSuccess', '保存成功');
-        
+
         window.setTimeout(() => {
           if (webrtcStatusMessage.value === t('Settings.SaveSuccess', '保存成功')) {
             webrtcStatusMessage.value = '';
@@ -538,18 +659,18 @@ export default defineComponent({
       if (!canChangeOwnPassword) {
         return;
       }
-    
+
       changePasswordError.value = '';
       if (!changePasswordForm.value.currentPassword || !changePasswordForm.value.newPassword) {
         changePasswordError.value = t('Settings.ChangePasswordRequired', '请完整填写密码信息');
         return;
       }
-    
+
       if (changePasswordForm.value.newPassword !== changePasswordForm.value.confirmPassword) {
         changePasswordError.value = t('Settings.PasswordMismatch', '两次输入的新密码不一致');
         return;
       }
-    
+
       changingPassword.value = true;
       try {
         const response = await apiFetch('/api/auth/change-password', {
@@ -566,7 +687,7 @@ export default defineComponent({
         if (!response.ok) {
           throw new Error(resolveApiErrorMessage(payload, t('Settings.ChangePasswordFailed', '修改密码失败')));
         }
-    
+
         notifications.show({
           type: 'success',
           title: t('Settings.ChangePasswordSuccessTitle', '密码已修改'),
@@ -583,7 +704,11 @@ export default defineComponent({
 
     onMounted(() => {
       loadLocalWebRtcSettings();
-    
+      void loadAppVersion().catch((error) => {
+        console.error('Failed to load app version:', error);
+        appVersionDescription.value = t('Settings.VersionUnavailable', '版本信息不可用');
+      });
+
       if (canViewRemoteSettings) {
         void loadServerLocale();
       }
@@ -622,6 +747,11 @@ export default defineComponent({
       canViewRemoteSettings,
       canManageRemoteSettings,
       canChangeOwnPassword,
+      appVersionDescription,
+      currentAppVersion,
+      currentReleaseTag,
+      latestReleaseUrl,
+      isCheckingUpdates,
       getLocalWebRtcScope,
       nextWebRtcServerFormId,
       createWebRtcServerFormId,
@@ -661,6 +791,10 @@ export default defineComponent({
       onUseLocalWebRtcOverrideChange,
       onNewDisplayDpiModeChange,
       onNewDisplayDpiValueChange,
+      normalizeVersion,
+      compareVersions,
+      openExternalUrl,
+      openGitHubRepository,
       handleUploadBackground,
       onWebRtcHostCandidateOverrideEnabledChange,
       onWebRtcSinglePortMuxEnabledChange,
@@ -685,6 +819,8 @@ export default defineComponent({
       openAccountManagement,
       closeChangePasswordDialog,
       handleLogout,
+      loadAppVersion,
+      checkForUpdates,
       loadWebRtcSettings,
       saveWebRtcSettings,
       submitChangePassword

@@ -23,6 +23,7 @@ import (
 	webrtcservice "aylink-agent/internal/service/webrtc"
 	"aylink-agent/internal/transport/http/handler"
 	"aylink-agent/internal/transport/http/middleware"
+	"aylink-agent/internal/version"
 )
 
 type Dependencies struct {
@@ -36,6 +37,7 @@ type Dependencies struct {
 
 type routeHandlers struct {
 	status   *handler.StatusHandler
+	version  *handler.VersionHandler
 	adb      *handler.ADBHandler
 	auth     *handler.AuthHandler
 	device   *handler.DeviceHandler
@@ -61,6 +63,7 @@ type routeGuards struct {
 func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	statusHandler := handler.NewStatusHandler(statusservice.NewService(deps.ADB))
+	versionHandler := handler.NewVersionHandler(version.AgentVersion, version.WebVersion, version.ReleaseTag)
 	adbHandler := handler.NewADBHandler(adbservice.NewService(deps.ADB))
 	authRepo := sqlite.NewAuthRepository(deps.DB)
 	authService := authservice.NewService(authRepo, deps.Logger)
@@ -100,6 +103,7 @@ func New(deps Dependencies) http.Handler {
 	guards := newRouteGuards(authMiddleware)
 	handlers := routeHandlers{
 		status:   statusHandler,
+		version:  versionHandler,
 		adb:      adbHandler,
 		auth:     authHandler,
 		device:   deviceHandler,

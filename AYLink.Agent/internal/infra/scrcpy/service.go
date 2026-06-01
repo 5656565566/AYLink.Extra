@@ -25,6 +25,10 @@ var (
 	encoderNamePattern  = regexp.MustCompile(`--(?:video|audio)-encoder=(\S+)`)
 )
 
+const serverStartupGrace = 2 * time.Second
+const serverStartupProbeInterval = 100 * time.Millisecond
+const serverStartupProbeCommandTimeout = 300 * time.Millisecond
+
 type Service struct {
 	logger     logging.Logger
 	client     *adbkit.Client
@@ -274,8 +278,54 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 		s.logger.Info("scrcpy server stream ended", "serial", serial, "scid", scid)
 	}()
 
+	// 设备端创建 scrcpy localabstract socket 存在启动竞态 尤其是到安卓设备延迟高
+	// 若客户端过早连接转发端口 adbd 会报 "failed to connect to socket"
+	// 然后本地读到 EOF 表现为首帧始终无法到达
+	// 轮询设备侧 socket 是否已经就绪 防止过早连接
+	if err := s.waitForServerReady(ctx, device, scid); err != nil {
+		_ = shellSession.Close()
+		return nil, err
+	}
+
 	s.logger.Info("scrcpy session started", "serial", serial, "scid", scid, "videoPort", ports.VideoPort, "audioPort", ports.AudioPort, "controlPort", ports.ControlPort)
 	return ports, nil
+}
+
+func (s *Service) waitForServerReady(ctx context.Context, device *adbkit.Device, scid int) error {
+	socketName := fmt.Sprintf("scrcpy_%d", scid)
+	deadline := time.NewTimer(serverStartupGrace)
+	defer deadline.Stop()
+
+	ticker := time.NewTicker(serverStartupProbeInterval)
+	defer ticker.Stop()
+
+	checkReady := func() bool {
+		probeCtx, cancel := context.WithTimeout(ctx, serverStartupProbeCommandTimeout)
+		defer cancel()
+
+		output, err := device.RunCommandContext(probeCtx, "cat /proc/net/unix")
+		if err != nil {
+			return false
+		}
+		return strings.Contains(output, socketName)
+	}
+
+	if checkReady() {
+		return nil
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return nil
+		case <-ticker.C:
+			if checkReady() {
+				return nil
+			}
+		}
+	}
 }
 
 func (s *Service) runQuery(ctx context.Context, serial string, options serverOptions) (string, error) {

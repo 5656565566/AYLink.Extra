@@ -92,6 +92,7 @@ type Repository interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	CreateUser(ctx context.Context, username, passwordHash, passwordSalt string, roleIds []int, deviceGroupIDs []int) (*User, error)
 	UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) (*User, error)
+	DeleteUser(ctx context.Context, userID int) error
 	UpdateUserPassword(ctx context.Context, userID int, passwordHash, passwordSalt string) error
 
 	ListRoles(ctx context.Context) ([]Role, error)
@@ -108,6 +109,7 @@ type Repository interface {
 	GetDirectDeviceGroupsForUser(ctx context.Context, userID int) ([]domaindevice.GroupSummary, error)
 	GetEffectiveDeviceGroupsForUser(ctx context.Context, userID int) ([]domaindevice.GroupSummary, error)
 	GetDeviceGroupsForRole(ctx context.Context, roleID int) ([]domaindevice.GroupSummary, error)
+	GetDeviceGroupsByIDs(ctx context.Context, ids []int) ([]domaindevice.GroupSummary, error)
 	SetDirectDeviceGroupsForUser(ctx context.Context, userID int, groupIDs []int) error
 	SetDeviceGroupsForRole(ctx context.Context, roleID int, groupIDs []int) error
 	CountAccessibleDevicesForUser(ctx context.Context, userID int) (int, error)

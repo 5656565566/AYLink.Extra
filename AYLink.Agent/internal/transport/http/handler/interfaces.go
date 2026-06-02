@@ -33,6 +33,7 @@ type AuthService interface {
 	GetUsers(ctx context.Context) ([]domainauth.User, error)
 	CreateUser(ctx context.Context, username, password string, roleIds []int, deviceGroupIds []int) (*domainauth.User, error)
 	UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIds []int, actingUserID *int) (*domainauth.User, error)
+	DeleteUser(ctx context.Context, userID int, actingUserID *int) error
 	ResetPassword(ctx context.Context, userID int, newPassword string) (string, error)
 	SetUserActiveState(ctx context.Context, userID int, isActive bool, actingUserID *int) error
 	GetRoles(ctx context.Context) ([]domainauth.Role, error)
@@ -68,6 +69,7 @@ type DeviceAccessService interface {
 type DeviceGroupService interface {
 	List(ctx context.Context) ([]domaindevice.Group, error)
 	ListOptions(ctx context.Context, keyword string) ([]domaindevice.GroupSummary, error)
+	ListOptionsForUser(ctx context.Context, userID int, keyword string) ([]domaindevice.GroupSummary, error)
 	GetByID(ctx context.Context, id int) (*domaindevice.Group, error)
 	Create(ctx context.Context, name, description string) (*domaindevice.Group, error)
 	Update(ctx context.Context, id int, name, description string) (*domaindevice.Group, error)

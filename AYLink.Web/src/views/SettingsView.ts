@@ -33,6 +33,7 @@ export default defineComponent({
       Name: string;
       Description?: string;
       DeviceCount?: number;
+      IsInternal?: boolean;
     }
 
     interface DeviceGroupItem extends DeviceGroupSummary {
@@ -252,6 +253,15 @@ export default defineComponent({
         return haystack.includes(keyword);
       });
     });
+
+    const editingGroup = computed(() => {
+      if (groupDialogMode.value !== 'edit' || editingGroupId.value == null) {
+        return null;
+      }
+      return deviceGroupItems.value.find((group) => group.Id === editingGroupId.value) || null;
+    });
+
+    const isEditingInternalGroup = computed(() => editingGroup.value?.IsInternal === true);
 
     let isSettingInternally = false;
 
@@ -665,9 +675,11 @@ export default defineComponent({
       editingGroupId.value = group.Id;
       groupForm.value.name = group.Name;
       groupForm.value.description = group.Description || '';
-      groupForm.value.deviceIds = groupManagementDevices.value
-        .filter((device) => Array.isArray(device.Groups) && device.Groups.some((item) => item.Id === group.Id))
-        .map((device) => device.Id);
+      groupForm.value.deviceIds = group.IsInternal
+        ? groupManagementDevices.value.map((device) => device.Id)
+        : groupManagementDevices.value
+          .filter((device) => Array.isArray(device.Groups) && device.Groups.some((item) => item.Id === group.Id))
+          .map((device) => device.Id);
       groupForm.value.roleIds = groupManagementRoles.value
         .filter((role) => Array.isArray(role.DeviceGroups) && role.DeviceGroups.some((item) => item.Id === group.Id))
         .map((role) => role.Id);
@@ -711,6 +723,10 @@ export default defineComponent({
     }
 
     async function loadGroupManagementData() {
+      return loadGroupManagementDataWithOptions({ includeDevices: true, includeAccounts: true });
+    }
+
+    async function loadGroupManagementDataWithOptions(options?: { includeDevices?: boolean; includeAccounts?: boolean }) {
       if (!canManageGroupSection.value) {
         return;
       }
@@ -719,11 +735,13 @@ export default defineComponent({
       groupManagementError.value = '';
 
       try {
+        const includeDevices = options?.includeDevices ?? canManageDevices.value;
+        const includeAccounts = options?.includeAccounts ?? canManageAccounts.value;
         const requests: Promise<Response>[] = [apiFetch('/api/device-groups')];
-        if (canManageDevices.value) {
+        if (includeDevices) {
           requests.push(apiFetch('/api/devices'));
         }
-        if (canManageAccounts.value) {
+        if (includeAccounts) {
           requests.push(apiFetch('/api/accounts/users'));
         }
 
@@ -742,7 +760,7 @@ export default defineComponent({
             throw new Error(await readApiErrorMessage(devicesResponse, t('Settings.LoadFailed', '加载失败')));
           }
           groupManagementDevices.value = await devicesResponse.json() as SettingsDeviceItem[];
-        } else {
+        } else if (includeDevices) {
           groupManagementDevices.value = [];
         }
 
@@ -753,7 +771,7 @@ export default defineComponent({
           const accountsPayload = await accountsResponse.json() as { users?: SettingsUserItem[]; roles?: SettingsRoleItem[] };
           groupManagementUsers.value = accountsPayload.users || [];
           groupManagementRoles.value = accountsPayload.roles || [];
-        } else {
+        } else if (includeAccounts) {
           groupManagementUsers.value = [];
           groupManagementRoles.value = [];
         }
@@ -762,6 +780,10 @@ export default defineComponent({
       } finally {
         groupManagementLoading.value = false;
       }
+    }
+
+    async function refreshGroupManagementList() {
+      await loadGroupManagementDataWithOptions({ includeDevices: false, includeAccounts: false });
     }
 
     async function saveDeviceGroupAssignments(groupId: number) {
@@ -872,7 +894,7 @@ export default defineComponent({
 
     async function saveGroupDialog() {
       const name = groupForm.value.name.trim();
-      if (!name) {
+      if (!isEditingInternalGroup.value && !name) {
         groupManagementError.value = t('Settings.GroupNameRequired', '分组名称不能为空');
         return;
       }
@@ -897,7 +919,7 @@ export default defineComponent({
             throw new Error(resolveApiErrorMessage(payload, t('Settings.SaveFailed', '保存失败')));
           }
           groupId = payload?.group?.Id ?? null;
-        } else if (groupId) {
+        } else if (groupId && !isEditingInternalGroup.value) {
           const response = await apiFetch(`/api/device-groups/${groupId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -916,7 +938,9 @@ export default defineComponent({
           throw new Error(t('Settings.SaveFailed', '保存失败'));
         }
 
-        await saveDeviceGroupAssignments(groupId);
+        if (!isEditingInternalGroup.value) {
+          await saveDeviceGroupAssignments(groupId);
+        }
         await saveRoleGroupAssignments(groupId);
         await saveUserGroupAssignments(groupId);
 
@@ -938,6 +962,10 @@ export default defineComponent({
     }
 
     async function deleteDeviceGroup(group: DeviceGroupItem) {
+      if (group.IsInternal) {
+        return;
+      }
+
       const confirmed = await dialogService.confirm(
         t('Settings.DeleteDeviceGroupTitle', '删除设备分组'),
         t('Settings.GroupDeleteConfirm', '确定要删除这个分组吗？'),
@@ -1265,6 +1293,8 @@ export default defineComponent({
       filteredGroupDevices,
       filteredGroupRoles,
       filteredGroupUsers,
+      editingGroup,
+      isEditingInternalGroup,
       changePasswordError,
       changePasswordForm,
       isSettingInternally,
@@ -1316,6 +1346,7 @@ export default defineComponent({
       onGroupSelectionChange,
       hasGroupSelection,
       loadGroupManagementData,
+      refreshGroupManagementList,
       saveGroupDialog,
       deleteDeviceGroup,
       closeChangePasswordDialog,

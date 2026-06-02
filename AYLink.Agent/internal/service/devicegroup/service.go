@@ -12,11 +12,13 @@ var (
 	ErrGroupNameRequired = errors.New("group name is required")
 	ErrGroupExists       = errors.New("group already exists")
 	ErrGroupNotFound     = errors.New("group not found")
+	ErrGroupInternal     = errors.New("group is internal")
 )
 
 type Repository interface {
 	List(ctx context.Context) ([]domaindevice.Group, error)
 	ListOptions(ctx context.Context, keyword string) ([]domaindevice.GroupSummary, error)
+	ListOptionsForUser(ctx context.Context, userID int, keyword string) ([]domaindevice.GroupSummary, error)
 	GetByID(ctx context.Context, id int) (*domaindevice.Group, error)
 	GetByName(ctx context.Context, name string) (*domaindevice.Group, error)
 	Create(ctx context.Context, name string, description string) (*domaindevice.Group, error)
@@ -41,6 +43,10 @@ func (s *Service) List(ctx context.Context) ([]domaindevice.Group, error) {
 
 func (s *Service) ListOptions(ctx context.Context, keyword string) ([]domaindevice.GroupSummary, error) {
 	return s.repo.ListOptions(ctx, keyword)
+}
+
+func (s *Service) ListOptionsForUser(ctx context.Context, userID int, keyword string) ([]domaindevice.GroupSummary, error) {
+	return s.repo.ListOptionsForUser(ctx, userID, keyword)
 }
 
 func (s *Service) GetByID(ctx context.Context, id int) (*domaindevice.Group, error) {
@@ -81,6 +87,9 @@ func (s *Service) Update(ctx context.Context, id int, name, description string) 
 	if current == nil {
 		return nil, ErrGroupNotFound
 	}
+	if current.IsInternal {
+		return nil, ErrGroupInternal
+	}
 	return s.repo.Update(ctx, id, trimmedName, strings.TrimSpace(description))
 }
 
@@ -91,6 +100,9 @@ func (s *Service) Delete(ctx context.Context, id int) error {
 	}
 	if current == nil {
 		return ErrGroupNotFound
+	}
+	if current.IsInternal {
+		return ErrGroupInternal
 	}
 	return s.repo.Delete(ctx, id)
 }

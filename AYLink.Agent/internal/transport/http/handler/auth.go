@@ -273,6 +273,31 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "user": user})
 }
 
+func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		WriteMethodNotAllowed(w, http.MethodDelete)
+		return
+	}
+
+	userID, err := idFromPath(r.URL.Path, "/api/accounts/users/")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_USER_ID", "Errors.InvalidUserId", "无效的用户 ID")
+		return
+	}
+
+	var actingUserID *int
+	if identity := getIdentity(r); identity != nil {
+		actingUserID = &identity.UserID
+	}
+
+	if err := h.service.DeleteUser(r.Context(), userID, actingUserID); err != nil {
+		writeAuthServiceError(w, err, http.StatusBadRequest, "DELETE_USER_FAILED", "Errors.DeleteUserFailed", "删除用户失败")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -479,6 +504,10 @@ func writeAuthServiceError(
 		WriteError(w, statusCode, code, "Errors.UsernameExists", "用户名已存在")
 	case errors.Is(err, authservice.ErrCurrentUserLocked):
 		WriteError(w, http.StatusConflict, code, "Errors.CurrentUserDisableForbidden", "不能禁用当前登录账号")
+	case errors.Is(err, authservice.ErrCurrentUserDelete):
+		WriteError(w, http.StatusConflict, code, "Errors.CurrentUserDeleteForbidden", "不能删除当前登录账号")
+	case errors.Is(err, authservice.ErrLastSystemOwner):
+		WriteError(w, http.StatusConflict, code, "Errors.LastSystemOwnerRequired", "至少需要保留一个启用中的系统所有者")
 	case errors.Is(err, authservice.ErrUserNotFound):
 		WriteError(w, http.StatusNotFound, code, "Errors.UserNotFound", "用户不存在")
 	case errors.Is(err, authservice.ErrCurrentPassword):

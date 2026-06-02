@@ -22,6 +22,9 @@ type fakeRepository struct {
 	userRecord            *domainauth.UserRecord
 	roleRecord            *domainauth.Role
 	userByUsername        *domainauth.UserRecord
+	users                 []domainauth.User
+	roles                 []domainauth.Role
+	groupItemsByID        map[int]domaindevice.GroupSummary
 	roleSummaries         []domainauth.RoleSummary
 	permissions           []string
 	loginResultUser       *domainauth.UserRecord
@@ -44,6 +47,8 @@ type fakeRepository struct {
 	deleteAllAccessCalled bool
 	createUserCalled      bool
 	updateUserCalled      bool
+	deleteUserCalled      bool
+	deletedUserID         int
 	updateUserIsActive    bool
 	updateUserRoleIDs     []int
 	revokeAllErr          error
@@ -72,7 +77,7 @@ func (f *fakeRepository) GetUserByID(context.Context, int) (*domainauth.UserReco
 	return f.userRecord, nil
 }
 
-func (f *fakeRepository) ListUsers(context.Context) ([]domainauth.User, error) { return nil, nil }
+func (f *fakeRepository) ListUsers(context.Context) ([]domainauth.User, error) { return f.users, nil }
 
 func (f *fakeRepository) CreateUser(_ context.Context, username, passwordHash, passwordSalt string, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
 	f.createUserCalled = true
@@ -86,6 +91,12 @@ func (f *fakeRepository) UpdateUser(_ context.Context, userID int, username stri
 	return &domainauth.User{ID: userID, Username: username, IsActive: isActive}, nil
 }
 
+func (f *fakeRepository) DeleteUser(_ context.Context, userID int) error {
+	f.deleteUserCalled = true
+	f.deletedUserID = userID
+	return nil
+}
+
 func (f *fakeRepository) UpdateUserPassword(_ context.Context, userID int, passwordHash, passwordSalt string) error {
 	if userID <= 0 {
 		return errors.New("invalid user id")
@@ -96,7 +107,7 @@ func (f *fakeRepository) UpdateUserPassword(_ context.Context, userID int, passw
 	return nil
 }
 
-func (f *fakeRepository) ListRoles(context.Context) ([]domainauth.Role, error) { return nil, nil }
+func (f *fakeRepository) ListRoles(context.Context) ([]domainauth.Role, error) { return f.roles, nil }
 func (f *fakeRepository) GetRoleByName(context.Context, string) (*domainauth.Role, error) {
 	return f.roleRecord, nil
 }
@@ -132,6 +143,15 @@ func (f *fakeRepository) GetEffectiveDeviceGroupsForUser(context.Context, int) (
 }
 func (f *fakeRepository) GetDeviceGroupsForRole(context.Context, int) ([]domaindevice.GroupSummary, error) {
 	return nil, nil
+}
+func (f *fakeRepository) GetDeviceGroupsByIDs(_ context.Context, ids []int) ([]domaindevice.GroupSummary, error) {
+	items := make([]domaindevice.GroupSummary, 0, len(ids))
+	for _, id := range ids {
+		if item, ok := f.groupItemsByID[id]; ok {
+			items = append(items, item)
+		}
+	}
+	return items, nil
 }
 func (f *fakeRepository) SetDirectDeviceGroupsForUser(context.Context, int, []int) error {
 	return nil
@@ -405,12 +425,49 @@ func TestUpdateUserRejectsDisablingCurrentUser(t *testing.T) {
 	}
 }
 
+func TestDeleteUserRejectsDeletingCurrentUser(t *testing.T) {
+	repo := &fakeRepository{}
+	service := NewService(repo, stubLogger{})
+	currentUserID := 3
+
+	err := service.DeleteUser(context.Background(), 3, &currentUserID)
+	if err == nil || !strings.Contains(err.Error(), "currently signed in") {
+		t.Fatalf("expected self-delete error, got %v", err)
+	}
+	if repo.deleteUserCalled {
+		t.Fatal("expected repository DeleteUser not to be called")
+	}
+}
+
 func TestSetUserActiveStateUsesExistingRoles(t *testing.T) {
 	repo := &fakeRepository{
 		userRecord: &domainauth.UserRecord{
 			ID:       5,
 			Username: "tester",
 			IsActive: true,
+		},
+		users: []domainauth.User{
+			{
+				ID:       5,
+				Username: "tester",
+				IsActive: true,
+				Roles: []domainauth.RoleSummary{
+					{ID: 10, Name: "RoleA"},
+					{ID: 20, Name: "RoleB"},
+				},
+			},
+			{
+				ID:                 9,
+				Username:           "owner",
+				IsActive:           true,
+				Roles:              []domainauth.RoleSummary{{ID: 99, Name: "Owner"}},
+				DirectDeviceGroups: []domaindevice.GroupSummary{{ID: 100, Name: "所有设备", IsInternal: true}},
+			},
+		},
+		roles: []domainauth.Role{
+			{ID: 10, Name: "RoleA", Permissions: []string{"devices.view"}},
+			{ID: 20, Name: "RoleB", Permissions: []string{"devices.control"}},
+			{ID: 99, Name: "Owner", Permissions: []string{"accounts.manage"}},
 		},
 		roleSummaries: []domainauth.RoleSummary{
 			{ID: 10, Name: "RoleA"},
@@ -433,6 +490,101 @@ func TestSetUserActiveStateUsesExistingRoles(t *testing.T) {
 	}
 	if !repo.revokeAllCalled || !repo.deleteAllAccessCalled {
 		t.Fatal("expected sessions to be revoked when disabling user")
+	}
+}
+
+func TestDeleteUserRejectsRemovingLastSystemOwner(t *testing.T) {
+	repo := &fakeRepository{
+		userRecord: &domainauth.UserRecord{
+			ID:       1,
+			Username: "owner",
+			IsActive: true,
+		},
+		users: []domainauth.User{
+			{
+				ID:                 1,
+				Username:           "owner",
+				IsActive:           true,
+				Roles:              []domainauth.RoleSummary{{ID: 10, Name: "Owner"}},
+				DirectDeviceGroups: []domaindevice.GroupSummary{{ID: 100, Name: "所有设备", IsInternal: true}},
+			},
+		},
+		roles: []domainauth.Role{
+			{ID: 10, Name: "Owner", Permissions: []string{"accounts.manage"}},
+		},
+	}
+	service := NewService(repo, stubLogger{})
+
+	err := service.DeleteUser(context.Background(), 1, nil)
+	if !errors.Is(err, ErrLastSystemOwner) {
+		t.Fatalf("expected ErrLastSystemOwner, got %v", err)
+	}
+	if repo.deleteUserCalled {
+		t.Fatal("expected repository DeleteUser not to be called")
+	}
+}
+
+func TestUpdateUserRejectsRemovingLastSystemOwnerScope(t *testing.T) {
+	repo := &fakeRepository{
+		userByUsername: nil,
+		users: []domainauth.User{
+			{
+				ID:                 1,
+				Username:           "owner",
+				IsActive:           true,
+				Roles:              []domainauth.RoleSummary{{ID: 10, Name: "Owner"}},
+				DirectDeviceGroups: []domaindevice.GroupSummary{{ID: 100, Name: "所有设备", IsInternal: true}},
+			},
+		},
+		roles: []domainauth.Role{
+			{ID: 10, Name: "Owner", Permissions: []string{"accounts.manage"}},
+		},
+		groupItemsByID: map[int]domaindevice.GroupSummary{},
+	}
+	service := NewService(repo, stubLogger{})
+
+	_, err := service.UpdateUser(context.Background(), 1, "owner", true, []int{10}, nil, nil)
+	if !errors.Is(err, ErrLastSystemOwner) {
+		t.Fatalf("expected ErrLastSystemOwner, got %v", err)
+	}
+	if repo.updateUserCalled {
+		t.Fatal("expected repository UpdateUser not to be called")
+	}
+}
+
+func TestUpdateRoleRejectsRemovingLastSystemOwnerPermission(t *testing.T) {
+	repo := &fakeRepository{
+		roleRecord: &domainauth.Role{
+			ID:           10,
+			Name:         "Owner",
+			Permissions:  []string{"accounts.manage"},
+			DeviceGroups: []domaindevice.GroupSummary{{ID: 100, Name: "所有设备", IsInternal: true}},
+		},
+		users: []domainauth.User{
+			{
+				ID:       1,
+				Username: "owner",
+				IsActive: true,
+				Roles:    []domainauth.RoleSummary{{ID: 10, Name: "Owner"}},
+			},
+		},
+		roles: []domainauth.Role{
+			{
+				ID:           10,
+				Name:         "Owner",
+				Permissions:  []string{"accounts.manage"},
+				DeviceGroups: []domaindevice.GroupSummary{{ID: 100, Name: "所有设备", IsInternal: true}},
+			},
+		},
+		groupItemsByID: map[int]domaindevice.GroupSummary{
+			100: {ID: 100, Name: "所有设备", IsInternal: true},
+		},
+	}
+	service := NewService(repo, stubLogger{})
+
+	_, err := service.UpdateRole(context.Background(), 10, "Owner", "desc", []string{"devices.view"}, []int{100})
+	if !errors.Is(err, ErrLastSystemOwner) {
+		t.Fatalf("expected ErrLastSystemOwner, got %v", err)
 	}
 }
 

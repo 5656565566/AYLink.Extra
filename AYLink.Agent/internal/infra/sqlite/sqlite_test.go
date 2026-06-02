@@ -60,6 +60,144 @@ func TestInitializeSeedsDefaultsIdempotently(t *testing.T) {
 	if got := countRows(t, db, `SELECT COUNT(*) FROM Settings WHERE Key = 'webrtc_network_config'`); got != 1 {
 		t.Fatalf("expected seeded webrtc_network_config, got %d rows", got)
 	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM DeviceGroups WHERE Name = ? AND IsInternal = 1`, internalAllDevicesGroupName); got != 1 {
+		t.Fatalf("expected seeded internal all-devices group, got %d", got)
+	}
+}
+
+func TestInitializeBackfillsAndAutoAssignsInternalAllDevicesGroup(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sqlite-migration.db")
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	defer rawDB.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	legacyQueries := []string{
+		`CREATE TABLE Devices (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			Name TEXT NOT NULL,
+			Serial TEXT NOT NULL,
+			IpAddress TEXT,
+			Port INTEGER,
+			Status TEXT NOT NULL DEFAULT 'unknown',
+			LastSeen TEXT NOT NULL,
+			CreatedAt TEXT NOT NULL,
+			UpdatedAt TEXT NOT NULL
+		)`,
+		`CREATE TABLE Settings (
+			Key TEXT PRIMARY KEY,
+			Value TEXT NOT NULL,
+			Description TEXT,
+			UpdatedAt TEXT NOT NULL
+		)`,
+		`CREATE TABLE Users (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			Username TEXT NOT NULL UNIQUE,
+			PasswordHash TEXT NOT NULL,
+			PasswordSalt TEXT NOT NULL,
+			IsActive INTEGER NOT NULL DEFAULT 1,
+			CreatedAt TEXT NOT NULL,
+			UpdatedAt TEXT NOT NULL,
+			LastLoginAt TEXT
+		)`,
+		`CREATE TABLE Roles (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			Name TEXT NOT NULL UNIQUE,
+			Description TEXT,
+			IsInternal INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE Permissions (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			Code TEXT NOT NULL UNIQUE,
+			Description TEXT
+		)`,
+		`CREATE TABLE UserRoles (
+			UserId INTEGER NOT NULL,
+			RoleId INTEGER NOT NULL,
+			PRIMARY KEY (UserId, RoleId)
+		)`,
+		`CREATE TABLE RolePermissions (
+			RoleId INTEGER NOT NULL,
+			PermissionId INTEGER NOT NULL,
+			PRIMARY KEY (RoleId, PermissionId)
+		)`,
+		`CREATE TABLE RefreshTokens (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			UserId INTEGER NOT NULL,
+			TokenHash TEXT NOT NULL UNIQUE,
+			ExpiresAt TEXT NOT NULL,
+			RevokedAt TEXT,
+			CreatedAt TEXT NOT NULL,
+			LastUsedAt TEXT NOT NULL
+		)`,
+		`CREATE TABLE AccessTokens (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			UserId INTEGER NOT NULL,
+			TokenHash TEXT NOT NULL UNIQUE,
+			ExpiresAt TEXT NOT NULL,
+			CreatedAt TEXT NOT NULL,
+			LastSeenAt TEXT NOT NULL
+		)`,
+		`CREATE TABLE DeviceGroups (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			Name TEXT NOT NULL UNIQUE,
+			Description TEXT,
+			CreatedAt TEXT NOT NULL,
+			UpdatedAt TEXT NOT NULL
+		)`,
+		`CREATE TABLE DeviceGroupDevices (
+			GroupId INTEGER NOT NULL,
+			DeviceId INTEGER NOT NULL,
+			PRIMARY KEY (GroupId, DeviceId)
+		)`,
+		`CREATE TABLE UserDeviceGroups (
+			UserId INTEGER NOT NULL,
+			GroupId INTEGER NOT NULL,
+			PRIMARY KEY (UserId, GroupId)
+		)`,
+		`CREATE TABLE RoleDeviceGroups (
+			RoleId INTEGER NOT NULL,
+			GroupId INTEGER NOT NULL,
+			PRIMARY KEY (RoleId, GroupId)
+		)`,
+	}
+	for _, query := range legacyQueries {
+		if _, err := rawDB.Exec(query); err != nil {
+			t.Fatalf("legacy schema exec error = %v", err)
+		}
+	}
+
+	if _, err := rawDB.Exec(`INSERT INTO Devices (Name, Serial, Status, LastSeen, CreatedAt, UpdatedAt) VALUES (?, ?, ?, ?, ?, ?)`, "Legacy Device", "legacy-serial", "online", now, now, now); err != nil {
+		t.Fatalf("insert legacy device error = %v", err)
+	}
+	if _, err := rawDB.Exec(`INSERT INTO Roles (Name, Description, IsInternal) VALUES (?, ?, 1)`, "Administrator", "Full access"); err != nil {
+		t.Fatalf("insert Administrator role error = %v", err)
+	}
+	if _, err := rawDB.Exec(`INSERT INTO Users (Username, PasswordHash, PasswordSalt, IsActive, CreatedAt, UpdatedAt) VALUES (?, ?, ?, 1, ?, ?)`, "legacy-admin", "hash", "salt", now, now); err != nil {
+		t.Fatalf("insert legacy user error = %v", err)
+	}
+	if _, err := rawDB.Exec(`INSERT INTO UserRoles (UserId, RoleId) VALUES (1, 1)`); err != nil {
+		t.Fatalf("insert legacy user role error = %v", err)
+	}
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() migrated db error = %v", err)
+	}
+	defer db.Close()
+
+	var internalGroupID int
+	if err := db.QueryRow(`SELECT Id FROM DeviceGroups WHERE Name = ? AND IsInternal = 1`, internalAllDevicesGroupName).Scan(&internalGroupID); err != nil {
+		t.Fatalf("query internal group error = %v", err)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM DeviceGroupDevices WHERE GroupId = ? AND DeviceId = 1`, internalGroupID); got != 1 {
+		t.Fatalf("expected legacy device to be added into internal group, got %d rows", got)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM UserDeviceGroups WHERE UserId = 1 AND GroupId = ?`, internalGroupID); got != 1 {
+		t.Fatalf("expected legacy admin user to be granted internal group, got %d rows", got)
+	}
 }
 
 func TestAuthRepositoryCreateUserLoadsRolesAndPermissions(t *testing.T) {
@@ -274,8 +412,194 @@ func TestAuthRepositoryListUsersHydratesDeviceAccessScope(t *testing.T) {
 	if scopedUser.EffectiveDeviceGroupCount != 2 {
 		t.Fatalf("expected 2 effective groups, got %d", scopedUser.EffectiveDeviceGroupCount)
 	}
-	if scopedUser.EffectiveDeviceCount != 3 {
-		t.Fatalf("expected access to 3 devices, got %d", scopedUser.EffectiveDeviceCount)
+	if scopedUser.EffectiveDeviceCount != 2 {
+		t.Fatalf("expected access to 2 devices, got %d", scopedUser.EffectiveDeviceCount)
+	}
+}
+
+func TestDeviceGroupRepositoryInternalGroupIsHiddenFromOptionsAndDeviceSummaries(t *testing.T) {
+	db := newTestDB(t)
+	authRepo := NewAuthRepository(db)
+	deviceRepo := NewDeviceRepository(db)
+	groupRepo := NewDeviceGroupRepository(db)
+	ctx := context.Background()
+
+	adminRole, err := authRepo.GetRoleByName(ctx, "Administrator")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error = %v", err)
+	}
+	adminUser, err := authRepo.CreateUser(ctx, "bootstrap-admin", "hash", "salt", []int{adminRole.ID}, nil)
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if adminUser == nil {
+		t.Fatal("expected admin user")
+	}
+
+	internalGroups, err := authRepo.GetDirectDeviceGroupsForUser(ctx, adminUser.ID)
+	if err != nil {
+		t.Fatalf("GetDirectDeviceGroupsForUser() error = %v", err)
+	}
+	if len(internalGroups) != 1 || internalGroups[0].Name != internalAllDevicesGroupName || !internalGroups[0].IsInternal {
+		t.Fatalf("expected bootstrap admin to receive internal group, got %+v", internalGroups)
+	}
+
+	device := &domaindevice.Device{
+		Name:      "Scoped Device",
+		Serial:    "scoped-serial",
+		Status:    "online",
+		LastSeen:  time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := deviceRepo.Insert(ctx, device); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+
+	internalOnlyGroups, err := groupRepo.GetGroupsForDevice(ctx, device.ID)
+	if err != nil {
+		t.Fatalf("GetGroupsForDevice() error = %v", err)
+	}
+	if len(internalOnlyGroups) != 0 {
+		t.Fatalf("expected internal group to be hidden from device summaries, got %+v", internalOnlyGroups)
+	}
+
+	options, err := groupRepo.ListOptions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListOptions() error = %v", err)
+	}
+	for _, option := range options {
+		if option.Name == internalAllDevicesGroupName || option.IsInternal {
+			t.Fatalf("expected internal group to be hidden from options, got %+v", options)
+		}
+	}
+}
+
+func TestDeviceGroupRepositoryStrictAccessRequiresMatchingGroup(t *testing.T) {
+	db := newTestDB(t)
+	authRepo := NewAuthRepository(db)
+	deviceRepo := NewDeviceRepository(db)
+	groupRepo := NewDeviceGroupRepository(db)
+	ctx := context.Background()
+
+	viewerRole, err := authRepo.CreateRole(ctx, "Viewer", "Scoped viewer", []string{"devices.view"}, nil)
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	businessGroup, err := groupRepo.Create(ctx, "Warehouse Scope", "Business scope")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	device := &domaindevice.Device{
+		Name:      "Scoped Device",
+		Serial:    "scoped-device",
+		Status:    "online",
+		LastSeen:  time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := deviceRepo.Insert(ctx, device); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+	if err := groupRepo.SetGroupsForDevice(ctx, device.ID, []int{businessGroup.ID}); err != nil {
+		t.Fatalf("SetGroupsForDevice() error = %v", err)
+	}
+
+	userWithoutGroups, err := authRepo.CreateUser(ctx, "no-scope-user", "hash", "salt", []int{viewerRole.ID}, nil)
+	if err != nil {
+		t.Fatalf("CreateUser(no-scope-user) error = %v", err)
+	}
+	if userWithoutGroups == nil {
+		t.Fatal("expected no-scope user")
+	}
+
+	visibleDeviceIDs, err := groupRepo.ListAccessibleDeviceIDs(ctx, userWithoutGroups.ID)
+	if err != nil {
+		t.Fatalf("ListAccessibleDeviceIDs(no-scope-user) error = %v", err)
+	}
+	if len(visibleDeviceIDs) != 0 {
+		t.Fatalf("expected no devices for user without groups, got %+v", visibleDeviceIDs)
+	}
+	canAccess, err := groupRepo.CanUserAccessDevice(ctx, userWithoutGroups.ID, device.ID)
+	if err != nil {
+		t.Fatalf("CanUserAccessDevice(no-scope-user) error = %v", err)
+	}
+	if canAccess {
+		t.Fatal("expected user without groups to be denied")
+	}
+
+	internalGroup, err := groupRepo.GetByName(ctx, internalAllDevicesGroupName)
+	if err != nil {
+		t.Fatalf("GetByName(internal) error = %v", err)
+	}
+	if internalGroup == nil {
+		t.Fatal("expected internal all-devices group")
+	}
+
+	userWithAllDevices, err := authRepo.CreateUser(ctx, "all-scope-user", "hash", "salt", []int{viewerRole.ID}, []int{internalGroup.ID})
+	if err != nil {
+		t.Fatalf("CreateUser(all-scope-user) error = %v", err)
+	}
+	if userWithAllDevices == nil {
+		t.Fatal("expected all-scope user")
+	}
+
+	visibleDeviceIDs, err = groupRepo.ListAccessibleDeviceIDs(ctx, userWithAllDevices.ID)
+	if err != nil {
+		t.Fatalf("ListAccessibleDeviceIDs(all-scope-user) error = %v", err)
+	}
+	if len(visibleDeviceIDs) != 1 || visibleDeviceIDs[0] != device.ID {
+		t.Fatalf("expected all-scope user to see all devices, got %+v", visibleDeviceIDs)
+	}
+	canAccess, err = groupRepo.CanUserAccessDevice(ctx, userWithAllDevices.ID, device.ID)
+	if err != nil {
+		t.Fatalf("CanUserAccessDevice(all-scope-user) error = %v", err)
+	}
+	if !canAccess {
+		t.Fatal("expected user with internal all-devices group to be allowed")
+	}
+}
+
+func TestDeviceGroupRepositoryListOptionsForUserOnlyReturnsAssignedBusinessGroups(t *testing.T) {
+	db := newTestDB(t)
+	authRepo := NewAuthRepository(db)
+	groupRepo := NewDeviceGroupRepository(db)
+	ctx := context.Background()
+
+	viewerRole, err := authRepo.CreateRole(ctx, "Scoped Options Viewer", "Scoped options viewer", []string{"devices.view"}, nil)
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+
+	assignedGroup, err := groupRepo.Create(ctx, "Assigned Group", "Visible to current user")
+	if err != nil {
+		t.Fatalf("Create(assigned) error = %v", err)
+	}
+	if _, err := groupRepo.Create(ctx, "Hidden Group", "Should not leak"); err != nil {
+		t.Fatalf("Create(hidden) error = %v", err)
+	}
+
+	user, err := authRepo.CreateUser(ctx, "scoped-options-user", "hash", "salt", []int{viewerRole.ID}, []int{assignedGroup.ID})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if user == nil {
+		t.Fatal("expected scoped-options-user to be created")
+	}
+
+	options, err := groupRepo.ListOptionsForUser(ctx, user.ID, "")
+	if err != nil {
+		t.Fatalf("ListOptionsForUser() error = %v", err)
+	}
+	if len(options) != 1 {
+		t.Fatalf("expected exactly one visible option, got %+v", options)
+	}
+	if options[0].Name != assignedGroup.Name {
+		t.Fatalf("expected visible option %q, got %+v", assignedGroup.Name, options)
+	}
+	if options[0].IsInternal {
+		t.Fatalf("expected business group option, got internal %+v", options[0])
 	}
 }
 

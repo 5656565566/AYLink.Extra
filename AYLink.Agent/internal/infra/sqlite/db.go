@@ -2,10 +2,14 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+const internalAllDevicesGroupName = "所有设备"
 
 func Open(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
@@ -112,6 +116,7 @@ func initialize(db *sql.DB) error {
 			Id INTEGER PRIMARY KEY AUTOINCREMENT,
 			Name TEXT NOT NULL UNIQUE,
 			Description TEXT,
+			IsInternal INTEGER NOT NULL DEFAULT 0,
 			CreatedAt TEXT NOT NULL,
 			UpdatedAt TEXT NOT NULL
 		)`,
@@ -136,6 +141,10 @@ func initialize(db *sql.DB) error {
 		if _, err := db.Exec(query); err != nil {
 			return err
 		}
+	}
+
+	if err := ensureColumn(db, "DeviceGroups", "IsInternal", `ALTER TABLE DeviceGroups ADD COLUMN IsInternal INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
 	}
 
 	return seedDefaults(db)
@@ -209,5 +218,136 @@ func seedDefaults(db *sql.DB) error {
 		}
 	}
 
+	if err := ensureInternalAllDevicesGroup(db, now); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func ensureColumn(db *sql.DB, table string, column string, alterQuery string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var dataType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(name, column) {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = db.Exec(alterQuery)
+	return err
+}
+
+func ensureInternalAllDevicesGroup(db *sql.DB, now string) error {
+	groupID, err := lookupInternalAllDevicesGroupID(db)
+	if err != nil {
+		return err
+	}
+	if groupID == 0 {
+		result, err := db.Exec(`
+			INSERT INTO DeviceGroups (Name, Description, IsInternal, CreatedAt, UpdatedAt)
+			VALUES (?, ?, 1, ?, ?)`,
+			internalAllDevicesGroupName,
+			"系统内置全量设备范围组",
+			now,
+			now,
+		)
+		if err != nil {
+			return err
+		}
+		lastInsertID, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		groupID = int(lastInsertID)
+	} else {
+		if _, err := db.Exec(`
+			UPDATE DeviceGroups
+			SET IsInternal = 1, UpdatedAt = ?
+			WHERE Id = ? AND IsInternal <> 1`, now, groupID); err != nil {
+			return err
+		}
+	}
+
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO DeviceGroupDevices (GroupId, DeviceId)
+		SELECT ?, d.Id
+		FROM Devices d`, groupID); err != nil {
+		return err
+	}
+
+	if _, err := db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS trg_devices_assign_internal_groups
+		AFTER INSERT ON Devices
+		BEGIN
+			INSERT OR IGNORE INTO DeviceGroupDevices (GroupId, DeviceId)
+			SELECT Id, NEW.Id
+			FROM DeviceGroups
+			WHERE IsInternal = 1;
+		END`); err != nil {
+		return err
+	}
+
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO Settings (Key, Value, Description, UpdatedAt)
+		VALUES ('device_groups_internal_all_seeded', '0', 'Tracks the initial assignment of the internal all-devices group', ?)
+	`, now); err != nil {
+		return err
+	}
+
+	var seededValue string
+	if err := db.QueryRow(`SELECT Value FROM Settings WHERE Key = 'device_groups_internal_all_seeded'`).Scan(&seededValue); err != nil {
+		return err
+	}
+	if seededValue == "1" {
+		return nil
+	}
+
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO UserDeviceGroups (UserId, GroupId)
+		SELECT DISTINCT ur.UserId, ?
+		FROM UserRoles ur
+		INNER JOIN Roles r ON r.Id = ur.RoleId
+		WHERE lower(r.Name) = lower('Administrator')`, groupID); err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		UPDATE Settings
+		SET Value = '1', UpdatedAt = ?
+		WHERE Key = 'device_groups_internal_all_seeded'`, now)
+	return err
+}
+
+func lookupInternalAllDevicesGroupID(db *sql.DB) (int, error) {
+	var groupID int
+	err := db.QueryRow(`
+		SELECT Id
+		FROM DeviceGroups
+		WHERE lower(Name) = lower(?)
+		ORDER BY Id
+		LIMIT 1`, internalAllDevicesGroupName).Scan(&groupID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return groupID, nil
 }

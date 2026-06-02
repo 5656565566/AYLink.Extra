@@ -49,7 +49,13 @@ func (h *DeviceGroupHandler) ListOptions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	items, err := h.service.ListOptions(r.Context(), strings.TrimSpace(r.URL.Query().Get("keyword")))
+	identity := getIdentity(r)
+	if identity == nil {
+		WriteUnauthorized(w)
+		return
+	}
+
+	items, err := h.service.ListOptionsForUser(r.Context(), identity.UserID, strings.TrimSpace(r.URL.Query().Get("keyword")))
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "DEVICE_GROUPS_LIST_FAILED", "Errors.DevicesListFailed", "加载设备分组选项失败")
 		return
@@ -134,6 +140,8 @@ func (h *DeviceGroupHandler) writeGroupError(w http.ResponseWriter, err error, c
 		WriteError(w, http.StatusBadRequest, code, "Errors.RoleNameRequired", "分组名称不能为空")
 	case errors.Is(err, devicegroupservice.ErrGroupExists):
 		WriteError(w, http.StatusBadRequest, code, "Errors.RoleExists", "分组名称已存在")
+	case errors.Is(err, devicegroupservice.ErrGroupInternal):
+		WriteError(w, http.StatusBadRequest, "DEVICE_GROUP_INTERNAL", "Errors.DeviceUpdateFailed", "内置分组不允许修改")
 	case errors.Is(err, devicegroupservice.ErrGroupNotFound):
 		WriteError(w, http.StatusNotFound, "DEVICE_GROUP_NOT_FOUND", "Devices.NotFound", "分组不存在")
 	default:

@@ -41,9 +41,9 @@ func (fakeADBManager) Devices(context.Context) ([]domainadb.Device, error) {
 		{Serial: "127.0.0.1:5555", State: "device"},
 	}, nil
 }
-func (fakeADBManager) StartServer(context.Context) error                   { return nil }
-func (fakeADBManager) KillServer(context.Context) error                    { return nil }
-func (fakeADBManager) ServerAddress() string                               { return "127.0.0.1:5037" }
+func (fakeADBManager) StartServer(context.Context) error { return nil }
+func (fakeADBManager) KillServer(context.Context) error  { return nil }
+func (fakeADBManager) ServerAddress() string             { return "127.0.0.1:5037" }
 func (fakeADBManager) PairDevice(context.Context, string, int, string) (string, error) {
 	return "", nil
 }
@@ -67,11 +67,12 @@ func (fakeADBManager) OpenShellSession(context.Context, string) (domainadb.Shell
 }
 
 type integrationEnv struct {
-	server     *httptest.Server
-	client     *http.Client
-	authSvc    *authservice.Service
-	authRepo   *sqlite.AuthRepository
-	deviceRepo *sqlite.DeviceRepository
+	server          *httptest.Server
+	client          *http.Client
+	authSvc         *authservice.Service
+	authRepo        *sqlite.AuthRepository
+	deviceRepo      *sqlite.DeviceRepository
+	deviceGroupRepo *sqlite.DeviceGroupRepository
 }
 
 type loginTokens struct {
@@ -93,6 +94,7 @@ func newIntegrationEnv(t *testing.T) *integrationEnv {
 
 	authRepo := sqlite.NewAuthRepository(db)
 	deviceRepo := sqlite.NewDeviceRepository(db)
+	deviceGroupRepo := sqlite.NewDeviceGroupRepository(db)
 	authSvc := authservice.NewService(authRepo, integrationLogger{})
 
 	handler := New(Dependencies{
@@ -115,11 +117,12 @@ func newIntegrationEnv(t *testing.T) *integrationEnv {
 	t.Cleanup(server.Close)
 
 	return &integrationEnv{
-		server:     server,
-		client:     server.Client(),
-		authSvc:    authSvc,
-		authRepo:   authRepo,
-		deviceRepo: deviceRepo,
+		server:          server,
+		client:          server.Client(),
+		authSvc:         authSvc,
+		authRepo:        authRepo,
+		deviceRepo:      deviceRepo,
+		deviceGroupRepo: deviceGroupRepo,
 	}
 }
 
@@ -139,15 +142,32 @@ func (e *integrationEnv) createAdminUser(t *testing.T, username, password string
 }
 
 func (e *integrationEnv) createUserWithPermissions(t *testing.T, username, password string, permissions []string) {
+	e.createUserWithPermissionsAndGroups(t, username, password, permissions, nil)
+}
+
+func (e *integrationEnv) createUserWithPermissionsAndGroups(t *testing.T, username, password string, permissions []string, deviceGroupIDs []int) {
 	t.Helper()
 
 	role, err := e.authSvc.CreateRole(context.Background(), username+"-role", "integration test role", permissions, nil)
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
-	if _, err := e.authSvc.CreateUser(context.Background(), username, password, []int{role.ID}, nil); err != nil {
+	if _, err := e.authSvc.CreateUser(context.Background(), username, password, []int{role.ID}, deviceGroupIDs); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
+}
+
+func (e *integrationEnv) internalAllDevicesGroupID(t *testing.T) int {
+	t.Helper()
+
+	group, err := e.deviceGroupRepo.GetByName(context.Background(), "所有设备")
+	if err != nil {
+		t.Fatalf("GetByName(所有设备) error = %v", err)
+	}
+	if group == nil {
+		t.Fatal("expected internal all-devices group")
+	}
+	return group.ID
 }
 
 func (e *integrationEnv) createDevice(t *testing.T, name, serial string) int {
@@ -389,6 +409,55 @@ func TestHTTPSettingsManagementEndpointsEnforcePermissions(t *testing.T) {
 	}
 }
 
+func TestHTTPDeviceGroupOptionsOnlyExposeAssignedGroups(t *testing.T) {
+	env := newIntegrationEnv(t)
+
+	visibleGroup, err := env.deviceGroupRepo.Create(context.Background(), "Visible Group", "Assigned to scoped user")
+	if err != nil {
+		t.Fatalf("Create(visible group) error = %v", err)
+	}
+	if _, err := env.deviceGroupRepo.Create(context.Background(), "Hidden Group", "Should not leak"); err != nil {
+		t.Fatalf("Create(hidden group) error = %v", err)
+	}
+
+	env.createUserWithPermissionsAndGroups(t, "scoped-options-user", "secret", []string{"devices.view"}, []int{visibleGroup.ID})
+	tokens := env.login(t, "scoped-options-user", "secret")
+
+	statusCode, body := env.doJSON(t, http.MethodGet, "/api/device-groups/options", tokens.AccessToken, nil)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected GET /api/device-groups/options 200, got %d: %s", statusCode, string(body))
+	}
+	if !bytes.Contains(body, []byte(`"Name":"Visible Group"`)) {
+		t.Fatalf("expected assigned group to be visible, got %s", string(body))
+	}
+	if bytes.Contains(body, []byte(`"Name":"Hidden Group"`)) {
+		t.Fatalf("expected unassigned group to stay hidden, got %s", string(body))
+	}
+}
+
+func TestHTTPDeleteUserRejectsRemovingLastSystemOwner(t *testing.T) {
+	env := newIntegrationEnv(t)
+	env.createAdminUser(t, "owner-user", "secret")
+	env.createUserWithPermissions(t, "account-manager", "secret", []string{"accounts.manage"})
+
+	managerTokens := env.login(t, "account-manager", "secret")
+	ownerUser, err := env.authRepo.GetUserByUsername(context.Background(), "owner-user")
+	if err != nil {
+		t.Fatalf("GetUserByUsername(owner-user) error = %v", err)
+	}
+	if ownerUser == nil {
+		t.Fatal("expected owner-user to exist")
+	}
+
+	statusCode, body := env.doJSON(t, http.MethodDelete, "/api/accounts/users/"+strconv.Itoa(ownerUser.ID), managerTokens.AccessToken, nil)
+	if statusCode != http.StatusConflict {
+		t.Fatalf("expected DELETE last system owner to return 409, got %d: %s", statusCode, string(body))
+	}
+	if !bytes.Contains(body, []byte(`"code":"DELETE_USER_FAILED"`)) {
+		t.Fatalf("expected DELETE_USER_FAILED error body, got %s", string(body))
+	}
+}
+
 func TestHTTPRefreshRotatesTokensAndAllowsAuthenticatedAccess(t *testing.T) {
 	env := newIntegrationEnv(t)
 	env.createAdminUser(t, "refresh-admin", "secret")
@@ -505,7 +574,7 @@ func TestHTTPDevicesListRequiresViewPermission(t *testing.T) {
 
 func TestHTTPDevicesListReturnsInsertedDevices(t *testing.T) {
 	env := newIntegrationEnv(t)
-	env.createUserWithPermissions(t, "devices-viewer", "secret", []string{"devices.view"})
+	env.createUserWithPermissionsAndGroups(t, "devices-viewer", "secret", []string{"devices.view"}, []int{env.internalAllDevicesGroupID(t)})
 	env.createDevice(t, "Pixel", "serial-1")
 
 	tokens := env.login(t, "devices-viewer", "secret")
@@ -533,7 +602,7 @@ func TestHTTPDevicePreviewRequiresViewPermission(t *testing.T) {
 func TestHTTPDevicePreviewAllowsViewPermission(t *testing.T) {
 	env := newIntegrationEnv(t)
 	deviceID := env.createDevice(t, "Preview Device", "127.0.0.1:5555")
-	env.createUserWithPermissions(t, "devices-preview-viewer", "secret", []string{"devices.view"})
+	env.createUserWithPermissionsAndGroups(t, "devices-preview-viewer", "secret", []string{"devices.view"}, []int{env.internalAllDevicesGroupID(t)})
 
 	tokens := env.login(t, "devices-preview-viewer", "secret")
 	statusCode, body := env.doJSON(t, http.MethodGet, "/api/devices/"+strconv.Itoa(deviceID)+"/preview", tokens.AccessToken, nil)
@@ -574,7 +643,7 @@ func TestHTTPDevicesDeleteReturnsNotFound(t *testing.T) {
 
 func TestHTTPDeviceSettingsRoundTrip(t *testing.T) {
 	env := newIntegrationEnv(t)
-	env.createUserWithPermissions(t, "devices-settings-manager", "secret", []string{"devices.control", "devices.manage"})
+	env.createUserWithPermissionsAndGroups(t, "devices-settings-manager", "secret", []string{"devices.control", "devices.manage"}, []int{env.internalAllDevicesGroupID(t)})
 	deviceID := env.createDevice(t, "Pixel", "serial-settings")
 
 	tokens := env.login(t, "devices-settings-manager", "secret")

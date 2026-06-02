@@ -13,6 +13,7 @@ import (
 	"time"
 
 	domainauth "aylink-agent/internal/domain/auth"
+	domaindevice "aylink-agent/internal/domain/device"
 	"aylink-agent/internal/infra/logging"
 
 	"golang.org/x/crypto/pbkdf2"
@@ -35,7 +36,9 @@ var (
 	ErrPasswordEmpty      = errors.New("password is required")
 	ErrUsernameRequired   = errors.New("username is required")
 	ErrCurrentUserLocked  = errors.New("You cannot disable the account that is currently signed in")
+	ErrCurrentUserDelete  = errors.New("You cannot delete the account that is currently signed in")
 	ErrUserNotFound       = errors.New("user not found")
+	ErrLastSystemOwner    = errors.New("At least one active system owner must remain")
 	ErrCurrentPassword    = errors.New("Current password is incorrect")
 	ErrRoleNameRequired   = errors.New("role name is required")
 	ErrRoleNotFound       = errors.New("role not found")
@@ -253,7 +256,24 @@ func (s *Service) UpdateUser(ctx context.Context, userID int, username string, i
 		return nil, ErrUsernameExists
 	}
 
-	user, err := s.repo.UpdateUser(ctx, userID, trimmedUsername, isActive, normalizeIds(roleIds), normalizeIds(deviceGroupIDs))
+	normalizedRoleIDs := normalizeIds(roleIds)
+	normalizedDeviceGroupIDs := normalizeIds(deviceGroupIDs)
+	directGroups, err := s.repo.GetDeviceGroupsByIDs(ctx, normalizedDeviceGroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureSystemOwnerPreserved(ctx, systemOwnerGuardOptions{
+		overrideUser: &systemOwnerUserState{
+			ID:               userID,
+			IsActive:         isActive,
+			RoleIDs:          normalizedRoleIDs,
+			DirectGroupItems: directGroups,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	user, err := s.repo.UpdateUser(ctx, userID, trimmedUsername, isActive, normalizedRoleIDs, normalizedDeviceGroupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +285,25 @@ func (s *Service) UpdateUser(ctx context.Context, userID int, username string, i
 	}
 
 	return user, nil
+}
+
+func (s *Service) DeleteUser(ctx context.Context, userID int, actingUserID *int) error {
+	if actingUserID != nil && *actingUserID == userID {
+		return ErrCurrentUserDelete
+	}
+
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if err := s.ensureSystemOwnerPreserved(ctx, systemOwnerGuardOptions{deletedUserID: &userID}); err != nil {
+		return err
+	}
+
+	return s.repo.DeleteUser(ctx, userID)
 }
 
 func (s *Service) ResetPassword(ctx context.Context, userID int, newPassword string) (string, error) {
@@ -354,6 +393,16 @@ func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive b
 	for _, group := range directGroupSummaries {
 		directGroupIDs = append(directGroupIDs, group.ID)
 	}
+	if err := s.ensureSystemOwnerPreserved(ctx, systemOwnerGuardOptions{
+		overrideUser: &systemOwnerUserState{
+			ID:               userID,
+			IsActive:         isActive,
+			RoleIDs:          roleIds,
+			DirectGroupItems: directGroupSummaries,
+		},
+	}); err != nil {
+		return err
+	}
 
 	_, err = s.repo.UpdateUser(ctx, userID, user.Username, isActive, roleIds, directGroupIDs)
 	if err == nil && !isActive {
@@ -420,8 +469,131 @@ func (s *Service) UpdateRole(ctx context.Context, roleID int, name, description 
 			return nil, err
 		}
 	}
+	normalizedDeviceGroupIDs := normalizeIds(deviceGroupIDs)
+	roleGroups, err := s.repo.GetDeviceGroupsByIDs(ctx, normalizedDeviceGroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureSystemOwnerPreserved(ctx, systemOwnerGuardOptions{
+		overrideRole: &domainauth.Role{
+			ID:           roleID,
+			Name:         trimmedName,
+			Description:  strings.TrimSpace(description),
+			IsInternal:   existingRole.IsInternal,
+			Permissions:  normalizedPerms,
+			DeviceGroups: roleGroups,
+		},
+	}); err != nil {
+		return nil, err
+	}
 
-	return s.repo.UpdateRole(ctx, roleID, trimmedName, strings.TrimSpace(description), normalizedPerms, normalizeIds(deviceGroupIDs))
+	return s.repo.UpdateRole(ctx, roleID, trimmedName, strings.TrimSpace(description), normalizedPerms, normalizedDeviceGroupIDs)
+}
+
+type systemOwnerUserState struct {
+	ID               int
+	IsActive         bool
+	RoleIDs          []int
+	DirectGroupItems []domaindevice.GroupSummary
+}
+
+type systemOwnerGuardOptions struct {
+	overrideUser  *systemOwnerUserState
+	overrideRole  *domainauth.Role
+	deletedUserID *int
+}
+
+func (s *Service) ensureSystemOwnerPreserved(ctx context.Context, options systemOwnerGuardOptions) error {
+	users, err := s.repo.ListUsers(ctx)
+	if err != nil {
+		return err
+	}
+	roles, err := s.repo.ListRoles(ctx)
+	if err != nil {
+		return err
+	}
+
+	roleByID := make(map[int]domainauth.Role, len(roles))
+	for _, role := range roles {
+		roleByID[role.ID] = role
+	}
+	if options.overrideRole != nil {
+		roleByID[options.overrideRole.ID] = *options.overrideRole
+	}
+
+	systemOwners := 0
+	for _, user := range users {
+		if options.deletedUserID != nil && user.ID == *options.deletedUserID {
+			continue
+		}
+
+		state := systemOwnerUserState{
+			ID:               user.ID,
+			IsActive:         user.IsActive,
+			DirectGroupItems: append([]domaindevice.GroupSummary(nil), user.DirectDeviceGroups...),
+			RoleIDs:          make([]int, 0, len(user.Roles)),
+		}
+		for _, role := range user.Roles {
+			state.RoleIDs = append(state.RoleIDs, role.ID)
+		}
+		if options.overrideUser != nil && user.ID == options.overrideUser.ID {
+			state = *options.overrideUser
+		}
+
+		if isSystemOwnerState(state, roleByID) {
+			systemOwners++
+		}
+	}
+
+	if systemOwners == 0 {
+		return ErrLastSystemOwner
+	}
+	return nil
+}
+
+func isSystemOwnerState(user systemOwnerUserState, roleByID map[int]domainauth.Role) bool {
+	if !user.IsActive {
+		return false
+	}
+
+	hasAccountsManage := false
+	hasInternalScope := false
+
+	for _, group := range user.DirectGroupItems {
+		if group.IsInternal {
+			hasInternalScope = true
+			break
+		}
+	}
+
+	for _, roleID := range user.RoleIDs {
+		role, ok := roleByID[roleID]
+		if !ok {
+			continue
+		}
+
+		if !hasAccountsManage {
+			for _, permission := range role.Permissions {
+				if permission == "accounts.manage" {
+					hasAccountsManage = true
+					break
+				}
+			}
+		}
+		if !hasInternalScope {
+			for _, group := range role.DeviceGroups {
+				if group.IsInternal {
+					hasInternalScope = true
+					break
+				}
+			}
+		}
+		if hasAccountsManage && hasInternalScope {
+			return true
+		}
+	}
+
+	return hasAccountsManage && hasInternalScope
 }
 
 func (s *Service) GetAvailablePermissions() []domainauth.PermissionDescriptor {

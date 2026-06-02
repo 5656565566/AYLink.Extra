@@ -43,8 +43,10 @@ func registerAuthRoutes(mux *http.ServeMux, handlers routeHandlers, guards route
 		switch r.Method {
 		case http.MethodPut:
 			handlers.auth.UpdateUser(w, r)
+		case http.MethodDelete:
+			handlers.auth.DeleteUser(w, r)
 		default:
-			handler.WriteMethodNotAllowed(w, http.MethodPut+", "+http.MethodPost)
+			handler.WriteMethodNotAllowed(w, http.MethodPut+", "+http.MethodDelete+", "+http.MethodPost)
 		}
 	}))))
 

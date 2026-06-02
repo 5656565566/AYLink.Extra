@@ -34,8 +34,16 @@
               </label>
             </div>
           </SettingItem>
+          <SettingItem :title="t('AccountPage.DeviceGroups', '设备组授权')" :description="t('AccountPage.DeviceGroupsDescription', '可额外指定这个用户能访问哪些设备组。系统内置组代表全量设备范围。')">
+            <div class="chip-list">
+              <label v-for="group in availableDeviceGroups" :key="group.Id" class="chip-option" :class="{ 'chip-option--internal': group.IsInternal }">
+                <input type="checkbox" :value="group.Id" v-model="newUser.deviceGroupIds" />
+                <span>{{ formatDeviceGroupLabel(group) }}</span>
+              </label>
+            </div>
+          </SettingItem>
           <div class="actions-row">
-            <button class="primary" @click="createUser" :disabled="saving || !newUser.username || !newUser.password || newUser.roleIds.length === 0">{{ t('AccountPage.CreateUser', '创建用户') }}</button>
+            <button class="primary" @click="createUser" :disabled="saving">{{ t('AccountPage.CreateUser', '创建用户') }}</button>
           </div>
         </SettingSection>
 
@@ -84,9 +92,34 @@
               </div>
             </div>
 
+            <div class="field-block">
+              <span class="field-label">{{ t('AccountPage.DeviceGroups', '设备组授权') }}</span>
+              <div class="chip-list">
+                <label v-for="group in availableDeviceGroups" :key="`${user.Id}-group-${group.Id}`" class="chip-option" :class="{ 'chip-option--internal': group.IsInternal }">
+                  <input
+                    type="checkbox"
+                    :checked="userDeviceGroupIds(user).includes(group.Id)"
+                    @change="onUserDeviceGroupChange(user, group.Id, $event)"
+                  />
+                  <span>{{ formatDeviceGroupLabel(group) }}</span>
+                </label>
+              </div>
+              <div class="field-help">
+                {{ formatEffectiveScope(user) }}
+              </div>
+            </div>
+
             <div class="actions-row">
               <button class="primary" @click="saveUser(user)" :disabled="saving">{{ t('AccountPage.SaveUser', '保存') }}</button>
               <button class="transparent" @click="resetPassword(user)" :disabled="saving">{{ t('AccountPage.ResetPassword', '重置密码') }}</button>
+              <button
+                class="transparent"
+                @click="deleteUser(user)"
+                :disabled="saving"
+                :title="isCurrentUser(user) ? t('AccountPage.DeleteCurrentUserHint', '当前登录账号不能删除自己，点击会显示说明') : ''"
+              >
+                {{ t('Common.Delete', '删除') }}
+              </button>
               <button
                 class="transparent"
                 @click="setActive(user, !user.IsActive)"
@@ -117,8 +150,16 @@
               </label>
             </div>
           </SettingItem>
+          <SettingItem :title="t('AccountPage.DefaultDeviceGroups', '默认设备组')" :description="t('AccountPage.DefaultDeviceGroupsDescription', '拥有该角色的用户会继承这些设备组。')">
+            <div class="chip-list">
+              <label v-for="group in availableDeviceGroups" :key="`new-role-group-${group.Id}`" class="chip-option" :class="{ 'chip-option--internal': group.IsInternal }">
+                <input type="checkbox" :value="group.Id" v-model="newRole.deviceGroupIds" />
+                <span>{{ formatDeviceGroupLabel(group) }}</span>
+              </label>
+            </div>
+          </SettingItem>
           <div class="actions-row">
-            <button class="primary" @click="createRole" :disabled="saving || !newRole.name || newRole.permissions.length === 0">{{ t('AccountPage.CreateRole', '创建角色') }}</button>
+            <button class="primary" @click="createRole" :disabled="saving">{{ t('AccountPage.CreateRole', '创建角色') }}</button>
           </div>
         </SettingSection>
 
@@ -162,6 +203,23 @@
               </div>
               <div v-if="role.IsInternal" class="field-help">
                 {{ t('AccountPage.InternalRolePermissionsLocked', '内部角色的权限内容已锁定，只允许修改名称和说明。') }}
+              </div>
+            </div>
+
+            <div class="field-block">
+              <span class="field-label">{{ t('AccountPage.DefaultDeviceGroups', '默认设备组') }}</span>
+              <div class="chip-list">
+                <label v-for="group in availableDeviceGroups" :key="`${role.Id}-group-${group.Id}`" class="chip-option" :class="{ 'chip-option--internal': group.IsInternal }">
+                  <input
+                    type="checkbox"
+                    :checked="roleDeviceGroupIds(role).includes(group.Id)"
+                    @change="onRoleDeviceGroupChange(role, group.Id, $event)"
+                  />
+                  <span>{{ formatDeviceGroupLabel(group) }}</span>
+                </label>
+              </div>
+              <div class="field-help">
+                {{ t('AccountPage.RoleDeviceGroupsHelp', '这里定义的是角色默认设备范围，用户自己的额外设备组会在此基础上叠加。') }}
               </div>
             </div>
 

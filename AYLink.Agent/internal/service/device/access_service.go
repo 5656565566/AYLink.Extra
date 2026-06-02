@@ -27,18 +27,12 @@ func (s *AccessService) CanAccessDevice(ctx context.Context, identity *domainaut
 	if identity == nil {
 		return false, nil
 	}
-	if identity.IsAdministrator {
-		return true, nil
-	}
 	return s.repo.CanUserAccessDevice(ctx, identity.UserID, deviceID)
 }
 
 func (s *AccessService) FilterDevices(ctx context.Context, identity *domainauth.Identity, devices []domaindevice.Device) ([]domaindevice.Device, error) {
 	if identity == nil {
 		return []domaindevice.Device{}, nil
-	}
-	if identity.IsAdministrator {
-		return devices, nil
 	}
 
 	allowedIDs, err := s.repo.ListAccessibleDeviceIDs(ctx, identity.UserID)

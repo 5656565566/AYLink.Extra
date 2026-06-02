@@ -158,6 +158,11 @@
   font-size: 13px;
 }
 
+.chip-option--internal {
+  background: rgba(120, 178, 255, 0.08);
+  border-color: rgba(120, 178, 255, 0.18);
+}
+
 .permission-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

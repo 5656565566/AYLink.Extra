@@ -66,6 +66,9 @@ func (f *fakeAuthHandlerService) CreateUser(context.Context, string, string, []i
 func (f *fakeAuthHandlerService) UpdateUser(context.Context, int, string, bool, []int, []int, *int) (*domainauth.User, error) {
 	panic("unexpected call")
 }
+func (f *fakeAuthHandlerService) DeleteUser(context.Context, int, *int) error {
+	panic("unexpected call")
+}
 func (f *fakeAuthHandlerService) ResetPassword(context.Context, int, string) (string, error) {
 	panic("unexpected call")
 }

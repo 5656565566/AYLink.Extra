@@ -482,7 +482,7 @@
               :placeholder="t('Settings.GroupSearchPlaceholder', '搜索分组名称或描述')"
             />
             <div class="group-management-toolbar__actions">
-              <button class="fluent-btn" :disabled="groupManagementLoading" @click="loadGroupManagementData">
+              <button class="fluent-btn" :disabled="groupManagementLoading" @click="refreshGroupManagementList">
                 {{ t('Common.Refresh', '刷新') }}
               </button>
               <button class="fluent-btn primary" @click="openCreateGroupDialog">
@@ -518,17 +518,25 @@
               <article v-for="group in filteredDeviceGroups" :key="group.Id" class="group-card">
                 <div class="group-card__header">
                   <div class="group-card__title-wrap">
-                    <h3 class="group-card__title">{{ group.Name }}</h3>
+                    <div class="group-card__title-line">
+                      <h3 class="group-card__title">{{ group.Name }}</h3>
+                      <span v-if="group.IsInternal" class="group-card__badge">
+                        {{ t('Settings.InternalGroupBadge', '系统内置') }}
+                      </span>
+                    </div>
                     <p v-if="group.Description" class="group-card__description">{{ group.Description }}</p>
                     <p v-else class="group-card__description group-card__description--muted">
                       {{ t('Settings.NoDescription', '暂无描述') }}
                     </p>
+                    <p v-if="group.IsInternal" class="group-card__hint">
+                      {{ t('Settings.InternalAllDevicesHint', '系统全量范围组，不可改名、删除，也不会作为普通业务分组显示在首页。') }}
+                    </p>
                   </div>
                   <div class="group-card__actions">
                     <button class="fluent-btn" @click="openEditGroupDialog(group)">
-                      {{ t('Settings.Manage', '管理') }}
+                      {{ group.IsInternal ? t('Settings.ManageAuthorization', '管理授权') : t('Settings.Manage', '管理') }}
                     </button>
-                    <button class="fluent-btn fluent-btn-danger" @click="deleteDeviceGroup(group)">
+                    <button v-if="!group.IsInternal" class="fluent-btn fluent-btn-danger" @click="deleteDeviceGroup(group)">
                       {{ t('Common.Delete', '删除') }}
                     </button>
                   </div>
@@ -594,6 +602,7 @@
                 v-model.trim="groupForm.name"
                 type="text"
                 class="fluent-input"
+                :disabled="isEditingInternalGroup"
                 :placeholder="t('Settings.GroupNamePlaceholder', '请输入设备分组名称')"
               />
             </div>
@@ -603,8 +612,12 @@
                 v-model.trim="groupForm.description"
                 class="fluent-textarea"
                 rows="3"
+                :disabled="isEditingInternalGroup"
                 :placeholder="t('Settings.GroupDescriptionPlaceholder', '可以写这个分组的用途或归属范围')"
               ></textarea>
+            </div>
+            <div v-if="isEditingInternalGroup" class="group-dialog-form__hint">
+              {{ t('Settings.InternalGroupLockedHint', '内置分组的名称和描述已锁定，你仍然可以在下面调整角色和用户的授权范围。') }}
             </div>
           </div>
 
@@ -619,12 +632,16 @@
                 </div>
               </div>
               <input
+                v-if="!isEditingInternalGroup"
                 v-model.trim="deviceSearchKeyword"
                 type="text"
                 class="fluent-input group-dialog-panel__search"
                 :placeholder="t('Settings.DeviceSearchPlaceholder', '搜索设备名称或序列号')"
               />
-              <div class="group-dialog-selection-list">
+              <div v-if="isEditingInternalGroup" class="group-dialog-static-note">
+                {{ t('Settings.InternalGroupDeviceAutoInclude', '这个系统内置组会自动包含全部设备，不能在这里手动增删设备。') }}
+              </div>
+              <div v-else class="group-dialog-selection-list">
                 <label v-for="device in filteredGroupDevices" :key="device.Id" class="group-dialog-selection-item">
                   <input
                     type="checkbox"

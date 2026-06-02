@@ -84,6 +84,11 @@ func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash,
 	}
 	defer tx.Rollback()
 
+	var existingUsers int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM Users`).Scan(&existingUsers); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO Users (Username, PasswordHash, PasswordSalt, IsActive, CreatedAt, UpdatedAt)
@@ -102,7 +107,42 @@ func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash,
 			return nil, err
 		}
 	}
-	for _, groupID := range normalizeIntIDs(deviceGroupIDs) {
+
+	normalizedGroupIDs := normalizeIntIDs(deviceGroupIDs)
+	if existingUsers == 0 {
+		hasAdministratorRole := false
+		for _, roleID := range roleIds {
+			var roleName string
+			if err := tx.QueryRowContext(ctx, `SELECT Name FROM Roles WHERE Id = ?`, roleID).Scan(&roleName); err != nil {
+				return nil, err
+			}
+			if strings.EqualFold(roleName, "Administrator") {
+				hasAdministratorRole = true
+				break
+			}
+		}
+		if !hasAdministratorRole {
+			goto assignUserGroups
+		}
+
+		var internalGroupID int
+		err := tx.QueryRowContext(ctx, `
+			SELECT Id
+			FROM DeviceGroups
+			WHERE lower(Name) = lower(?)
+			ORDER BY Id
+			LIMIT 1`, internalAllDevicesGroupName).Scan(&internalGroupID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if internalGroupID != 0 {
+			normalizedGroupIDs = append(normalizedGroupIDs, internalGroupID)
+			normalizedGroupIDs = normalizeIntIDs(normalizedGroupIDs)
+		}
+	}
+
+assignUserGroups:
+	for _, groupID := range normalizedGroupIDs {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO UserDeviceGroups (UserId, GroupId) VALUES (?, ?)`, userId, groupID); err != nil {
 			return nil, err
 		}
@@ -152,6 +192,30 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID int, username st
 	}
 
 	return r.loadUserByID(ctx, userID)
+}
+
+func (r *AuthRepository) DeleteUser(ctx context.Context, userID int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	queries := []string{
+		`DELETE FROM UserDeviceGroups WHERE UserId = ?`,
+		`DELETE FROM UserRoles WHERE UserId = ?`,
+		`DELETE FROM RefreshTokens WHERE UserId = ?`,
+		`DELETE FROM AccessTokens WHERE UserId = ?`,
+		`DELETE FROM Users WHERE Id = ?`,
+	}
+
+	for _, query := range queries {
+		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (r *AuthRepository) UpdateUserPassword(ctx context.Context, userID int, passwordHash, passwordSalt string) error {
@@ -469,12 +533,12 @@ func (r *AuthRepository) IsUserAdministrator(ctx context.Context, userID int) (b
 
 func (r *AuthRepository) GetDirectDeviceGroupsForUser(ctx context.Context, userID int) ([]domaindevice.GroupSummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount, g.IsInternal
 		FROM DeviceGroups g
 		INNER JOIN UserDeviceGroups ug ON ug.GroupId = g.Id
 		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
 		WHERE ug.UserId = ?
-		GROUP BY g.Id, g.Name, g.Description
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal
 		ORDER BY g.Name COLLATE NOCASE, g.Id`, userID)
 	if err != nil {
 		return nil, err
@@ -485,7 +549,7 @@ func (r *AuthRepository) GetDirectDeviceGroupsForUser(ctx context.Context, userI
 
 func (r *AuthRepository) GetEffectiveDeviceGroupsForUser(ctx context.Context, userID int) ([]domaindevice.GroupSummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount, g.IsInternal
 		FROM DeviceGroups g
 		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
 		WHERE g.Id IN (
@@ -496,7 +560,7 @@ func (r *AuthRepository) GetEffectiveDeviceGroupsForUser(ctx context.Context, us
 			INNER JOIN UserRoles ur ON ur.RoleId = rdg.RoleId
 			WHERE ur.UserId = ?
 		)
-		GROUP BY g.Id, g.Name, g.Description
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal
 		ORDER BY g.Name COLLATE NOCASE, g.Id`, userID, userID)
 	if err != nil {
 		return nil, err
@@ -507,13 +571,39 @@ func (r *AuthRepository) GetEffectiveDeviceGroupsForUser(ctx context.Context, us
 
 func (r *AuthRepository) GetDeviceGroupsForRole(ctx context.Context, roleID int) ([]domaindevice.GroupSummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount, g.IsInternal
 		FROM DeviceGroups g
 		INNER JOIN RoleDeviceGroups rg ON rg.GroupId = g.Id
 		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
 		WHERE rg.RoleId = ?
-		GROUP BY g.Id, g.Name, g.Description
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal
 		ORDER BY g.Name COLLATE NOCASE, g.Id`, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanGroupSummaries(rows)
+}
+
+func (r *AuthRepository) GetDeviceGroupsByIDs(ctx context.Context, ids []int) ([]domaindevice.GroupSummary, error) {
+	normalizedIDs := normalizeIntIDs(ids)
+	if len(normalizedIDs) == 0 {
+		return []domaindevice.GroupSummary{}, nil
+	}
+
+	query := `
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount, g.IsInternal
+		FROM DeviceGroups g
+		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
+		WHERE g.Id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(normalizedIDs)), ",") + `)
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal
+		ORDER BY g.Name COLLATE NOCASE, g.Id`
+	args := make([]any, 0, len(normalizedIDs))
+	for _, id := range normalizedIDs {
+		args = append(args, id)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -574,10 +664,7 @@ func (r *AuthRepository) CountAccessibleDevicesForUser(ctx context.Context, user
 			LEFT JOIN DeviceGroupDevices gd ON gd.DeviceId = d.Id
 			LEFT JOIN UserGroups ug ON ug.GroupId = gd.GroupId
 			GROUP BY d.Id
-			HAVING
-				(SELECT COUNT(*) FROM UserGroups) = 0
-				OR COUNT(gd.GroupId) = 0
-				OR COUNT(ug.GroupId) > 0
+			HAVING COUNT(ug.GroupId) > 0
 		)`, userID, userID)
 
 	var count int

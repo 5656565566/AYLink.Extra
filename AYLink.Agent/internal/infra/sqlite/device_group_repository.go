@@ -20,7 +20,7 @@ func NewDeviceGroupRepository(db *sql.DB) *DeviceGroupRepository {
 
 func (r *DeviceGroupRepository) List(ctx context.Context) ([]domaindevice.Group, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT g.Id, g.Name, g.Description, g.CreatedAt, g.UpdatedAt,
+		SELECT g.Id, g.Name, g.Description, g.IsInternal, g.CreatedAt, g.UpdatedAt,
 		       COUNT(DISTINCT gd.DeviceId) AS DeviceCount,
 		       COUNT(DISTINCT rg.RoleId) AS RoleCount,
 		       COUNT(DISTINCT ug.UserId) AS UserCount
@@ -28,8 +28,8 @@ func (r *DeviceGroupRepository) List(ctx context.Context) ([]domaindevice.Group,
 		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
 		LEFT JOIN RoleDeviceGroups rg ON rg.GroupId = g.Id
 		LEFT JOIN UserDeviceGroups ug ON ug.GroupId = g.Id
-		GROUP BY g.Id, g.Name, g.Description, g.CreatedAt, g.UpdatedAt
-		ORDER BY g.Name COLLATE NOCASE, g.Id`)
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal, g.CreatedAt, g.UpdatedAt
+		ORDER BY g.IsInternal DESC, g.Name COLLATE NOCASE, g.Id`)
 	if err != nil {
 		return nil, err
 	}
@@ -48,19 +48,64 @@ func (r *DeviceGroupRepository) List(ctx context.Context) ([]domaindevice.Group,
 
 func (r *DeviceGroupRepository) ListOptions(ctx context.Context, keyword string) ([]domaindevice.GroupSummary, error) {
 	query := `
-		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount, g.IsInternal
 		FROM DeviceGroups g
-		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id`
+		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
+		WHERE g.IsInternal = 0`
 	args := make([]any, 0, 2)
 
 	trimmedKeyword := strings.TrimSpace(keyword)
 	if trimmedKeyword != "" {
-		query += ` WHERE lower(g.Name) LIKE lower(?)`
+		query += ` AND lower(g.Name) LIKE lower(?)`
 		args = append(args, "%"+trimmedKeyword+"%")
 	}
 
 	query += `
-		GROUP BY g.Id, g.Name, g.Description
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal
+		ORDER BY g.Name COLLATE NOCASE, g.Id`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domaindevice.GroupSummary, 0)
+	for rows.Next() {
+		summary, err := scanGroupSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, summary)
+	}
+	return items, rows.Err()
+}
+
+func (r *DeviceGroupRepository) ListOptionsForUser(ctx context.Context, userID int, keyword string) ([]domaindevice.GroupSummary, error) {
+	query := `
+		WITH UserGroups AS (
+			SELECT GroupId FROM UserDeviceGroups WHERE UserId = ?
+			UNION
+			SELECT rdg.GroupId
+			FROM RoleDeviceGroups rdg
+			INNER JOIN UserRoles ur ON ur.RoleId = rdg.RoleId
+			WHERE ur.UserId = ?
+		)
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount, g.IsInternal
+		FROM DeviceGroups g
+		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
+		WHERE g.IsInternal = 0
+		  AND g.Id IN (SELECT GroupId FROM UserGroups)`
+	args := []any{userID, userID}
+
+	trimmedKeyword := strings.TrimSpace(keyword)
+	if trimmedKeyword != "" {
+		query += ` AND lower(g.Name) LIKE lower(?)`
+		args = append(args, "%"+trimmedKeyword+"%")
+	}
+
+	query += `
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal
 		ORDER BY g.Name COLLATE NOCASE, g.Id`
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -82,7 +127,7 @@ func (r *DeviceGroupRepository) ListOptions(ctx context.Context, keyword string)
 
 func (r *DeviceGroupRepository) GetByID(ctx context.Context, id int) (*domaindevice.Group, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT g.Id, g.Name, g.Description, g.CreatedAt, g.UpdatedAt,
+		SELECT g.Id, g.Name, g.Description, g.IsInternal, g.CreatedAt, g.UpdatedAt,
 		       COUNT(DISTINCT gd.DeviceId) AS DeviceCount,
 		       COUNT(DISTINCT rg.RoleId) AS RoleCount,
 		       COUNT(DISTINCT ug.UserId) AS UserCount
@@ -91,7 +136,7 @@ func (r *DeviceGroupRepository) GetByID(ctx context.Context, id int) (*domaindev
 		LEFT JOIN RoleDeviceGroups rg ON rg.GroupId = g.Id
 		LEFT JOIN UserDeviceGroups ug ON ug.GroupId = g.Id
 		WHERE g.Id = ?
-		GROUP BY g.Id, g.Name, g.Description, g.CreatedAt, g.UpdatedAt`, id)
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal, g.CreatedAt, g.UpdatedAt`, id)
 
 	group, err := scanDeviceGroup(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -105,7 +150,7 @@ func (r *DeviceGroupRepository) GetByID(ctx context.Context, id int) (*domaindev
 
 func (r *DeviceGroupRepository) GetByName(ctx context.Context, name string) (*domaindevice.Group, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT g.Id, g.Name, g.Description, g.CreatedAt, g.UpdatedAt,
+		SELECT g.Id, g.Name, g.Description, g.IsInternal, g.CreatedAt, g.UpdatedAt,
 		       COUNT(DISTINCT gd.DeviceId) AS DeviceCount,
 		       COUNT(DISTINCT rg.RoleId) AS RoleCount,
 		       COUNT(DISTINCT ug.UserId) AS UserCount
@@ -114,7 +159,7 @@ func (r *DeviceGroupRepository) GetByName(ctx context.Context, name string) (*do
 		LEFT JOIN RoleDeviceGroups rg ON rg.GroupId = g.Id
 		LEFT JOIN UserDeviceGroups ug ON ug.GroupId = g.Id
 		WHERE lower(g.Name) = lower(?)
-		GROUP BY g.Id, g.Name, g.Description, g.CreatedAt, g.UpdatedAt`, strings.TrimSpace(name))
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal, g.CreatedAt, g.UpdatedAt`, strings.TrimSpace(name))
 
 	group, err := scanDeviceGroup(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -129,8 +174,8 @@ func (r *DeviceGroupRepository) GetByName(ctx context.Context, name string) (*do
 func (r *DeviceGroupRepository) Create(ctx context.Context, name string, description string) (*domaindevice.Group, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := r.db.ExecContext(ctx, `
-		INSERT INTO DeviceGroups (Name, Description, CreatedAt, UpdatedAt)
-		VALUES (?, ?, ?, ?)`,
+		INSERT INTO DeviceGroups (Name, Description, IsInternal, CreatedAt, UpdatedAt)
+		VALUES (?, ?, 0, ?, ?)`,
 		strings.TrimSpace(name),
 		strings.TrimSpace(description),
 		now,
@@ -150,7 +195,7 @@ func (r *DeviceGroupRepository) Update(ctx context.Context, id int, name string,
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE DeviceGroups
 		SET Name = ?, Description = ?, UpdatedAt = ?
-		WHERE Id = ?`,
+		WHERE Id = ? AND IsInternal = 0`,
 		strings.TrimSpace(name),
 		strings.TrimSpace(description),
 		time.Now().UTC().Format(time.RFC3339Nano),
@@ -163,6 +208,14 @@ func (r *DeviceGroupRepository) Update(ctx context.Context, id int, name string,
 }
 
 func (r *DeviceGroupRepository) Delete(ctx context.Context, id int) error {
+	group, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if group != nil && group.IsInternal {
+		return nil
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -186,12 +239,12 @@ func (r *DeviceGroupRepository) Delete(ctx context.Context, id int) error {
 
 func (r *DeviceGroupRepository) GetGroupsForDevice(ctx context.Context, deviceID int) ([]domaindevice.GroupSummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd2.DeviceId) AS DeviceCount
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd2.DeviceId) AS DeviceCount, g.IsInternal
 		FROM DeviceGroups g
 		INNER JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
 		LEFT JOIN DeviceGroupDevices gd2 ON gd2.GroupId = g.Id
-		WHERE gd.DeviceId = ?
-		GROUP BY g.Id, g.Name, g.Description
+		WHERE gd.DeviceId = ? AND g.IsInternal = 0
+		GROUP BY g.Id, g.Name, g.Description, g.IsInternal
 		ORDER BY g.Name COLLATE NOCASE, g.Id`, deviceID)
 	if err != nil {
 		return nil, err
@@ -228,14 +281,29 @@ func (r *DeviceGroupRepository) SetGroupsForDevice(ctx context.Context, deviceID
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM DeviceGroupDevices WHERE DeviceId = ?`, deviceID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM DeviceGroupDevices
+		WHERE DeviceId = ?
+		  AND GroupId NOT IN (SELECT Id FROM DeviceGroups WHERE IsInternal = 1)`, deviceID); err != nil {
 		return err
 	}
 
 	for _, groupID := range normalizeIntIDs(groupIDs) {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO DeviceGroupDevices (GroupId, DeviceId) VALUES (?, ?)`, groupID, deviceID); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO DeviceGroupDevices (GroupId, DeviceId)
+			SELECT Id, ?
+			FROM DeviceGroups
+			WHERE Id = ? AND IsInternal = 0`, deviceID, groupID); err != nil {
 			return err
 		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO DeviceGroupDevices (GroupId, DeviceId)
+		SELECT Id, ?
+		FROM DeviceGroups
+		WHERE IsInternal = 1`, deviceID); err != nil {
+		return err
 	}
 
 	return tx.Commit()
@@ -256,10 +324,7 @@ func (r *DeviceGroupRepository) ListAccessibleDeviceIDs(ctx context.Context, use
 		LEFT JOIN DeviceGroupDevices gd ON gd.DeviceId = d.Id
 		LEFT JOIN UserGroups ug ON ug.GroupId = gd.GroupId
 		GROUP BY d.Id
-		HAVING
-			(SELECT COUNT(*) FROM UserGroups) = 0
-			OR COUNT(gd.GroupId) = 0
-			OR COUNT(ug.GroupId) > 0
+		HAVING COUNT(ug.GroupId) > 0
 		ORDER BY d.Id`, userID, userID)
 	if err != nil {
 		return nil, err
@@ -293,10 +358,7 @@ func (r *DeviceGroupRepository) CanUserAccessDevice(ctx context.Context, userID 
 		LEFT JOIN UserGroups ug ON ug.GroupId = gd.GroupId
 		WHERE d.Id = ?
 		GROUP BY d.Id
-		HAVING
-			(SELECT COUNT(*) FROM UserGroups) = 0
-			OR COUNT(gd.GroupId) = 0
-			OR COUNT(ug.GroupId) > 0
+		HAVING COUNT(ug.GroupId) > 0
 		LIMIT 1`, userID, userID, deviceID)
 
 	var marker int
@@ -330,7 +392,7 @@ func (r *DeviceGroupRepository) IsUserAdministrator(ctx context.Context, userID 
 func scanGroupSummary(s scanner) (domaindevice.GroupSummary, error) {
 	var summary domaindevice.GroupSummary
 	var description sql.NullString
-	if err := s.Scan(&summary.ID, &summary.Name, &description, &summary.DeviceCount); err != nil {
+	if err := s.Scan(&summary.ID, &summary.Name, &description, &summary.DeviceCount, &summary.IsInternal); err != nil {
 		return domaindevice.GroupSummary{}, err
 	}
 	summary.Description = description.String
@@ -345,6 +407,7 @@ func scanDeviceGroup(s scanner) (domaindevice.Group, error) {
 		&group.ID,
 		&group.Name,
 		&description,
+		&group.IsInternal,
 		&createdAt,
 		&updatedAt,
 		&group.DeviceCount,

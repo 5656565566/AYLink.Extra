@@ -7,6 +7,7 @@ type GroupSummary struct {
 	Name        string `json:"Name"`
 	Description string `json:"Description,omitempty"`
 	DeviceCount int    `json:"DeviceCount,omitempty"`
+	IsInternal  bool   `json:"IsInternal,omitempty"`
 }
 
 type Group struct {
@@ -16,6 +17,7 @@ type Group struct {
 	DeviceCount int       `json:"DeviceCount"`
 	RoleCount   int       `json:"RoleCount"`
 	UserCount   int       `json:"UserCount"`
+	IsInternal  bool      `json:"IsInternal"`
 	CreatedAt   time.Time `json:"CreatedAt"`
 	UpdatedAt   time.Time `json:"UpdatedAt"`
 }

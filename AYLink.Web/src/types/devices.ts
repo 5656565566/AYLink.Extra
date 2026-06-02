@@ -2,6 +2,7 @@ export interface DeviceGroupSummary {
   Id: number;
   Name: string;
   Source?: string | null;
+  IsInternal?: boolean;
 }
 
 export interface DeviceSummary {

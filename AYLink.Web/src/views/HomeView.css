@@ -18,15 +18,57 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  position: relative;
+}
+
+.group-picker-trigger {
+  min-width: 168px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--fluent-stroke-default);
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.group-picker-trigger:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.group-picker-trigger svg {
+  width: 16px;
+  height: 16px;
+}
+
+.group-picker-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 64px;
+  width: 280px;
+  background-color: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  z-index: 120;
+  overflow: hidden;
+}
+
+.group-picker-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--fluent-stroke-default);
+}
+
+.group-picker-search input {
+  width: 100%;
 }
 
 .label {
   font-weight: 600;
   font-size: 14px;
-}
-
-select {
-  min-width: 140px;
 }
 
 .actions {
@@ -68,7 +110,7 @@ select {
 /* List Styles */
 .list-header {
   display: grid;
-  grid-template-columns: 1fr 150px 180px;
+  grid-template-columns: minmax(0, 1fr) 220px 150px 180px;
   padding: 12px 24px;
   font-weight: 600;
   font-size: 14px;
@@ -83,7 +125,7 @@ select {
 
 .list-row {
   display: grid;
-  grid-template-columns: 1fr 150px 180px;
+  grid-template-columns: minmax(0, 1fr) 220px 150px 180px;
   padding: 16px 24px;
   align-items: center;
   transition: background-color 0.2s ease;
@@ -108,6 +150,20 @@ select {
 .device-ip {
   font-size: 12px;
   color: var(--fluent-text-secondary);
+}
+
+.col-group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.device-group-text {
+  font-size: 13px;
+  color: var(--fluent-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .col-conn {
@@ -345,4 +401,47 @@ select {
 .dialog-footer-grid button {
   width: 100%;
   justify-content: center;
+}
+
+.group-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.group-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--fluent-text-primary);
+  text-align: left;
+}
+
+.group-option:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.group-option.selected {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.group-option__name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.group-picker-empty {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-secondary);
+  text-align: center;
+  font-size: 13px;
 }

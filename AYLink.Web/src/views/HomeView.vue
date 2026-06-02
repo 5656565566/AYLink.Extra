@@ -4,9 +4,43 @@
       <div class="title-bar">
         <div class="group-select">
           <span class="label">{{ t('HomeView.DeviceGroup', '设备分组') }}</span>
-          <select>
-            <option>{{ t('HomeView.AllDevices', '全部设备') }}</option>
-          </select>
+          <button class="group-picker-trigger" @click.stop="toggleGroupPickerMenu">
+            <span>{{ selectedGroup?.Name || t('HomeView.AllDevices', '全部设备') }}</span>
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div v-if="showGroupPickerMenu" class="group-picker-menu" @click.stop>
+            <div class="group-picker-search">
+              <input
+                v-model="groupKeyword"
+                type="text"
+                :placeholder="t('HomeView.GroupSearchPlaceholder', '搜索分组名称')"
+                autofocus
+              />
+            </div>
+            <div class="group-picker-list">
+              <button
+                class="group-option"
+                :class="{ selected: selectedGroupId === 0 }"
+                @click="selectGroup(0)"
+              >
+                <span class="group-option__name">{{ t('HomeView.AllDevices', '全部设备') }}</span>
+              </button>
+              <button
+                v-for="group in filteredAvailableGroups"
+                :key="group.Id"
+                class="group-option"
+                :class="{ selected: selectedGroupId === group.Id }"
+                @click="selectGroup(group.Id)"
+              >
+                <span class="group-option__name">{{ group.Name }}</span>
+              </button>
+              <div v-if="filteredAvailableGroups.length === 0" class="group-picker-empty">
+                {{ t('HomeView.NoGroupsMatched', '没有匹配的分组') }}
+              </div>
+            </div>
+          </div>
         </div>
         <div class="actions">
           <button v-if="canManageDevices" class="transparent" @click="showAddDialog = true">
@@ -72,6 +106,7 @@
     <div class="content-area">
       <div class="list-header">
         <div class="col-info">{{ t('HomeView.DeviceInfo', '设备信息') }}</div>
+        <div class="col-group">{{ t('HomeView.DeviceGroup', '分组') }}</div>
         <div class="col-conn">{{ t('HomeView.ConnectionType', '连接方式') }}</div>
         <div class="col-actions">{{ t('HomeView.Actions', '操作') }}</div>
       </div>
@@ -80,14 +115,17 @@
         <div class="spinner"></div>
         <p>{{ t('HomeView.LoadingDevices', '正在加载设备列表...') }}</p>
       </div>
-      <div v-else-if="devices.length === 0" class="empty-state">
+      <div v-else-if="visibleDevices.length === 0" class="empty-state">
         <p>{{ t('HomeView.NoDevices', '没有可用的设备，请点击「添加设备」按钮') }}</p>
       </div>
       <div v-else class="list-body">
-        <div v-for="device in devices" :key="device.Id" class="list-row">
+        <div v-for="device in visibleDevices" :key="device.Id" class="list-row">
           <div class="col-info">
             <div class="device-name">{{ device.Name || device.Serial || t('Devices.UnknownDevice', '未知设备') }}</div>
             <div class="device-ip">{{ device.IpAddress ? `${device.IpAddress}:${device.Port}` : device.Serial }}</div>
+          </div>
+          <div class="col-group">
+            <span class="device-group-text">{{ formatDeviceGroups(device) }}</span>
           </div>
           <div class="col-conn">
             <div class="wifi-badge">

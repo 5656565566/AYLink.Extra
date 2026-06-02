@@ -52,10 +52,10 @@ func (f *fakeAuthHandlerService) LogoutAll(_ context.Context, userID int) error 
 func (f *fakeAuthHandlerService) GetUsers(context.Context) ([]domainauth.User, error) {
 	panic("unexpected call")
 }
-func (f *fakeAuthHandlerService) CreateUser(context.Context, string, string, []int) (*domainauth.User, error) {
+func (f *fakeAuthHandlerService) CreateUser(context.Context, string, string, []int, []int) (*domainauth.User, error) {
 	panic("unexpected call")
 }
-func (f *fakeAuthHandlerService) UpdateUser(context.Context, int, string, bool, []int, *int) (*domainauth.User, error) {
+func (f *fakeAuthHandlerService) UpdateUser(context.Context, int, string, bool, []int, []int, *int) (*domainauth.User, error) {
 	panic("unexpected call")
 }
 func (f *fakeAuthHandlerService) ResetPassword(context.Context, int, string) (string, error) {
@@ -67,10 +67,10 @@ func (f *fakeAuthHandlerService) SetUserActiveState(context.Context, int, bool, 
 func (f *fakeAuthHandlerService) GetRoles(context.Context) ([]domainauth.Role, error) {
 	panic("unexpected call")
 }
-func (f *fakeAuthHandlerService) CreateRole(context.Context, string, string, []string) (*domainauth.Role, error) {
+func (f *fakeAuthHandlerService) CreateRole(context.Context, string, string, []string, []int) (*domainauth.Role, error) {
 	panic("unexpected call")
 }
-func (f *fakeAuthHandlerService) UpdateRole(context.Context, int, string, string, []string) (*domainauth.Role, error) {
+func (f *fakeAuthHandlerService) UpdateRole(context.Context, int, string, string, []string, []int) (*domainauth.Role, error) {
 	panic("unexpected call")
 }
 func (f *fakeAuthHandlerService) GetAvailablePermissions() []domainauth.PermissionDescriptor {

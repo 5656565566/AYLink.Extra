@@ -14,6 +14,7 @@ import (
 	appservice "aylink-agent/internal/service/app"
 	authservice "aylink-agent/internal/service/auth"
 	deviceservice "aylink-agent/internal/service/device"
+	devicegroupservice "aylink-agent/internal/service/devicegroup"
 	fileservice "aylink-agent/internal/service/file"
 	i18nservice "aylink-agent/internal/service/i18n"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
@@ -36,15 +37,16 @@ type Dependencies struct {
 }
 
 type routeHandlers struct {
-	status   *handler.StatusHandler
-	version  *handler.VersionHandler
-	adb      *handler.ADBHandler
-	auth     *handler.AuthHandler
-	device   *handler.DeviceHandler
-	terminal *handler.TerminalHandler
-	settings *handler.SettingsHandler
-	webrtc   *handler.WebRTCHandler
-	i18n     *handler.I18NHandler
+	status      *handler.StatusHandler
+	version     *handler.VersionHandler
+	adb         *handler.ADBHandler
+	auth        *handler.AuthHandler
+	device      *handler.DeviceHandler
+	deviceGroup *handler.DeviceGroupHandler
+	terminal    *handler.TerminalHandler
+	settings    *handler.SettingsHandler
+	webrtc      *handler.WebRTCHandler
+	i18n        *handler.I18NHandler
 }
 
 type routeGuards struct {
@@ -70,8 +72,11 @@ func New(deps Dependencies) http.Handler {
 	authHandler := handler.NewAuthHandler(authService)
 
 	deviceRepo := sqlite.NewDeviceRepository(deps.DB)
+	deviceGroupRepo := sqlite.NewDeviceGroupRepository(deps.DB)
 	deviceService := deviceservice.NewService(deviceRepo)
 	deviceService.SetADBManager(deps.ADB) // 注入 adb manager
+	deviceAccessService := deviceservice.NewAccessService(deviceGroupRepo)
+	deviceGroupService := devicegroupservice.NewService(deviceGroupRepo)
 	appService := appservice.NewService(deviceService, deps.ADB)
 	fileService := fileservice.NewService(deviceService, deps.ADB)
 
@@ -87,35 +92,40 @@ func New(deps Dependencies) http.Handler {
 
 	deviceHandler := handler.NewDeviceHandler(
 		deviceService,
+		deviceAccessService,
+		deviceGroupService,
 		appService,
 		fileService,
 		settingsRepo,
 		scrcpyService,
 	)
+	deviceGroupHandler := handler.NewDeviceGroupHandler(deviceGroupService)
 
-	terminalHandler := handler.NewTerminalHandler(terminalservice.NewService(deviceRepo, deps.ADB))
+	terminalHandler := handler.NewTerminalHandler(terminalservice.NewService(deviceRepo, deps.ADB), deviceAccessService)
 	settingsService := settingsservice.NewService(deps.DB)
-	webRtcHandler := handler.NewWebRTCHandler(webrtcservice.NewService(deps.Logger), settingsService, scrcpyService)
+	webRtcHandler := handler.NewWebRTCHandler(webrtcservice.NewService(deps.Logger), settingsService, scrcpyService, deviceAccessService)
 	i18nHandler := handler.NewI18NHandler(i18nservice.NewService(), settingsService)
 	settingsHandler := handler.NewSettingsHandler(settingsService)
 
 	authMiddleware := middleware.Auth(authService)
 	guards := newRouteGuards(authMiddleware)
 	handlers := routeHandlers{
-		status:   statusHandler,
-		version:  versionHandler,
-		adb:      adbHandler,
-		auth:     authHandler,
-		device:   deviceHandler,
-		terminal: terminalHandler,
-		settings: settingsHandler,
-		webrtc:   webRtcHandler,
-		i18n:     i18nHandler,
+		status:      statusHandler,
+		version:     versionHandler,
+		adb:         adbHandler,
+		auth:        authHandler,
+		device:      deviceHandler,
+		deviceGroup: deviceGroupHandler,
+		terminal:    terminalHandler,
+		settings:    settingsHandler,
+		webrtc:      webRtcHandler,
+		i18n:        i18nHandler,
 	}
 
 	registerStatusRoutes(mux, handlers)
 	registerAuthRoutes(mux, handlers, guards)
 	registerDeviceRoutes(mux, handlers, guards)
+	registerDeviceGroupRoutes(mux, handlers, guards)
 	registerSettingsRoutes(mux, handlers, guards)
 	mux.Handle("/", handler.NewSPAHandler(deps.WWWRoot, deps.EmbeddedWWW, deps.Logger))
 

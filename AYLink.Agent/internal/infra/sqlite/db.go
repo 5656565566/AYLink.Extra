@@ -101,6 +101,28 @@ func initialize(db *sql.DB) error {
 			CreatedAt TEXT NOT NULL,
 			LastSeenAt TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS DeviceGroups (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT,
+			Name TEXT NOT NULL UNIQUE,
+			Description TEXT,
+			CreatedAt TEXT NOT NULL,
+			UpdatedAt TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS DeviceGroupDevices (
+			GroupId INTEGER NOT NULL,
+			DeviceId INTEGER NOT NULL,
+			PRIMARY KEY (GroupId, DeviceId)
+		)`,
+		`CREATE TABLE IF NOT EXISTS UserDeviceGroups (
+			UserId INTEGER NOT NULL,
+			GroupId INTEGER NOT NULL,
+			PRIMARY KEY (UserId, GroupId)
+		)`,
+		`CREATE TABLE IF NOT EXISTS RoleDeviceGroups (
+			RoleId INTEGER NOT NULL,
+			GroupId INTEGER NOT NULL,
+			PRIMARY KEY (RoleId, GroupId)
+		)`,
 	}
 
 	for _, query := range queries {

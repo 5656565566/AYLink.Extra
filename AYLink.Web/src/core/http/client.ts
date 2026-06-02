@@ -11,6 +11,7 @@ export interface ApiRequestOptions extends RequestInit {
 
 interface AuthSessionHandlers {
   clearSession: () => void;
+  ensureFreshAccessToken: () => Promise<void>;
   getAccessToken: () => string;
   hasActiveAccessToken: () => boolean;
   refreshAccessToken: () => Promise<boolean>;
@@ -87,6 +88,10 @@ export async function sendApiRequest(url: string, options: ApiRequestOptions = {
 
   if (requiresAuth && !authSessionHandlers) {
     throw new Error('Auth session handlers are not registered.');
+  }
+
+  if (requiresAuth) {
+    await authSessionHandlers?.ensureFreshAccessToken?.();
   }
 
   if (requiresAuth && !authSessionHandlers?.getAccessToken()) {

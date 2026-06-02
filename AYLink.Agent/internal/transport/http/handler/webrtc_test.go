@@ -65,7 +65,7 @@ func (fakeScrcpyRuntimeService) StartRuntimeForWebRTC(context.Context, int, scrc
 }
 
 func TestWebRTCHandlerCreateTicketRejectsInvalidJSON(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{`))
 	recorder := httptest.NewRecorder()
@@ -80,7 +80,7 @@ func TestWebRTCHandlerCreateTicketRejectsInvalidJSON(t *testing.T) {
 func TestWebRTCHandlerCreateTicketMapsMissingDeviceID(t *testing.T) {
 	handler := NewWebRTCHandler(&fakeWebRTCService{
 		createTicketErr: webrtcservice.ErrDeviceIDRequired,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":" "}`))
 	recorder := httptest.NewRecorder()
@@ -100,7 +100,7 @@ func TestWebRTCHandlerCreateTicketTrimsPayloadAndReturnsResult(t *testing.T) {
 			ExpiresInSeconds: 60,
 		},
 	}
-	handler := NewWebRTCHandler(service, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	handler := NewWebRTCHandler(service, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":" 123 ","appPackage":" com.demo.app ","appName":" Demo "}`))
 	recorder := httptest.NewRecorder()
@@ -118,7 +118,7 @@ func TestWebRTCHandlerCreateTicketTrimsPayloadAndReturnsResult(t *testing.T) {
 func TestWebRTCHandlerHeartbeatMapsSessionIDRequired(t *testing.T) {
 	handler := NewWebRTCHandler(&fakeWebRTCService{
 		touchErr: webrtcservice.ErrSessionIDRequired,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/scrcpy-sessions/heartbeat", strings.NewReader(`{"deviceId":"1","sessionId":" "}`))
 	recorder := httptest.NewRecorder()
@@ -133,7 +133,7 @@ func TestWebRTCHandlerHeartbeatMapsSessionIDRequired(t *testing.T) {
 func TestWebRTCHandlerHeartbeatReturnsSuccessFlag(t *testing.T) {
 	handler := NewWebRTCHandler(&fakeWebRTCService{
 		touchResult: true,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/scrcpy-sessions/heartbeat", strings.NewReader(`{"deviceId":"1","sessionId":"abc"}`))
 	recorder := httptest.NewRecorder()
@@ -151,7 +151,7 @@ func TestWebRTCHandlerHeartbeatReturnsSuccessFlag(t *testing.T) {
 func TestWebRTCHandlerReleaseMapsDeviceIDRequired(t *testing.T) {
 	handler := NewWebRTCHandler(&fakeWebRTCService{
 		releaseErr: webrtcservice.ErrDeviceIDRequired,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/scrcpy-sessions/release", strings.NewReader(`{"deviceId":" ","sessionId":"abc"}`))
 	recorder := httptest.NewRecorder()
@@ -164,7 +164,7 @@ func TestWebRTCHandlerReleaseMapsDeviceIDRequired(t *testing.T) {
 }
 
 func TestWebRTCHandlerReleaseReturnsSuccess(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 	handler.runtimes["1"] = &managedRuntime{
 		deviceID:   "1",
 		refCount:   0,
@@ -188,7 +188,7 @@ func TestWebRTCHandlerReleaseReturnsSuccess(t *testing.T) {
 func TestWebRTCHandlerCreateTicketMapsInternalError(t *testing.T) {
 	handler := NewWebRTCHandler(&fakeWebRTCService{
 		createTicketErr: errors.New("boom"),
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{})
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":"1"}`))
 	recorder := httptest.NewRecorder()

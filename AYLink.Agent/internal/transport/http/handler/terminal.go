@@ -14,8 +14,9 @@ import (
 )
 
 type TerminalHandler struct {
-	service  TerminalService
-	upgrader websocket.Upgrader
+	service       TerminalService
+	accessService DeviceAccessService
+	upgrader      websocket.Upgrader
 }
 
 type terminalMessage struct {
@@ -26,9 +27,10 @@ type terminalMessage struct {
 	Rows    int    `json:"rows,omitempty"`
 }
 
-func NewTerminalHandler(service TerminalService) *TerminalHandler {
+func NewTerminalHandler(service TerminalService, accessService DeviceAccessService) *TerminalHandler {
 	return &TerminalHandler{
-		service: service,
+		service:       service,
+		accessService: accessService,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -39,6 +41,9 @@ func (h *TerminalHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	deviceID, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, deviceID); !ok {
 		return
 	}
 

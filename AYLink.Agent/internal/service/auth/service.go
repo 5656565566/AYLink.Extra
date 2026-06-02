@@ -93,7 +93,7 @@ func (s *Service) EnsureBootstrapAdmin(ctx context.Context) error {
 		return errors.New("Administrator role missing during bootstrap")
 	}
 
-	_, err = s.repo.CreateUser(ctx, username, hash, salt, []int{role.ID})
+	_, err = s.repo.CreateUser(ctx, username, hash, salt, []int{role.ID}, nil)
 	if err != nil {
 		return err
 	}
@@ -175,6 +175,10 @@ func (s *Service) ValidateAccessToken(ctx context.Context, accessToken string) (
 	if err != nil {
 		return nil, err
 	}
+	isAdministrator, err := s.repo.IsUserAdministrator(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.repo.TouchAccessToken(ctx, hashToken(accessToken), time.Now().UTC()); err != nil {
 		return nil, err
 	}
@@ -182,6 +186,7 @@ func (s *Service) ValidateAccessToken(ctx context.Context, accessToken string) (
 		UserID:               user.ID,
 		Username:             user.Username,
 		Permissions:          permissions,
+		IsAdministrator:      isAdministrator,
 		AccessToken:          accessToken,
 		AccessTokenExpiresAt: expiresAt,
 	}, nil
@@ -212,7 +217,7 @@ func (s *Service) GetUsers(ctx context.Context) ([]domainauth.User, error) {
 	return s.repo.ListUsers(ctx)
 }
 
-func (s *Service) CreateUser(ctx context.Context, username, password string, roleIds []int) (*domainauth.User, error) {
+func (s *Service) CreateUser(ctx context.Context, username, password string, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
 	if strings.TrimSpace(username) == "" {
 		return nil, ErrUsernameRequired
 	}
@@ -234,10 +239,10 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 	}
 	hash := hashPassword(password, salt)
 
-	return s.repo.CreateUser(ctx, strings.TrimSpace(username), hash, salt, normalizeIds(roleIds))
+	return s.repo.CreateUser(ctx, strings.TrimSpace(username), hash, salt, normalizeIds(roleIds), normalizeIds(deviceGroupIDs))
 }
 
-func (s *Service) UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, actingUserID *int) (*domainauth.User, error) {
+func (s *Service) UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int, actingUserID *int) (*domainauth.User, error) {
 	if actingUserID != nil && *actingUserID == userID && !isActive {
 		return nil, ErrCurrentUserLocked
 	}
@@ -251,7 +256,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID int, username string, i
 		return nil, ErrUsernameExists
 	}
 
-	user, err := s.repo.UpdateUser(ctx, userID, trimmedUsername, isActive, normalizeIds(roleIds))
+	user, err := s.repo.UpdateUser(ctx, userID, trimmedUsername, isActive, normalizeIds(roleIds), normalizeIds(deviceGroupIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +349,16 @@ func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive b
 		roleIds = append(roleIds, r.ID)
 	}
 
-	_, err = s.repo.UpdateUser(ctx, userID, user.Username, isActive, roleIds)
+	directGroupSummaries, err := s.repo.GetDirectDeviceGroupsForUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	directGroupIDs := make([]int, 0, len(directGroupSummaries))
+	for _, group := range directGroupSummaries {
+		directGroupIDs = append(directGroupIDs, group.ID)
+	}
+
+	_, err = s.repo.UpdateUser(ctx, userID, user.Username, isActive, roleIds, directGroupIDs)
 	if err == nil && !isActive {
 		err = s.LogoutAll(ctx, userID)
 	}
@@ -356,7 +370,7 @@ func (s *Service) GetRoles(ctx context.Context) ([]domainauth.Role, error) {
 	return s.repo.ListRoles(ctx)
 }
 
-func (s *Service) CreateRole(ctx context.Context, name, description string, permissions []string) (*domainauth.Role, error) {
+func (s *Service) CreateRole(ctx context.Context, name, description string, permissions []string, deviceGroupIDs []int) (*domainauth.Role, error) {
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
 		return nil, ErrRoleNameRequired
@@ -375,10 +389,10 @@ func (s *Service) CreateRole(ctx context.Context, name, description string, perm
 		return nil, err
 	}
 
-	return s.repo.CreateRole(ctx, trimmedName, strings.TrimSpace(description), normalizedPerms)
+	return s.repo.CreateRole(ctx, trimmedName, strings.TrimSpace(description), normalizedPerms, normalizeIds(deviceGroupIDs))
 }
 
-func (s *Service) UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string) (*domainauth.Role, error) {
+func (s *Service) UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string, deviceGroupIDs []int) (*domainauth.Role, error) {
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
 		return nil, ErrRoleNameRequired
@@ -410,7 +424,7 @@ func (s *Service) UpdateRole(ctx context.Context, roleID int, name, description 
 		}
 	}
 
-	return s.repo.UpdateRole(ctx, roleID, trimmedName, strings.TrimSpace(description), normalizedPerms)
+	return s.repo.UpdateRole(ctx, roleID, trimmedName, strings.TrimSpace(description), normalizedPerms, normalizeIds(deviceGroupIDs))
 }
 
 func (s *Service) GetAvailablePermissions() []domainauth.PermissionDescriptor {
@@ -478,13 +492,29 @@ func (s *Service) buildUser(ctx context.Context, userID int) (*domainauth.User, 
 	if err != nil {
 		return nil, err
 	}
+	directGroups, err := s.repo.GetDirectDeviceGroupsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	effectiveGroups, err := s.repo.GetEffectiveDeviceGroupsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	deviceCount, err := s.repo.CountAccessibleDevicesForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 	return &domainauth.User{
-		ID:          record.ID,
-		Username:    record.Username,
-		IsActive:    record.IsActive,
-		LastLoginAt: record.LastLoginAt,
-		Roles:       roles,
-		Permissions: permissions,
+		ID:                        record.ID,
+		Username:                  record.Username,
+		IsActive:                  record.IsActive,
+		LastLoginAt:               record.LastLoginAt,
+		Roles:                     roles,
+		Permissions:               permissions,
+		DirectDeviceGroups:        directGroups,
+		EffectiveDeviceGroups:     effectiveGroups,
+		EffectiveDeviceGroupCount: len(effectiveGroups),
+		EffectiveDeviceCount:      deviceCount,
 	}, nil
 }
 

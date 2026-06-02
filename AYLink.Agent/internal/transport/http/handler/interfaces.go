@@ -31,13 +31,13 @@ type AuthService interface {
 	ChangeOwnPassword(ctx context.Context, userID int, currentPassword, newPassword string) error
 	LogoutAll(ctx context.Context, userID int) error
 	GetUsers(ctx context.Context) ([]domainauth.User, error)
-	CreateUser(ctx context.Context, username, password string, roleIds []int) (*domainauth.User, error)
-	UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, actingUserID *int) (*domainauth.User, error)
+	CreateUser(ctx context.Context, username, password string, roleIds []int, deviceGroupIds []int) (*domainauth.User, error)
+	UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIds []int, actingUserID *int) (*domainauth.User, error)
 	ResetPassword(ctx context.Context, userID int, newPassword string) (string, error)
 	SetUserActiveState(ctx context.Context, userID int, isActive bool, actingUserID *int) error
 	GetRoles(ctx context.Context) ([]domainauth.Role, error)
-	CreateRole(ctx context.Context, name, description string, permissions []string) (*domainauth.Role, error)
-	UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string) (*domainauth.Role, error)
+	CreateRole(ctx context.Context, name, description string, permissions []string, deviceGroupIds []int) (*domainauth.Role, error)
+	UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string, deviceGroupIds []int) (*domainauth.Role, error)
 	GetAvailablePermissions() []domainauth.PermissionDescriptor
 }
 
@@ -58,6 +58,23 @@ type DeviceService interface {
 	Delete(ctx context.Context, id int) error
 	Connect(ctx context.Context, id int) (*domaindevice.Device, error)
 	Rename(ctx context.Context, id int, name string) (*domaindevice.Device, error)
+}
+
+type DeviceAccessService interface {
+	CanAccessDevice(ctx context.Context, identity *domainauth.Identity, deviceID int) (bool, error)
+	FilterDevices(ctx context.Context, identity *domainauth.Identity, devices []domaindevice.Device) ([]domaindevice.Device, error)
+}
+
+type DeviceGroupService interface {
+	List(ctx context.Context) ([]domaindevice.Group, error)
+	ListOptions(ctx context.Context, keyword string) ([]domaindevice.GroupSummary, error)
+	GetByID(ctx context.Context, id int) (*domaindevice.Group, error)
+	Create(ctx context.Context, name, description string) (*domaindevice.Group, error)
+	Update(ctx context.Context, id int, name, description string) (*domaindevice.Group, error)
+	Delete(ctx context.Context, id int) error
+	GetGroupsForDevice(ctx context.Context, deviceID int) ([]domaindevice.GroupSummary, error)
+	GetGroupsForDevices(ctx context.Context, deviceIDs []int) (map[int][]domaindevice.GroupSummary, error)
+	SetGroupsForDevice(ctx context.Context, deviceID int, groupIDs []int) error
 }
 
 type DeviceSettingsService interface {

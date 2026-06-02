@@ -16,15 +16,19 @@ import (
 
 type DeviceHandler struct {
 	service         DeviceService
+	accessService   DeviceAccessService
+	groupService    DeviceGroupService
 	appService      AppService
 	fileService     FileService
 	settingsService DeviceSettingsService
 	scrcpyService   ScrcpyService
 }
 
-func NewDeviceHandler(service DeviceService, appService AppService, fileService FileService, settingsService DeviceSettingsService, scrcpyService ScrcpyService) *DeviceHandler {
+func NewDeviceHandler(service DeviceService, accessService DeviceAccessService, groupService DeviceGroupService, appService AppService, fileService FileService, settingsService DeviceSettingsService, scrcpyService ScrcpyService) *DeviceHandler {
 	return &DeviceHandler{
 		service:         service,
+		accessService:   accessService,
+		groupService:    groupService,
 		appService:      appService,
 		fileService:     fileService,
 		settingsService: settingsService,
@@ -41,6 +45,28 @@ func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "DEVICES_LIST_FAILED", "Errors.DevicesListFailed", "加载设备列表失败")
 		return
+	}
+	if h.accessService != nil {
+		identity := getIdentity(r)
+		devices, err = h.accessService.FilterDevices(r.Context(), identity, devices)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "DEVICES_FILTER_FAILED", "Errors.DevicesListFailed", "过滤设备列表失败")
+			return
+		}
+	}
+	if h.groupService != nil && len(devices) > 0 {
+		deviceIDs := make([]int, 0, len(devices))
+		for _, device := range devices {
+			deviceIDs = append(deviceIDs, device.ID)
+		}
+		groupsByDeviceID, err := h.groupService.GetGroupsForDevices(r.Context(), deviceIDs)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "DEVICE_GROUPS_LOAD_FAILED", "Errors.DevicesListFailed", "加载设备分组失败")
+			return
+		}
+		for index := range devices {
+			devices[index].Groups = groupsByDeviceID[devices[index].ID]
+		}
 	}
 	WriteJSON(w, http.StatusOK, devices)
 }
@@ -81,6 +107,9 @@ func (h *DeviceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 	if err := h.service.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, deviceservice.ErrDeviceNotFound) {
 			WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "Device not found")
@@ -103,6 +132,9 @@ func (h *DeviceHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(value)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 
@@ -140,6 +172,9 @@ func (h *DeviceHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 
 	var payload struct {
 		Name string `json:"Name"`
@@ -175,6 +210,9 @@ func (h *DeviceHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 	settings, err := h.settingsService.GetByDeviceID(r.Context(), id)
 	if err != nil {
 		h.writeDeviceSettingsError(w, err)
@@ -191,6 +229,9 @@ func (h *DeviceHandler) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 	payload := domaindevice.DefaultSettingsProfile()
@@ -216,6 +257,9 @@ func (h *DeviceHandler) ResetSettings(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 	settings, err := h.settingsService.ResetByDeviceID(r.Context(), id)
 	if err != nil {
 		h.writeDeviceSettingsError(w, err)
@@ -232,6 +276,9 @@ func (h *DeviceHandler) ListEncoders(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 	encoders, err := h.scrcpyService.ListEncoders(r.Context(), id)
@@ -252,6 +299,9 @@ func (h *DeviceHandler) ListApps(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 	apps, err := h.scrcpyService.ListApps(r.Context(), id)
 	if err != nil {
 		h.writeScrcpyError(w, err, "获取应用列表失败")
@@ -268,6 +318,9 @@ func (h *DeviceHandler) LaunchApp(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 
@@ -295,6 +348,9 @@ func (h *DeviceHandler) DownloadApp(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 
@@ -329,6 +385,9 @@ func (h *DeviceHandler) UninstallApp(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 
 	var payload struct {
 		PackageName string `json:"packageName"`
@@ -354,6 +413,9 @@ func (h *DeviceHandler) AppInfo(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 
@@ -382,6 +444,9 @@ func (h *DeviceHandler) InstallApp(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 
@@ -413,6 +478,9 @@ func (h *DeviceHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 
@@ -450,6 +518,9 @@ func (h *DeviceHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	id, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
 		return
 	}
 
@@ -493,6 +564,9 @@ func (h *DeviceHandler) RenameFile(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 
 	var payload struct {
 		Path    string `json:"path"`
@@ -522,6 +596,69 @@ func (h *DeviceHandler) RenameFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *DeviceHandler) GetGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	id, err := deviceIDFromPath(strings.TrimSuffix(r.URL.Path, "/groups"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
+
+	groups, err := h.groupService.GetGroupsForDevice(r.Context(), id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "DEVICE_GROUPS_LOAD_FAILED", "Errors.DeviceUpdateFailed", "加载设备分组失败")
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"groups": groups})
+}
+
+func (h *DeviceHandler) SaveGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		WriteMethodNotAllowed(w, http.MethodPut)
+		return
+	}
+
+	id, err := deviceIDFromPath(strings.TrimSuffix(r.URL.Path, "/groups"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
+
+	var payload struct {
+		GroupIDs []int `json:"groupIds"`
+	}
+	if err := decodeJSONBody(r, &payload); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
+
+	if err := h.groupService.SetGroupsForDevice(r.Context(), id, payload.GroupIDs); err != nil {
+		WriteError(w, http.StatusInternalServerError, "DEVICE_GROUPS_SAVE_FAILED", "Errors.DeviceUpdateFailed", "保存设备分组失败")
+		return
+	}
+
+	groups, err := h.groupService.GetGroupsForDevice(r.Context(), id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "DEVICE_GROUPS_LOAD_FAILED", "Errors.DeviceUpdateFailed", "加载设备分组失败")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"groups":  groups,
+	})
 }
 
 func (h *DeviceHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,7 @@ const (
 	deviceRouteTerminalWS
 	deviceRouteRename
 	deviceRouteSettings
+	deviceRouteGroups
 	deviceRouteEncoders
 	deviceRouteClipboard
 	deviceRouteApps
@@ -70,6 +71,17 @@ func handleDeviceResourceRoute(w http.ResponseWriter, r *http.Request, handlers 
 		guards.requireDevicesManage(http.HandlerFunc(handlers.device.Rename)).ServeHTTP(w, r)
 	case deviceRouteSettings:
 		handleDeviceSettingsRoute(w, r, handlers, guards)
+	case deviceRouteGroups:
+		guards.requireDevicesManage(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				handlers.device.GetGroups(w, r)
+			case http.MethodPut:
+				handlers.device.SaveGroups(w, r)
+			default:
+				handler.WriteMethodNotAllowed(w, http.MethodGet+", "+http.MethodPut)
+			}
+		})).ServeHTTP(w, r)
 	case deviceRouteEncoders:
 		guards.requireDevicesControl(http.HandlerFunc(handlers.device.ListEncoders)).ServeHTTP(w, r)
 	case deviceRouteClipboard:
@@ -144,6 +156,8 @@ func classifyDeviceRoute(path string) deviceRouteKind {
 		return deviceRouteRename
 	case strings.HasSuffix(path, "/settings"):
 		return deviceRouteSettings
+	case strings.HasSuffix(path, "/groups"):
+		return deviceRouteGroups
 	case strings.HasSuffix(path, "/encoders"):
 		return deviceRouteEncoders
 	case strings.HasSuffix(path, "/clipboard"):

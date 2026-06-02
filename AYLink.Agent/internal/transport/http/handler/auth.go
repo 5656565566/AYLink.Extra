@@ -210,9 +210,10 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		RoleIds  []int  `json:"roleIds"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		RoleIds        []int  `json:"roleIds"`
+		DeviceGroupIds []int  `json:"deviceGroupIds"`
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
@@ -220,7 +221,7 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.service.CreateUser(r.Context(), payload.Username, payload.Password, payload.RoleIds)
+	user, err := h.service.CreateUser(r.Context(), payload.Username, payload.Password, payload.RoleIds, payload.DeviceGroupIds)
 	if err != nil {
 		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_USER_FAILED", "Errors.CreateUserFailed", "创建用户失败")
 		return
@@ -242,9 +243,10 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Username string `json:"username"`
-		IsActive *bool  `json:"isActive"`
-		RoleIds  []int  `json:"roleIds"`
+		Username       string `json:"username"`
+		IsActive       *bool  `json:"isActive"`
+		RoleIds        []int  `json:"roleIds"`
+		DeviceGroupIds []int  `json:"deviceGroupIds"`
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
@@ -262,7 +264,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		actingUserID = &identity.UserID
 	}
 
-	user, err := h.service.UpdateUser(r.Context(), userID, payload.Username, isActive, payload.RoleIds, actingUserID)
+	user, err := h.service.UpdateUser(r.Context(), userID, payload.Username, isActive, payload.RoleIds, payload.DeviceGroupIds, actingUserID)
 	if err != nil {
 		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_USER_FAILED", "Errors.UpdateUserFailed", "更新用户失败")
 		return
@@ -369,9 +371,10 @@ func (h *AuthHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Permissions []string `json:"permissions"`
+		Name           string   `json:"name"`
+		Description    string   `json:"description"`
+		Permissions    []string `json:"permissions"`
+		DeviceGroupIds []int    `json:"deviceGroupIds"`
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
@@ -379,7 +382,7 @@ func (h *AuthHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role, err := h.service.CreateRole(r.Context(), payload.Name, payload.Description, payload.Permissions)
+	role, err := h.service.CreateRole(r.Context(), payload.Name, payload.Description, payload.Permissions, payload.DeviceGroupIds)
 	if err != nil {
 		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_ROLE_FAILED", "Errors.CreateRoleFailed", "创建角色失败")
 		return
@@ -401,9 +404,10 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Permissions []string `json:"permissions"`
+		Name           string   `json:"name"`
+		Description    string   `json:"description"`
+		Permissions    []string `json:"permissions"`
+		DeviceGroupIds []int    `json:"deviceGroupIds"`
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
@@ -411,7 +415,7 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role, err := h.service.UpdateRole(r.Context(), roleID, payload.Name, payload.Description, payload.Permissions)
+	role, err := h.service.UpdateRole(r.Context(), roleID, payload.Name, payload.Description, payload.Permissions, payload.DeviceGroupIds)
 	if err != nil {
 		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_ROLE_FAILED", "Errors.UpdateRoleFailed", "更新角色失败")
 		return

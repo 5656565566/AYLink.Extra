@@ -1,3 +1,9 @@
+export interface DeviceGroupSummary {
+  Id: number;
+  Name: string;
+  Source?: string | null;
+}
+
 export interface DeviceSummary {
   Id: number;
   Name?: string | null;
@@ -5,4 +11,6 @@ export interface DeviceSummary {
   IpAddress?: string | null;
   Port?: number | null;
   Status?: string | null;
+  Groups?: DeviceGroupSummary[] | null;
+  GroupSources?: string[] | null;
 }

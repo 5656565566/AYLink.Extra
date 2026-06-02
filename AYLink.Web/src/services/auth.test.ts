@@ -36,6 +36,7 @@ describe('auth service', () => {
     expect(authModule.getRefreshToken()).toBe('refresh');
     expect(authModule.hasPermission('files.access')).toBe(true);
     expect(window.localStorage.getItem(storageKeys.auth.accessToken)).toBe('access');
+    expect(window.localStorage.getItem(storageKeys.auth.accessTokenExpiresAt)).toBe('');
     expect(window.localStorage.getItem(storageKeys.auth.refreshToken)).toBe('refresh');
   });
 
@@ -130,6 +131,8 @@ describe('auth service', () => {
     expect(authModule.getAccessToken()).toBe('');
     expect(authModule.getRefreshToken()).toBe('');
     expect(window.localStorage.getItem(storageKeys.auth.accessToken)).toBeNull();
+    expect(window.localStorage.getItem(storageKeys.auth.accessTokenExpiresAt)).toBeNull();
     expect(window.localStorage.getItem(storageKeys.auth.refreshToken)).toBeNull();
+    expect(window.localStorage.getItem(storageKeys.auth.refreshTokenExpiresAt)).toBeNull();
   });
 });

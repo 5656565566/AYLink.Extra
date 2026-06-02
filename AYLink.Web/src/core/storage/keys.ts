@@ -3,7 +3,9 @@
 export const storageKeys = {
   auth: {
     accessToken: 'aylink.auth.accessToken',
+    accessTokenExpiresAt: 'aylink.auth.accessTokenExpiresAt',
     refreshToken: 'aylink.auth.refreshToken',
+    refreshTokenExpiresAt: 'aylink.auth.refreshTokenExpiresAt',
     user: 'aylink.auth.user',
     permissions: 'aylink.auth.permissions',
   },

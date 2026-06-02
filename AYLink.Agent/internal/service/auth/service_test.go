@@ -8,6 +8,7 @@ import (
 	"time"
 
 	domainauth "aylink-agent/internal/domain/auth"
+	domaindevice "aylink-agent/internal/domain/device"
 )
 
 type stubLogger struct{}
@@ -71,12 +72,12 @@ func (f *fakeRepository) GetUserByID(context.Context, int) (*domainauth.UserReco
 
 func (f *fakeRepository) ListUsers(context.Context) ([]domainauth.User, error) { return nil, nil }
 
-func (f *fakeRepository) CreateUser(_ context.Context, username, passwordHash, passwordSalt string, roleIds []int) (*domainauth.User, error) {
+func (f *fakeRepository) CreateUser(_ context.Context, username, passwordHash, passwordSalt string, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
 	f.createUserCalled = true
 	return &domainauth.User{Username: username}, nil
 }
 
-func (f *fakeRepository) UpdateUser(_ context.Context, userID int, username string, isActive bool, roleIds []int) (*domainauth.User, error) {
+func (f *fakeRepository) UpdateUser(_ context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
 	f.updateUserCalled = true
 	f.updateUserIsActive = isActive
 	f.updateUserRoleIDs = append([]int(nil), roleIds...)
@@ -100,10 +101,10 @@ func (f *fakeRepository) GetRoleByName(context.Context, string) (*domainauth.Rol
 func (f *fakeRepository) GetRoleByID(context.Context, int) (*domainauth.Role, error) {
 	return f.roleRecord, nil
 }
-func (f *fakeRepository) CreateRole(context.Context, string, string, []string) (*domainauth.Role, error) {
+func (f *fakeRepository) CreateRole(context.Context, string, string, []string, []int) (*domainauth.Role, error) {
 	return nil, nil
 }
-func (f *fakeRepository) UpdateRole(context.Context, int, string, string, []string) (*domainauth.Role, error) {
+func (f *fakeRepository) UpdateRole(context.Context, int, string, string, []string, []int) (*domainauth.Role, error) {
 	return nil, nil
 }
 func (f *fakeRepository) GetRefreshToken(context.Context, string) (*domainauth.TokenRecord, *domainauth.UserRecord, error) {
@@ -117,6 +118,27 @@ func (f *fakeRepository) GetRoleSummariesForUser(context.Context, int) ([]domain
 }
 func (f *fakeRepository) GetPermissionsForUser(context.Context, int) ([]string, error) {
 	return f.permissions, nil
+}
+func (f *fakeRepository) IsUserAdministrator(context.Context, int) (bool, error) {
+	return false, nil
+}
+func (f *fakeRepository) GetDirectDeviceGroupsForUser(context.Context, int) ([]domaindevice.GroupSummary, error) {
+	return nil, nil
+}
+func (f *fakeRepository) GetEffectiveDeviceGroupsForUser(context.Context, int) ([]domaindevice.GroupSummary, error) {
+	return nil, nil
+}
+func (f *fakeRepository) GetDeviceGroupsForRole(context.Context, int) ([]domaindevice.GroupSummary, error) {
+	return nil, nil
+}
+func (f *fakeRepository) SetDirectDeviceGroupsForUser(context.Context, int, []int) error {
+	return nil
+}
+func (f *fakeRepository) SetDeviceGroupsForRole(context.Context, int, []int) error {
+	return nil
+}
+func (f *fakeRepository) CountAccessibleDevicesForUser(context.Context, int) (int, error) {
+	return 0, nil
 }
 func (f *fakeRepository) CreateSession(_ context.Context, user domainauth.UserRecord, pair domainauth.TokenPair) error {
 	f.createSessionCalled = true
@@ -157,7 +179,7 @@ func TestCreateUserRejectsEmptyPassword(t *testing.T) {
 	repo := &fakeRepository{}
 	service := NewService(repo, stubLogger{})
 
-	_, err := service.CreateUser(context.Background(), "tester", "   ", []int{1})
+	_, err := service.CreateUser(context.Background(), "tester", "   ", []int{1}, nil)
 	if !errors.Is(err, ErrPasswordEmpty) {
 		t.Fatalf("expected ErrPasswordEmpty, got %v", err)
 	}
@@ -349,7 +371,7 @@ func TestUpdateUserRejectsDisablingCurrentUser(t *testing.T) {
 	service := NewService(repo, stubLogger{})
 	currentUserID := 3
 
-	_, err := service.UpdateUser(context.Background(), 3, "tester", false, []int{1}, &currentUserID)
+	_, err := service.UpdateUser(context.Background(), 3, "tester", false, []int{1}, nil, &currentUserID)
 	if err == nil || !strings.Contains(err.Error(), "currently signed in") {
 		t.Fatalf("expected self-disable error, got %v", err)
 	}

@@ -6,7 +6,7 @@ import { useDialog } from '../../services/dialog';
 import { useNotification } from '../../services/notification';
 import { requestWorkspaceOpen } from '../../services/workspaceNavigation';
 import { apiFetch, readApiErrorMessage, resolveApiErrorMessage } from '../../utils/api';
-import type { DeviceSummary } from '../../types/devices';
+import type { DeviceGroupSummary, DeviceSummary } from '../../types/devices';
 import { isAbortError } from '../../lib/async/abort';
 import { createLatestRequestController } from '../../lib/async/latestRequest';
 
@@ -27,6 +27,7 @@ export function useHomeDevices() {
   const loading = ref(true);
   const showAddDialog = ref(false);
   const showMoreActionsMenu = ref(false);
+  const showGroupPickerMenu = ref(false);
   const isMultiSelectMode = ref(false);
   const adding = ref(false);
   const addError = ref('');
@@ -45,13 +46,91 @@ export function useHomeDevices() {
   const deviceEncoders = ref<string[]>([]);
   const encodersDeviceName = ref('');
   const activeMenuDeviceId = ref<number | null>(null);
+  const selectedGroupId = ref<number>(0);
+  const groupKeyword = ref('');
   const devicesRequest = createLatestRequestController();
   const encodersRequest = createLatestRequestController();
+
+  const availableGroups = computed<DeviceGroupSummary[]>(() => {
+    const deduped = new Map<number, DeviceGroupSummary>();
+
+    for (const device of devices.value) {
+      const deviceGroups = Array.isArray(device.Groups) ? device.Groups : [];
+      for (const group of deviceGroups) {
+        if (!group || typeof group.Id !== 'number') {
+          continue;
+        }
+        if (!deduped.has(group.Id)) {
+          deduped.set(group.Id, {
+            Id: group.Id,
+            Name: String(group.Name || '').trim() || t('HomeView.UnknownGroup', '未命名分组'),
+            Source: group.Source || null,
+          });
+        }
+      }
+    }
+
+    return Array.from(deduped.values()).sort((left, right) => left.Name.localeCompare(right.Name));
+  });
+
+  const filteredAvailableGroups = computed(() => {
+    const keyword = groupKeyword.value.trim().toLowerCase();
+    if (!keyword) {
+      return availableGroups.value;
+    }
+
+    return availableGroups.value.filter((group) => {
+      const haystack = `${group.Name} ${group.Source || ''}`.toLowerCase();
+      return haystack.includes(keyword);
+    });
+  });
+
+  const selectedGroup = computed(() => {
+    if (selectedGroupId.value === 0) {
+      return null;
+    }
+    return availableGroups.value.find((group) => group.Id === selectedGroupId.value) || null;
+  });
+
+  const visibleDevices = computed(() => {
+    if (selectedGroupId.value === 0) {
+      return devices.value;
+    }
+
+    return devices.value.filter((device) => {
+      const deviceGroups = Array.isArray(device.Groups) ? device.Groups : [];
+      return deviceGroups.some((group) => group?.Id === selectedGroupId.value);
+    });
+  });
 
   const canManageDevices = computed(() => hasPermission('devices.manage'));
   const canControlDevices = computed(() => hasPermission('devices.control'));
   const canAccessFiles = computed(() => hasPermission('files.access'));
   const canAccessTerminal = computed(() => hasPermission('terminal.access'));
+
+  const formatDeviceGroups = (device: DeviceSummary) => {
+    const groups = Array.isArray(device.Groups) ? device.Groups : [];
+    if (groups.length === 0) {
+      return t('HomeView.AllDevices', '全部设备');
+    }
+    return groups
+      .map((group) => String(group?.Name || '').trim())
+      .filter(Boolean)
+      .join(' / ');
+  };
+
+  const toggleGroupPickerMenu = () => {
+    showGroupPickerMenu.value = !showGroupPickerMenu.value;
+    groupKeyword.value = '';
+    showMoreActionsMenu.value = false;
+    activeMenuDeviceId.value = null;
+  };
+
+  const selectGroup = (groupId: number) => {
+    selectedGroupId.value = groupId;
+    showGroupPickerMenu.value = false;
+    groupKeyword.value = '';
+  };
 
   const toggleMenu = (deviceId: number) => {
     if (activeMenuDeviceId.value === deviceId) {
@@ -72,6 +151,9 @@ export function useHomeDevices() {
       activeMenuDeviceId.value = null;
       showMoreActionsMenu.value = false;
     }
+    if (!target.closest('.group-select')) {
+      showGroupPickerMenu.value = false;
+    }
   };
 
   const fetchDevices = async () => {
@@ -89,6 +171,9 @@ export function useHomeDevices() {
 
       if (response.ok) {
         devices.value = await response.json();
+        if (selectedGroupId.value !== 0 && !availableGroups.value.some((group) => group.Id === selectedGroupId.value)) {
+          selectedGroupId.value = 0;
+        }
       }
     } catch (error) {
       if (!isAbortError(error)) {
@@ -376,9 +461,11 @@ export function useHomeDevices() {
     notificationService,
     t,
     devices,
+    visibleDevices,
     loading,
     showAddDialog,
     showMoreActionsMenu,
+    showGroupPickerMenu,
     isMultiSelectMode,
     adding,
     addError,
@@ -397,10 +484,18 @@ export function useHomeDevices() {
     deviceEncoders,
     encodersDeviceName,
     activeMenuDeviceId,
+    selectedGroupId,
+    selectedGroup,
+    groupKeyword,
+    availableGroups,
+    filteredAvailableGroups,
     canManageDevices,
     canControlDevices,
     canAccessFiles,
     canAccessTerminal,
+    formatDeviceGroups,
+    toggleGroupPickerMenu,
+    selectGroup,
     toggleMenu,
     toggleMoreActionsMenu,
     closeMenu,

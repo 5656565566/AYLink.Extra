@@ -5,12 +5,16 @@ import { storageKeys } from '../core/storage/keys';
 import type { AuthMePayload, AuthResponsePayload, AuthUser } from '../types/auth';
 
 const ACCESS_TOKEN_KEY = storageKeys.auth.accessToken;
+const ACCESS_TOKEN_EXPIRES_AT_KEY = storageKeys.auth.accessTokenExpiresAt;
 const REFRESH_TOKEN_KEY = storageKeys.auth.refreshToken;
+const REFRESH_TOKEN_EXPIRES_AT_KEY = storageKeys.auth.refreshTokenExpiresAt;
 const USER_KEY = storageKeys.auth.user;
 const PERMISSIONS_KEY = storageKeys.auth.permissions;
 
 const accessToken = ref<string>(readLocalString(ACCESS_TOKEN_KEY) || '');
+const accessTokenExpiresAt = ref<string>(readLocalString(ACCESS_TOKEN_EXPIRES_AT_KEY) || '');
 const refreshToken = ref<string>(readLocalString(REFRESH_TOKEN_KEY) || '');
+const refreshTokenExpiresAt = ref<string>(readLocalString(REFRESH_TOKEN_EXPIRES_AT_KEY) || '');
 const currentUser = ref<AuthUser | null>(readStoredUser());
 const permissions = ref<string[]>(readStoredPermissions());
 const initialized = ref(false);
@@ -18,7 +22,15 @@ const initialized = ref(false);
 let initializePromise: Promise<void> | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let storageSyncInitialized = false;
-const trackedStorageKeys: readonly string[] = [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY, PERMISSIONS_KEY];
+const trackedStorageKeys: readonly string[] = [
+  ACCESS_TOKEN_KEY,
+  ACCESS_TOKEN_EXPIRES_AT_KEY,
+  REFRESH_TOKEN_KEY,
+  REFRESH_TOKEN_EXPIRES_AT_KEY,
+  USER_KEY,
+  PERMISSIONS_KEY,
+];
+const accessTokenRefreshSkewMs = 30_000;
 
 export function useAuth() {
   return {
@@ -88,15 +100,38 @@ export async function initializeAuth() {
 
 export function applyAuthResponse(payload: AuthResponsePayload) {
   accessToken.value = payload.accessToken || '';
+  accessTokenExpiresAt.value = payload.accessTokenExpiresAt || '';
   refreshToken.value = payload.refreshToken || '';
+  refreshTokenExpiresAt.value = payload.refreshTokenExpiresAt || '';
   currentUser.value = payload.user || null;
   permissions.value = payload.permissions || payload.user?.Permissions || [];
 
   writeLocalString(ACCESS_TOKEN_KEY, accessToken.value);
+  writeLocalString(ACCESS_TOKEN_EXPIRES_AT_KEY, accessTokenExpiresAt.value);
   writeLocalString(REFRESH_TOKEN_KEY, refreshToken.value);
+  writeLocalString(REFRESH_TOKEN_EXPIRES_AT_KEY, refreshTokenExpiresAt.value);
   writeLocalJson(USER_KEY, currentUser.value);
   writeLocalJson(PERMISSIONS_KEY, permissions.value);
   initialized.value = true;
+}
+
+export async function ensureFreshAccessToken() {
+  ensureStorageSync();
+
+  if (!accessToken.value && refreshToken.value) {
+    await refreshAccessToken();
+    return;
+  }
+
+  if (!isTokenExpiredOrNearExpiry(accessTokenExpiresAt.value, accessTokenRefreshSkewMs)) {
+    return;
+  }
+
+  if (isTokenExpiredOrNearExpiry(refreshTokenExpiresAt.value, 0)) {
+    return;
+  }
+
+  await refreshAccessToken();
 }
 
 export async function refreshAccessToken() {
@@ -207,11 +242,15 @@ export async function logout() {
 
 export function clearSession() {
   accessToken.value = '';
+  accessTokenExpiresAt.value = '';
   refreshToken.value = '';
+  refreshTokenExpiresAt.value = '';
   currentUser.value = null;
   permissions.value = [];
   removeLocalValue(ACCESS_TOKEN_KEY);
+  removeLocalValue(ACCESS_TOKEN_EXPIRES_AT_KEY);
   removeLocalValue(REFRESH_TOKEN_KEY);
+  removeLocalValue(REFRESH_TOKEN_EXPIRES_AT_KEY);
   removeLocalValue(USER_KEY);
   removeLocalValue(PERMISSIONS_KEY);
 }
@@ -222,9 +261,24 @@ export function hasActiveAccessToken() {
 
 export function syncSessionFromStorage() {
   accessToken.value = readLocalString(ACCESS_TOKEN_KEY) || '';
+  accessTokenExpiresAt.value = readLocalString(ACCESS_TOKEN_EXPIRES_AT_KEY) || '';
   refreshToken.value = readLocalString(REFRESH_TOKEN_KEY) || '';
+  refreshTokenExpiresAt.value = readLocalString(REFRESH_TOKEN_EXPIRES_AT_KEY) || '';
   currentUser.value = readStoredUser();
   permissions.value = readStoredPermissions();
+}
+
+function isTokenExpiredOrNearExpiry(value: string, skewMs: number) {
+  if (!value) {
+    return true;
+  }
+
+  const expiresAt = Date.parse(value);
+  if (!Number.isFinite(expiresAt)) {
+    return true;
+  }
+
+  return Date.now() + skewMs >= expiresAt;
 }
 
 function ensureStorageSync() {
@@ -279,6 +333,7 @@ export async function login(username: string, password: string) {
 
 registerAuthSessionHandlers({
   clearSession,
+  ensureFreshAccessToken,
   getAccessToken,
   hasActiveAccessToken,
   refreshAccessToken,

@@ -125,7 +125,7 @@ func (e *integrationEnv) createAdminUser(t *testing.T, username, password string
 	if role == nil {
 		t.Fatal("expected Administrator role to exist")
 	}
-	if _, err := e.authSvc.CreateUser(context.Background(), username, password, []int{role.ID}); err != nil {
+	if _, err := e.authSvc.CreateUser(context.Background(), username, password, []int{role.ID}, nil); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 }
@@ -133,11 +133,11 @@ func (e *integrationEnv) createAdminUser(t *testing.T, username, password string
 func (e *integrationEnv) createUserWithPermissions(t *testing.T, username, password string, permissions []string) {
 	t.Helper()
 
-	role, err := e.authSvc.CreateRole(context.Background(), username+"-role", "integration test role", permissions)
+	role, err := e.authSvc.CreateRole(context.Background(), username+"-role", "integration test role", permissions, nil)
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
-	if _, err := e.authSvc.CreateUser(context.Background(), username, password, []int{role.ID}); err != nil {
+	if _, err := e.authSvc.CreateUser(context.Background(), username, password, []int{role.ID}, nil); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 }

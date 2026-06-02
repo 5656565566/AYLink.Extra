@@ -75,7 +75,7 @@ func TestAuthRepositoryCreateUserLoadsRolesAndPermissions(t *testing.T) {
 		t.Fatal("expected Administrator role to exist")
 	}
 
-	user, err := repo.CreateUser(ctx, "tester", "hash", "salt", []int{adminRole.ID})
+	user, err := repo.CreateUser(ctx, "tester", "hash", "salt", []int{adminRole.ID}, nil)
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestAuthRepositoryGetUserByUsernameIsCaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error = %v", err)
 	}
-	if _, err := repo.CreateUser(ctx, "CaseUser", "hash", "salt", []int{adminRole.ID}); err != nil {
+	if _, err := repo.CreateUser(ctx, "CaseUser", "hash", "salt", []int{adminRole.ID}, nil); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 
@@ -132,17 +132,17 @@ func TestAuthRepositoryUpdateUserReplacesRolesAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRoleByName(Administrator) error = %v", err)
 	}
-	limitedRole, err := repo.CreateRole(ctx, "Device Viewer", "View-only device access", []string{"devices.view"})
+	limitedRole, err := repo.CreateRole(ctx, "Device Viewer", "View-only device access", []string{"devices.view"}, nil)
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
 
-	user, err := repo.CreateUser(ctx, "role-user", "hash", "salt", []int{adminRole.ID})
+	user, err := repo.CreateUser(ctx, "role-user", "hash", "salt", []int{adminRole.ID}, nil)
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 
-	updated, err := repo.UpdateUser(ctx, user.ID, "role-user-updated", true, []int{limitedRole.ID})
+	updated, err := repo.UpdateUser(ctx, user.ID, "role-user-updated", true, []int{limitedRole.ID}, nil)
 	if err != nil {
 		t.Fatalf("UpdateUser() error = %v", err)
 	}
@@ -169,7 +169,7 @@ func TestAuthRepositoryCreateSessionAndCleanupExpiredTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error = %v", err)
 	}
-	createdUser, err := repo.CreateUser(ctx, "session-user", "hash", "salt", []int{adminRole.ID})
+	createdUser, err := repo.CreateUser(ctx, "session-user", "hash", "salt", []int{adminRole.ID}, nil)
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
@@ -220,7 +220,7 @@ func TestAuthRepositoryTokenRevocationAndDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error = %v", err)
 	}
-	user, err := repo.CreateUser(ctx, "token-user", "hash", "salt", []int{adminRole.ID})
+	user, err := repo.CreateUser(ctx, "token-user", "hash", "salt", []int{adminRole.ID}, nil)
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
@@ -280,7 +280,7 @@ func TestAuthRepositoryRevokeAndDeleteAllTokensForUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRoleByName() error = %v", err)
 	}
-	user, err := repo.CreateUser(ctx, "all-token-user", "hash", "salt", []int{adminRole.ID})
+	user, err := repo.CreateUser(ctx, "all-token-user", "hash", "salt", []int{adminRole.ID}, nil)
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}

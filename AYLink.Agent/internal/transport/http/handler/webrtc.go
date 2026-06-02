@@ -23,6 +23,7 @@ type WebRTCHandler struct {
 	service  WebRTCService
 	settings SettingsService
 	scrcpy   ScrcpyService
+	access   DeviceAccessService
 	upgrader websocket.Upgrader
 
 	runtimeMu sync.Mutex
@@ -50,11 +51,12 @@ type SignalErrorPayload struct {
 	Retryable  bool   `json:"retryable,omitempty"`
 }
 
-func NewWebRTCHandler(service WebRTCService, settings SettingsService, scrcpy ScrcpyService) *WebRTCHandler {
+func NewWebRTCHandler(service WebRTCService, settings SettingsService, scrcpy ScrcpyService, access DeviceAccessService) *WebRTCHandler {
 	handler := &WebRTCHandler{
 		service:  service,
 		settings: settings,
 		scrcpy:   scrcpy,
+		access:   access,
 		runtimes: make(map[string]*managedRuntime),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -79,6 +81,16 @@ func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	payload.DeviceID = strings.TrimSpace(payload.DeviceID)
 	payload.AppPackage = strings.TrimSpace(payload.AppPackage)
 	payload.AppName = strings.TrimSpace(payload.AppName)
+	if payload.DeviceID != "" {
+		deviceID, err := strconv.Atoi(payload.DeviceID)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+			return
+		}
+		if _, ok := ensureDeviceAccess(w, r, h.access, deviceID); !ok {
+			return
+		}
+	}
 
 	result, err := h.service.CreateTicket(r.Context(), payload)
 	if err != nil {
@@ -158,6 +170,9 @@ func (h *WebRTCHandler) GetClipboard(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.access, deviceID); !ok {
+		return
+	}
 
 	runtime, release, err := h.borrowRuntime(strconv.Itoa(deviceID))
 	if err != nil {
@@ -206,6 +221,9 @@ func (h *WebRTCHandler) SetClipboard(w http.ResponseWriter, r *http.Request) {
 	deviceID, err := deviceIDFromPath(r.URL.Path)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.access, deviceID); !ok {
 		return
 	}
 

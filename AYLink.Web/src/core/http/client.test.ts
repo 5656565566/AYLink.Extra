@@ -29,6 +29,7 @@ describe('http client', () => {
     const client = await import('./client');
     client.registerAuthSessionHandlers({
       clearSession: vi.fn(),
+      ensureFreshAccessToken: vi.fn(async () => {}),
       getAccessToken: () => 'access-token',
       hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),
@@ -52,6 +53,7 @@ describe('http client', () => {
     const client = await import('./client');
     client.registerAuthSessionHandlers({
       clearSession: vi.fn(),
+      ensureFreshAccessToken: vi.fn(async () => {}),
       getAccessToken: () => 'access-token',
       hasActiveAccessToken: () => true,
       refreshAccessToken,
@@ -76,6 +78,7 @@ describe('http client', () => {
     client.registerUnauthorizedHandler(unauthorizedHandler);
     client.registerAuthSessionHandlers({
       clearSession,
+      ensureFreshAccessToken: vi.fn(async () => {}),
       getAccessToken: () => 'access-token',
       hasActiveAccessToken: () => false,
       refreshAccessToken: vi.fn(async () => false),
@@ -94,6 +97,7 @@ describe('http client', () => {
     const client = await import('./client');
     client.registerAuthSessionHandlers({
       clearSession: vi.fn(),
+      ensureFreshAccessToken: vi.fn(async () => {}),
       getAccessToken: () => 'access-token',
       hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),
@@ -118,6 +122,7 @@ describe('http client', () => {
     const client = await import('./client');
     client.registerAuthSessionHandlers({
       clearSession: vi.fn(),
+      ensureFreshAccessToken: vi.fn(async () => {}),
       getAccessToken: () => 'access-token',
       hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),
@@ -147,6 +152,7 @@ describe('http client', () => {
     const client = await import('./client');
     client.registerAuthSessionHandlers({
       clearSession: vi.fn(),
+      ensureFreshAccessToken: vi.fn(async () => {}),
       getAccessToken: () => 'access-token',
       hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),

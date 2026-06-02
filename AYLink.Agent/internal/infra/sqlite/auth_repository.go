@@ -10,6 +10,7 @@ import (
 	"time"
 
 	domainauth "aylink-agent/internal/domain/auth"
+	domaindevice "aylink-agent/internal/domain/device"
 )
 
 type AuthRepository struct {
@@ -72,12 +73,31 @@ func (r *AuthRepository) ListUsers(ctx context.Context) ([]domainauth.User, erro
 		}
 		user.Permissions = permissions
 
+		directGroups, err := r.GetDirectDeviceGroupsForUser(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		user.DirectDeviceGroups = directGroups
+
+		effectiveGroups, err := r.GetEffectiveDeviceGroupsForUser(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		user.EffectiveDeviceGroups = effectiveGroups
+		user.EffectiveDeviceGroupCount = len(effectiveGroups)
+
+		deviceCount, err := r.CountAccessibleDevicesForUser(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		user.EffectiveDeviceCount = deviceCount
+
 		users = append(users, user)
 	}
 	return users, rows.Err()
 }
 
-func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash, passwordSalt string, roleIds []int) (*domainauth.User, error) {
+func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash, passwordSalt string, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -102,6 +122,11 @@ func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash,
 			return nil, err
 		}
 	}
+	for _, groupID := range normalizeIntIDs(deviceGroupIDs) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO UserDeviceGroups (UserId, GroupId) VALUES (?, ?)`, userId, groupID); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -120,18 +145,34 @@ func (r *AuthRepository) CreateUser(ctx context.Context, username, passwordHash,
 	if err != nil {
 		return nil, err
 	}
+	directGroups, err := r.GetDirectDeviceGroupsForUser(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+	effectiveGroups, err := r.GetEffectiveDeviceGroupsForUser(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+	deviceCount, err := r.CountAccessibleDevicesForUser(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
 
 	return &domainauth.User{
-		ID:          record.ID,
-		Username:    record.Username,
-		IsActive:    record.IsActive,
-		LastLoginAt: record.LastLoginAt,
-		Roles:       roles,
-		Permissions: permissions,
+		ID:                        record.ID,
+		Username:                  record.Username,
+		IsActive:                  record.IsActive,
+		LastLoginAt:               record.LastLoginAt,
+		Roles:                     roles,
+		Permissions:               permissions,
+		DirectDeviceGroups:        directGroups,
+		EffectiveDeviceGroups:     effectiveGroups,
+		EffectiveDeviceGroupCount: len(effectiveGroups),
+		EffectiveDeviceCount:      deviceCount,
 	}, nil
 }
 
-func (r *AuthRepository) UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int) (*domainauth.User, error) {
+func (r *AuthRepository) UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -154,6 +195,14 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID int, username st
 			return nil, err
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM UserDeviceGroups WHERE UserId = ?`, userID); err != nil {
+		return nil, err
+	}
+	for _, groupID := range normalizeIntIDs(deviceGroupIDs) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO UserDeviceGroups (UserId, GroupId) VALUES (?, ?)`, userID, groupID); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -172,14 +221,30 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID int, username st
 	if err != nil {
 		return nil, err
 	}
+	directGroups, err := r.GetDirectDeviceGroupsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	effectiveGroups, err := r.GetEffectiveDeviceGroupsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	deviceCount, err := r.CountAccessibleDevicesForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 
 	return &domainauth.User{
-		ID:          record.ID,
-		Username:    record.Username,
-		IsActive:    record.IsActive,
-		LastLoginAt: record.LastLoginAt,
-		Roles:       roles,
-		Permissions: permissions,
+		ID:                        record.ID,
+		Username:                  record.Username,
+		IsActive:                  record.IsActive,
+		LastLoginAt:               record.LastLoginAt,
+		Roles:                     roles,
+		Permissions:               permissions,
+		DirectDeviceGroups:        directGroups,
+		EffectiveDeviceGroups:     effectiveGroups,
+		EffectiveDeviceGroupCount: len(effectiveGroups),
+		EffectiveDeviceCount:      deviceCount,
 	}, nil
 }
 
@@ -215,6 +280,11 @@ func (r *AuthRepository) ListRoles(ctx context.Context) ([]domainauth.Role, erro
 			return nil, err
 		}
 		role.Permissions = permissions
+		deviceGroups, err := r.GetDeviceGroupsForRole(ctx, role.ID)
+		if err != nil {
+			return nil, err
+		}
+		role.DeviceGroups = deviceGroups
 		roles = append(roles, role)
 	}
 	return roles, nil
@@ -239,6 +309,11 @@ func (r *AuthRepository) GetRoleByName(ctx context.Context, name string) (*domai
 		return nil, err
 	}
 	role.Permissions = permissions
+	deviceGroups, err := r.GetDeviceGroupsForRole(ctx, role.ID)
+	if err != nil {
+		return nil, err
+	}
+	role.DeviceGroups = deviceGroups
 	return &role, nil
 }
 
@@ -261,10 +336,15 @@ func (r *AuthRepository) GetRoleByID(ctx context.Context, id int) (*domainauth.R
 		return nil, err
 	}
 	role.Permissions = permissions
+	deviceGroups, err := r.GetDeviceGroupsForRole(ctx, role.ID)
+	if err != nil {
+		return nil, err
+	}
+	role.DeviceGroups = deviceGroups
 	return &role, nil
 }
 
-func (r *AuthRepository) CreateRole(ctx context.Context, name, description string, permissions []string) (*domainauth.Role, error) {
+func (r *AuthRepository) CreateRole(ctx context.Context, name, description string, permissions []string, deviceGroupIDs []int) (*domainauth.Role, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -290,6 +370,11 @@ func (r *AuthRepository) CreateRole(ctx context.Context, name, description strin
 			return nil, err
 		}
 	}
+	for _, groupID := range normalizeIntIDs(deviceGroupIDs) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO RoleDeviceGroups (RoleId, GroupId) VALUES (?, ?)`, roleId, groupID); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -298,7 +383,7 @@ func (r *AuthRepository) CreateRole(ctx context.Context, name, description strin
 	return r.GetRoleByID(ctx, roleId)
 }
 
-func (r *AuthRepository) UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string) (*domainauth.Role, error) {
+func (r *AuthRepository) UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string, deviceGroupIDs []int) (*domainauth.Role, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -312,6 +397,9 @@ func (r *AuthRepository) UpdateRole(ctx context.Context, roleID int, name, descr
 	if _, err := tx.ExecContext(ctx, `DELETE FROM RolePermissions WHERE RoleId = ?`, roleID); err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM RoleDeviceGroups WHERE RoleId = ?`, roleID); err != nil {
+		return nil, err
+	}
 
 	for _, code := range permissions {
 		var permId int
@@ -319,6 +407,11 @@ func (r *AuthRepository) UpdateRole(ctx context.Context, roleID int, name, descr
 			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO RolePermissions (RoleId, PermissionId) VALUES (?, ?)`, roleID, permId); err != nil {
+			return nil, err
+		}
+	}
+	for _, groupID := range normalizeIntIDs(deviceGroupIDs) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO RoleDeviceGroups (RoleId, GroupId) VALUES (?, ?)`, roleID, groupID); err != nil {
 			return nil, err
 		}
 	}
@@ -471,6 +564,144 @@ func (r *AuthRepository) GetPermissionsForUser(ctx context.Context, userID int) 
 	return permissions, rows.Err()
 }
 
+func (r *AuthRepository) IsUserAdministrator(ctx context.Context, userID int) (bool, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM UserRoles ur
+		INNER JOIN Roles r ON r.Id = ur.RoleId
+		WHERE ur.UserId = ? AND lower(r.Name) = lower(?)
+		LIMIT 1`, userID, "Administrator")
+
+	var marker int
+	if err := row.Scan(&marker); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *AuthRepository) GetDirectDeviceGroupsForUser(ctx context.Context, userID int) ([]domaindevice.GroupSummary, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount
+		FROM DeviceGroups g
+		INNER JOIN UserDeviceGroups ug ON ug.GroupId = g.Id
+		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
+		WHERE ug.UserId = ?
+		GROUP BY g.Id, g.Name, g.Description
+		ORDER BY g.Name COLLATE NOCASE, g.Id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanGroupSummaries(rows)
+}
+
+func (r *AuthRepository) GetEffectiveDeviceGroupsForUser(ctx context.Context, userID int) ([]domaindevice.GroupSummary, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount
+		FROM DeviceGroups g
+		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
+		WHERE g.Id IN (
+			SELECT GroupId FROM UserDeviceGroups WHERE UserId = ?
+			UNION
+			SELECT rdg.GroupId
+			FROM RoleDeviceGroups rdg
+			INNER JOIN UserRoles ur ON ur.RoleId = rdg.RoleId
+			WHERE ur.UserId = ?
+		)
+		GROUP BY g.Id, g.Name, g.Description
+		ORDER BY g.Name COLLATE NOCASE, g.Id`, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanGroupSummaries(rows)
+}
+
+func (r *AuthRepository) GetDeviceGroupsForRole(ctx context.Context, roleID int) ([]domaindevice.GroupSummary, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT g.Id, g.Name, g.Description, COUNT(DISTINCT gd.DeviceId) AS DeviceCount
+		FROM DeviceGroups g
+		INNER JOIN RoleDeviceGroups rg ON rg.GroupId = g.Id
+		LEFT JOIN DeviceGroupDevices gd ON gd.GroupId = g.Id
+		WHERE rg.RoleId = ?
+		GROUP BY g.Id, g.Name, g.Description
+		ORDER BY g.Name COLLATE NOCASE, g.Id`, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanGroupSummaries(rows)
+}
+
+func (r *AuthRepository) SetDirectDeviceGroupsForUser(ctx context.Context, userID int, groupIDs []int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM UserDeviceGroups WHERE UserId = ?`, userID); err != nil {
+		return err
+	}
+	for _, groupID := range normalizeIntIDs(groupIDs) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO UserDeviceGroups (UserId, GroupId) VALUES (?, ?)`, userID, groupID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *AuthRepository) SetDeviceGroupsForRole(ctx context.Context, roleID int, groupIDs []int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM RoleDeviceGroups WHERE RoleId = ?`, roleID); err != nil {
+		return err
+	}
+	for _, groupID := range normalizeIntIDs(groupIDs) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO RoleDeviceGroups (RoleId, GroupId) VALUES (?, ?)`, roleID, groupID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *AuthRepository) CountAccessibleDevicesForUser(ctx context.Context, userID int) (int, error) {
+	row := r.db.QueryRowContext(ctx, `
+		WITH UserGroups AS (
+			SELECT GroupId FROM UserDeviceGroups WHERE UserId = ?
+			UNION
+			SELECT rdg.GroupId
+			FROM RoleDeviceGroups rdg
+			INNER JOIN UserRoles ur ON ur.RoleId = rdg.RoleId
+			WHERE ur.UserId = ?
+		)
+		SELECT COUNT(*)
+		FROM (
+			SELECT d.Id
+			FROM Devices d
+			LEFT JOIN DeviceGroupDevices gd ON gd.DeviceId = d.Id
+			LEFT JOIN UserGroups ug ON ug.GroupId = gd.GroupId
+			GROUP BY d.Id
+			HAVING
+				(SELECT COUNT(*) FROM UserGroups) = 0
+				OR COUNT(gd.GroupId) = 0
+				OR COUNT(ug.GroupId) > 0
+		)`, userID, userID)
+
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (r *AuthRepository) CreateSession(ctx context.Context, user domainauth.UserRecord, pair domainauth.TokenPair) error {
 	now := time.Now().UTC()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -572,4 +803,16 @@ func parseTime(value string) time.Time {
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return strings.ToUpper(hex.EncodeToString(sum[:]))
+}
+
+func scanGroupSummaries(rows *sql.Rows) ([]domaindevice.GroupSummary, error) {
+	items := make([]domaindevice.GroupSummary, 0)
+	for rows.Next() {
+		summary, err := scanGroupSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, summary)
+	}
+	return items, rows.Err()
 }

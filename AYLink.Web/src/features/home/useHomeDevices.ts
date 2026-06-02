@@ -1,7 +1,10 @@
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from '../../composables/useI18n';
+import { readLocalString, writeLocalString } from '../../core/storage/browserStorage';
+import { storageKeys } from '../../core/storage/keys';
 import { hasPermission } from '../../services/auth';
+import { useAppSettings } from '../../services/appSettings';
 import { useDialog } from '../../services/dialog';
 import { useNotification } from '../../services/notification';
 import { requestWorkspaceOpen } from '../../services/workspaceNavigation';
@@ -17,13 +20,32 @@ interface AddDevicePayload {
   PairingCode?: string;
 }
 
+interface DevicePreviewState {
+  objectUrl: string;
+  loading: boolean;
+  lastRequestedAt: number;
+  lastLoadedAt: number;
+  failedAt: number;
+}
+
+type HomeDeviceViewMode = 'list' | 'preview';
+
+const DEVICE_VIEW_MODE_KEY = storageKeys.app.homeDeviceViewMode;
+const PREVIEW_WIDTH = 240;
+const PREVIEW_MAX_CONCURRENT = 2;
+const PREVIEW_PRIORITY_LIMIT = 6;
+const PREVIEW_RETRY_DELAY_MS = 5000;
+
 export function useHomeDevices() {
   const router = useRouter();
   const notificationService = useNotification();
   const dialogService = useDialog();
   const { t } = useI18n();
+  const { previewRefreshInterval } = useAppSettings();
 
   const devices = ref<DeviceSummary[]>([]);
+  const deviceViewMode = ref<HomeDeviceViewMode>(loadDeviceViewMode());
+  const previewStates = ref<Record<number, DevicePreviewState>>({});
   const selectedDeviceIds = ref<number[]>([]);
   const loading = ref(true);
   const showAddDialog = ref(false);
@@ -53,6 +75,8 @@ export function useHomeDevices() {
   const encodersRequest = createLatestRequestController();
 
   const availableGroups = ref<DeviceGroupSummary[]>([]);
+  const previewActiveRequests = new Map<number, AbortController>();
+  let previewSchedulerHandle: number | null = null;
 
   const filteredAvailableGroups = computed(() => {
     const keyword = groupKeyword.value.trim().toLowerCase();
@@ -87,6 +111,7 @@ export function useHomeDevices() {
   });
 
   const selectedDeviceCount = computed(() => selectedDeviceIds.value.length);
+  const isPreviewMode = computed(() => deviceViewMode.value === 'preview');
 
   const canManageDevices = computed(() => hasPermission('devices.manage'));
   const canControlDevices = computed(() => hasPermission('devices.control'));
@@ -102,6 +127,225 @@ export function useHomeDevices() {
       .map((group) => String(group?.Name || '').trim())
       .filter(Boolean)
       .join(' / ');
+  };
+
+  const ensurePreviewState = (deviceId: number) => {
+    if (!previewStates.value[deviceId]) {
+      previewStates.value[deviceId] = {
+        objectUrl: '',
+        loading: false,
+        lastRequestedAt: 0,
+        lastLoadedAt: 0,
+        failedAt: 0,
+      };
+    }
+
+    return previewStates.value[deviceId];
+  };
+
+  const revokePreviewObjectUrl = (deviceId: number) => {
+    const state = previewStates.value[deviceId];
+    if (!state || !state.objectUrl) {
+      return;
+    }
+
+    URL.revokeObjectURL(state.objectUrl);
+    state.objectUrl = '';
+  };
+
+  const removePreviewState = (deviceId: number) => {
+    previewActiveRequests.get(deviceId)?.abort();
+    previewActiveRequests.delete(deviceId);
+    revokePreviewObjectUrl(deviceId);
+    delete previewStates.value[deviceId];
+  };
+
+  const cleanupPreviewStates = (validDeviceIds: number[]) => {
+    const validIds = new Set(validDeviceIds);
+    Object.keys(previewStates.value).forEach((deviceId) => {
+      const normalizedId = Number(deviceId);
+      if (!validIds.has(normalizedId)) {
+        removePreviewState(normalizedId);
+      }
+    });
+  };
+
+  const isDevicePreviewOnline = (device: DeviceSummary) => String(device.Status ?? '').toLowerCase() === 'online';
+
+  const getPreviewState = (deviceId: number | string) => {
+    return previewStates.value[Number(deviceId)] || null;
+  };
+
+  const getDevicePreviewUrl = (deviceId: number | string) => {
+    return getPreviewState(deviceId)?.objectUrl || '';
+  };
+
+  const isDevicePreviewLoading = (deviceId: number | string) => {
+    return getPreviewState(deviceId)?.loading === true;
+  };
+
+  const markVisiblePreviewsStale = () => {
+    visibleDevices.value.forEach((device) => {
+      const state = previewStates.value[Number(device.Id)];
+      if (!state) {
+        return;
+      }
+
+      state.lastLoadedAt = 0;
+      state.lastRequestedAt = 0;
+    });
+  };
+
+  const shouldRefreshPreview = (device: DeviceSummary, now: number, force = false) => {
+    if (!isPreviewMode.value || !isDevicePreviewOnline(device)) {
+      return false;
+    }
+
+    const deviceId = Number(device.Id);
+    if (!Number.isFinite(deviceId)) {
+      return false;
+    }
+    if (previewActiveRequests.has(deviceId)) {
+      return false;
+    }
+
+    const state = ensurePreviewState(deviceId);
+    if (state.loading) {
+      return false;
+    }
+
+    if (force) {
+      return true;
+    }
+
+    if (state.failedAt > 0 && now-state.failedAt < PREVIEW_RETRY_DELAY_MS) {
+      return false;
+    }
+
+    const refreshIntervalMs = previewRefreshInterval.value * 1000;
+    const lastSuccessfulLoad = state.lastLoadedAt;
+    if (lastSuccessfulLoad === 0) {
+      return state.lastRequestedAt === 0 || now-state.lastRequestedAt >= PREVIEW_RETRY_DELAY_MS;
+    }
+
+    return now-lastSuccessfulLoad >= refreshIntervalMs;
+  };
+
+  const loadPreviewForDevice = async (device: DeviceSummary) => {
+    const deviceId = Number(device.Id);
+    if (!Number.isFinite(deviceId)) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const state = ensurePreviewState(deviceId);
+    state.loading = true;
+    state.lastRequestedAt = Date.now();
+    previewActiveRequests.set(deviceId, controller);
+
+    try {
+      const response = await apiFetch(`/api/devices/${deviceId}/preview?width=${PREVIEW_WIDTH}`, {
+        signal: controller.signal,
+        timeoutMs: 15000,
+      });
+      if (!response.ok) {
+        throw new Error(`preview request failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      revokePreviewObjectUrl(deviceId);
+
+      state.objectUrl = objectUrl;
+      state.lastLoadedAt = Date.now();
+      state.failedAt = 0;
+    } catch (error) {
+      if (!isAbortError(error)) {
+        state.failedAt = Date.now();
+        console.error('Failed to fetch device preview', error);
+      }
+    } finally {
+      state.loading = false;
+      previewActiveRequests.delete(deviceId);
+    }
+  };
+
+  const queuePreviewRefresh = (force = false) => {
+    if (!isPreviewMode.value) {
+      return;
+    }
+
+    const availableSlots = PREVIEW_MAX_CONCURRENT - previewActiveRequests.size;
+    if (availableSlots <= 0) {
+      return;
+    }
+
+    const prioritizedDevices = visibleDevices.value.slice(0, PREVIEW_PRIORITY_LIMIT);
+    const remainingDevices = visibleDevices.value.slice(PREVIEW_PRIORITY_LIMIT);
+    const queue = [...prioritizedDevices, ...remainingDevices];
+    const now = Date.now();
+    let started = 0;
+    for (const device of queue) {
+      if (started >= availableSlots) {
+        break;
+      }
+      if (!shouldRefreshPreview(device, now, force)) {
+        continue;
+      }
+
+      started += 1;
+      void loadPreviewForDevice(device);
+    }
+  };
+
+  const startPreviewScheduler = () => {
+    if (previewSchedulerHandle !== null) {
+      return;
+    }
+
+    previewSchedulerHandle = window.setInterval(() => {
+      queuePreviewRefresh(false);
+    }, 1000);
+  };
+
+  const stopPreviewScheduler = () => {
+    if (previewSchedulerHandle !== null) {
+      window.clearInterval(previewSchedulerHandle);
+      previewSchedulerHandle = null;
+    }
+  };
+
+  const cancelPreviewRequests = () => {
+    previewActiveRequests.forEach((controller) => controller.abort());
+    previewActiveRequests.clear();
+    Object.values(previewStates.value).forEach((state) => {
+      state.loading = false;
+    });
+  };
+
+  const setDeviceViewMode = (mode: HomeDeviceViewMode) => {
+    deviceViewMode.value = mode;
+    writeLocalString(DEVICE_VIEW_MODE_KEY, mode);
+  };
+
+  const toggleDeviceViewMode = async () => {
+    const nextMode: HomeDeviceViewMode = isPreviewMode.value ? 'list' : 'preview';
+    showMoreActionsMenu.value = false;
+    activeMenuDeviceId.value = null;
+    if (nextMode === 'preview') {
+      selectedDeviceIds.value = [];
+    }
+    setDeviceViewMode(nextMode);
+
+    if (nextMode === 'preview') {
+      await fetchDevices();
+      queuePreviewRefresh(true);
+      startPreviewScheduler();
+      return;
+    }
+
+    stopPreviewScheduler();
+    cancelPreviewRequests();
   };
 
   const toggleGroupPickerMenu = async () => {
@@ -183,6 +427,7 @@ export function useHomeDevices() {
         devices.value = await response.json();
         const validDeviceIds = new Set(devices.value.map((device) => Number(device.Id)));
         selectedDeviceIds.value = selectedDeviceIds.value.filter((id) => validDeviceIds.has(id));
+        cleanupPreviewStates([...validDeviceIds]);
       }
     } catch (error) {
       if (!isAbortError(error)) {
@@ -235,7 +480,11 @@ export function useHomeDevices() {
 
   const handleRefreshDevices = async () => {
     showMoreActionsMenu.value = false;
+    markVisiblePreviewsStale();
     await fetchDevices();
+    if (isPreviewMode.value) {
+      queuePreviewRefresh(true);
+    }
   };
 
   const deleteSelectedDevices = async () => {
@@ -521,13 +770,41 @@ export function useHomeDevices() {
     router.push({ name: 'device-settings', params: { id: String(device.Id) } });
   };
 
+  watch(isPreviewMode, (enabled) => {
+    if (enabled) {
+      queuePreviewRefresh(true);
+      startPreviewScheduler();
+      return;
+    }
+
+    stopPreviewScheduler();
+    cancelPreviewRequests();
+  }, { immediate: true });
+
+  watch(visibleDevices, () => {
+    if (isPreviewMode.value) {
+      queuePreviewRefresh(true);
+    }
+  });
+
+  watch(previewRefreshInterval, () => {
+    if (isPreviewMode.value) {
+      queuePreviewRefresh(false);
+    }
+  });
+
   onMounted(() => {
-    fetchDevices();
-    fetchAvailableGroups();
+    void fetchDevices();
+    void fetchAvailableGroups();
     document.addEventListener('click', closeMenu);
   });
 
   onUnmounted(() => {
+    stopPreviewScheduler();
+    cancelPreviewRequests();
+    Object.keys(previewStates.value).forEach((deviceId) => {
+      removePreviewState(Number(deviceId));
+    });
     devicesRequest.dispose();
     groupOptionsRequest.dispose();
     encodersRequest.dispose();
@@ -539,7 +816,11 @@ export function useHomeDevices() {
     notificationService,
     t,
     devices,
+    deviceViewMode,
+    isPreviewMode,
+    previewRefreshInterval,
     visibleDevices,
+    previewStates,
     selectedDeviceIds,
     selectedDeviceCount,
     loading,
@@ -578,8 +859,12 @@ export function useHomeDevices() {
     selectGroup,
     isDeviceSelected,
     toggleDeviceSelection,
+    getPreviewState,
+    getDevicePreviewUrl,
+    isDevicePreviewLoading,
     toggleMenu,
     toggleMoreActionsMenu,
+    toggleDeviceViewMode,
     closeMenu,
     fetchDevices,
     fetchAvailableGroups,
@@ -599,4 +884,8 @@ export function useHomeDevices() {
     showEncoderList,
     openDeviceSettings
   };
+}
+
+function loadDeviceViewMode(): HomeDeviceViewMode {
+  return readLocalString(DEVICE_VIEW_MODE_KEY) === 'preview' ? 'preview' : 'list';
 }

@@ -18,17 +18,19 @@ type DeviceHandler struct {
 	service         DeviceService
 	accessService   DeviceAccessService
 	groupService    DeviceGroupService
+	previewService  DevicePreviewService
 	appService      AppService
 	fileService     FileService
 	settingsService DeviceSettingsService
 	scrcpyService   ScrcpyService
 }
 
-func NewDeviceHandler(service DeviceService, accessService DeviceAccessService, groupService DeviceGroupService, appService AppService, fileService FileService, settingsService DeviceSettingsService, scrcpyService ScrcpyService) *DeviceHandler {
+func NewDeviceHandler(service DeviceService, accessService DeviceAccessService, groupService DeviceGroupService, previewService DevicePreviewService, appService AppService, fileService FileService, settingsService DeviceSettingsService, scrcpyService ScrcpyService) *DeviceHandler {
 	return &DeviceHandler{
 		service:         service,
 		accessService:   accessService,
 		groupService:    groupService,
+		previewService:  previewService,
 		appService:      appService,
 		fileService:     fileService,
 		settingsService: settingsService,
@@ -69,6 +71,36 @@ func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	WriteJSON(w, http.StatusOK, devices)
+}
+
+func (h *DeviceHandler) Preview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+	id, err := deviceIDFromPath(r.URL.Path)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
+	if h.previewService == nil {
+		WriteError(w, http.StatusServiceUnavailable, "DEVICE_PREVIEW_UNAVAILABLE", "HomeView.PreviewUnavailable", "设备预览不可用")
+		return
+	}
+
+	payload, err := h.previewService.Get(r.Context(), id)
+	if err != nil {
+		h.writeDevicePreviewError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=5")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
 }
 
 func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -739,6 +771,19 @@ func (h *DeviceHandler) writeAppError(w http.ResponseWriter, err error, fallback
 		WriteError(w, http.StatusNotFound, "APP_PACKAGE_PATH_NOT_FOUND", "AppPage.PackagePathUnavailable", "未找到可下载的 APK 路径")
 	default:
 		WriteError(w, http.StatusInternalServerError, "APP_REQUEST_FAILED", "AppPage.RequestFailed", fallback)
+	}
+}
+
+func (h *DeviceHandler) writeDevicePreviewError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, deviceservice.ErrDeviceNotFound):
+		WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "设备不存在")
+	case errors.Is(err, deviceservice.ErrDeviceOffline):
+		WriteError(w, http.StatusConflict, "DEVICE_OFFLINE", "Devices.Offline", "设备已断开，请稍后重试")
+	case errors.Is(err, deviceservice.ErrDeviceSerialEmpty):
+		WriteError(w, http.StatusBadRequest, "DEVICE_SERIAL_REQUIRED", "Devices.SerialRequired", "设备序列号不能为空")
+	default:
+		WriteError(w, http.StatusInternalServerError, "DEVICE_PREVIEW_FAILED", "HomeView.PreviewLoadFailed", "设备预览加载失败")
 	}
 }
 

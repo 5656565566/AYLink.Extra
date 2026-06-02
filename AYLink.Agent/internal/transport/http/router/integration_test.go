@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
 	"io"
 	"io/fs"
 	"net/http"
@@ -35,15 +36,22 @@ type fakeADBManager struct{}
 func (fakeADBManager) ResolvedBinary() (domainadb.ResolvedBinary, bool) {
 	return domainadb.ResolvedBinary{}, false
 }
-func (fakeADBManager) Devices(context.Context) ([]domainadb.Device, error) { return nil, nil }
+func (fakeADBManager) Devices(context.Context) ([]domainadb.Device, error) {
+	return []domainadb.Device{
+		{Serial: "127.0.0.1:5555", State: "device"},
+	}, nil
+}
 func (fakeADBManager) StartServer(context.Context) error                   { return nil }
 func (fakeADBManager) KillServer(context.Context) error                    { return nil }
 func (fakeADBManager) ServerAddress() string                               { return "127.0.0.1:5037" }
 func (fakeADBManager) PairDevice(context.Context, string, int, string) (string, error) {
 	return "", nil
 }
-func (fakeADBManager) ConnectDevice(context.Context, string, int) error           { return nil }
-func (fakeADBManager) DeviceDisplayName(context.Context, string) (string, error)  { return "", nil }
+func (fakeADBManager) ConnectDevice(context.Context, string, int) error          { return nil }
+func (fakeADBManager) DeviceDisplayName(context.Context, string) (string, error) { return "", nil }
+func (fakeADBManager) CaptureScreenshot(context.Context, string) (image.Image, error) {
+	return image.NewRGBA(image.Rect(0, 0, 16, 16)), nil
+}
 func (fakeADBManager) RunCommand(context.Context, string, string) (string, error) { return "", nil }
 func (fakeADBManager) ListDirectory(context.Context, string, string) ([]domainadb.DirectoryEntry, error) {
 	return nil, nil
@@ -507,6 +515,33 @@ func TestHTTPDevicesListReturnsInsertedDevices(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte(`"Name":"Pixel"`)) {
 		t.Fatalf("expected device list payload, got %s", string(body))
+	}
+}
+
+func TestHTTPDevicePreviewRequiresViewPermission(t *testing.T) {
+	env := newIntegrationEnv(t)
+	deviceID := env.createDevice(t, "Preview Device", "serial-preview-no-view")
+	env.createUserWithPermissions(t, "devices-preview-blocked", "secret", []string{"settings.view"})
+
+	tokens := env.login(t, "devices-preview-blocked", "secret")
+	statusCode, body := env.doJSON(t, http.MethodGet, "/api/devices/"+strconv.Itoa(deviceID)+"/preview", tokens.AccessToken, nil)
+	if statusCode != http.StatusForbidden {
+		t.Fatalf("expected preview GET to require devices.view, got %d: %s", statusCode, string(body))
+	}
+}
+
+func TestHTTPDevicePreviewAllowsViewPermission(t *testing.T) {
+	env := newIntegrationEnv(t)
+	deviceID := env.createDevice(t, "Preview Device", "127.0.0.1:5555")
+	env.createUserWithPermissions(t, "devices-preview-viewer", "secret", []string{"devices.view"})
+
+	tokens := env.login(t, "devices-preview-viewer", "secret")
+	statusCode, body := env.doJSON(t, http.MethodGet, "/api/devices/"+strconv.Itoa(deviceID)+"/preview", tokens.AccessToken, nil)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected preview GET 200, got %d: %s", statusCode, string(body))
+	}
+	if len(body) == 0 {
+		t.Fatal("expected preview image payload")
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	authservice "aylink-agent/internal/service/auth"
 	deviceservice "aylink-agent/internal/service/device"
 	devicegroupservice "aylink-agent/internal/service/devicegroup"
+	devicepreviewservice "aylink-agent/internal/service/devicepreview"
 	fileservice "aylink-agent/internal/service/file"
 	i18nservice "aylink-agent/internal/service/i18n"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
@@ -81,6 +82,7 @@ func New(deps Dependencies) http.Handler {
 	fileService := fileservice.NewService(deviceService, deps.ADB)
 
 	settingsRepo := deviceservice.NewSettingsService(deviceRepo, sqlite.NewDeviceSettingsRepository(deps.DB))
+	previewService := devicepreviewservice.NewService(deviceService, deps.ADB)
 
 	adbBinaryPath := deps.Config.ADB.Path
 	if resolved, ok := deps.ADB.ResolvedBinary(); ok && resolved.Path != "" {
@@ -94,6 +96,7 @@ func New(deps Dependencies) http.Handler {
 		deviceService,
 		deviceAccessService,
 		deviceGroupService,
+		previewService,
 		appService,
 		fileService,
 		settingsRepo,

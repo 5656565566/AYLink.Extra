@@ -72,6 +72,7 @@ func (fakeAppService) Install(context.Context, int, string, io.Reader) error {
 
 type fakeFileService struct{}
 type fakeScrcpyService struct{}
+type fakeDevicePreviewService struct{}
 
 func (fakeFileService) List(context.Context, int, string) (*fileservice.ListResult, error) {
 	panic("unexpected call")
@@ -90,11 +91,15 @@ func (fakeScrcpyService) StartRuntimeForWebRTC(context.Context, int, scrcpyservi
 	return nil, nil
 }
 
+func (fakeDevicePreviewService) Get(context.Context, int) ([]byte, error) {
+	return []byte("preview"), nil
+}
+
 func TestDeviceHandlerListReturnsDevices(t *testing.T) {
 	service := &fakeDeviceService{
 		listResult: []domaindevice.Device{{ID: 1, Name: "Pixel", Serial: "serial-1"}},
 	}
-	handler := NewDeviceHandler(service, nil, nil, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
+	handler := NewDeviceHandler(service, nil, nil, fakeDevicePreviewService{}, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/devices", nil)
 	recorder := httptest.NewRecorder()
@@ -111,7 +116,7 @@ func TestDeviceHandlerListReturnsDevices(t *testing.T) {
 
 func TestDeviceHandlerCreateMapsDomainValidationError(t *testing.T) {
 	service := &fakeDeviceService{createErr: deviceservice.ErrDeviceSerialEmpty}
-	handler := NewDeviceHandler(service, nil, nil, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
+	handler := NewDeviceHandler(service, nil, nil, fakeDevicePreviewService{}, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/devices", strings.NewReader(`{"Name":"Pixel"}`))
 	recorder := httptest.NewRecorder()
@@ -130,7 +135,7 @@ func TestDeviceHandlerCreatePassesPayloadToService(t *testing.T) {
 	service := &fakeDeviceService{
 		createResult: &domaindevice.Device{ID: 2, Name: "Pixel", Serial: "serial-2"},
 	}
-	handler := NewDeviceHandler(service, nil, nil, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
+	handler := NewDeviceHandler(service, nil, nil, fakeDevicePreviewService{}, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/devices", strings.NewReader(`{"Serial":"serial-2","Name":"Pixel","PairingPort":1234,"PairingCode":"654321"}`))
 	recorder := httptest.NewRecorder()
@@ -149,7 +154,7 @@ func TestDeviceHandlerConnectReturnsInternalServerErrorForUnexpectedFailure(t *t
 	service := &fakeDeviceService{
 		connectErr: errors.New("adb connect failed"),
 	}
-	handler := NewDeviceHandler(service, nil, nil, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
+	handler := NewDeviceHandler(service, nil, nil, fakeDevicePreviewService{}, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/devices/connect/7", nil)
 	recorder := httptest.NewRecorder()

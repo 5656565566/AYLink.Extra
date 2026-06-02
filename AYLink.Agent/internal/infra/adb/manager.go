@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"net"
 	"os/exec"
@@ -149,6 +150,11 @@ func (m *Manager) DeviceDisplayName(ctx context.Context, serial string) (string,
 	}
 
 	return "", fmt.Errorf("device display name unavailable")
+}
+
+func (m *Manager) CaptureScreenshot(ctx context.Context, serial string) (image.Image, error) {
+	device := m.client.Device(adbkit.DeviceWithSerial(serial))
+	return device.Screencap()
 }
 
 func (m *Manager) RunCommand(ctx context.Context, serial string, command string) (string, error) {

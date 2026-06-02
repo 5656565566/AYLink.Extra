@@ -117,6 +117,10 @@ type SettingsService interface {
 	SaveWebRtcNetworkSettings(ctx context.Context, settings domainsettings.WebRtcNetworkSettings) (domainsettings.WebRtcNetworkSettings, error)
 }
 
+type DevicePreviewService interface {
+	Get(ctx context.Context, deviceID int) ([]byte, error)
+}
+
 type TerminalSession interface {
 	ReadPacket() (domainadb.ShellPacket, error)
 	WriteInput(data string) error

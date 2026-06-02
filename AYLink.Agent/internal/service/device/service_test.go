@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"errors"
+	"image"
 	"testing"
 	"time"
 
@@ -66,6 +67,10 @@ func (f *fakeADBManager) DeviceDisplayName(context.Context, string) (string, err
 		return "", errors.New("no display name")
 	}
 	return f.deviceDisplayName, nil
+}
+
+func (f *fakeADBManager) CaptureScreenshot(context.Context, string) (image.Image, error) {
+	return image.NewRGBA(image.Rect(0, 0, 16, 16)), nil
 }
 
 func TestParseSerialAddress(t *testing.T) {

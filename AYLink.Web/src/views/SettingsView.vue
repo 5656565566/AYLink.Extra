@@ -51,6 +51,20 @@
             @change="onNewDisplayDpiValueChange"
           />
         </SettingItem>
+        <SettingItem
+          :title="t('Settings.PreviewRefreshInterval', '预览刷新间隔')"
+          :description="t('Settings.PreviewRefreshIntervalDescription', '首页预览视图中每台设备的自动刷新间隔，单位为秒')"
+        >
+          <input
+            type="number"
+            min="2"
+            max="300"
+            step="1"
+            class="fluent-input"
+            :value="previewRefreshInterval"
+            @change="onPreviewRefreshIntervalChange"
+          />
+        </SettingItem>
       </SettingSection>
 
       <SettingSection :title="t('Settings.Appearance', '外观')">

@@ -2,6 +2,7 @@ package adb
 
 import (
 	"context"
+	"image"
 	"io"
 )
 
@@ -55,6 +56,7 @@ type Manager interface {
 	PairDevice(ctx context.Context, host string, port int, code string) (string, error)
 	ConnectDevice(ctx context.Context, host string, port int) error
 	DeviceDisplayName(ctx context.Context, serial string) (string, error)
+	CaptureScreenshot(ctx context.Context, serial string) (image.Image, error)
 	RunCommand(ctx context.Context, serial string, command string) (string, error)
 	ListDirectory(ctx context.Context, serial string, path string) ([]DirectoryEntry, error)
 	OpenRead(ctx context.Context, serial string, path string) (io.ReadCloser, error)

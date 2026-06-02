@@ -65,6 +65,13 @@
                 </svg>
                 {{ t('HomeView.RefreshDevices', '刷新设备') }}
               </button>
+              <button class="dropdown-item" @click.stop="toggleDeviceViewMode">
+                <svg class="item-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M2.5 3H13.5M2.5 8H13.5M2.5 13H13.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                  <path d="M3 3H6V6H3V3ZM10 3H13V6H10V3ZM3 10H6V13H3V10ZM10 10H13V13H10V10Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+                </svg>
+                {{ isPreviewMode ? t('HomeView.ListView', '列表视图') : t('HomeView.PreviewView', '预览视图') }}
+              </button>
               <button
                 v-if="canManageDevices"
                 class="dropdown-item danger"
@@ -89,7 +96,7 @@
     </div>
     
     <div class="content-area">
-      <div class="list-header">
+      <div v-if="!isPreviewMode" class="list-header">
         <div class="col-info">{{ t('HomeView.DeviceInfo', '设备信息') }}</div>
         <div class="col-group">{{ t('HomeView.DeviceGroup', '分组') }}</div>
         <div class="col-conn">{{ t('HomeView.ConnectionType', '连接方式') }}</div>
@@ -103,7 +110,7 @@
       <div v-else-if="visibleDevices.length === 0" class="empty-state">
         <p>{{ t('HomeView.NoDevices', '没有可用的设备，请点击「添加设备」按钮') }}</p>
       </div>
-      <div v-else class="list-body">
+      <div v-else-if="!isPreviewMode" class="list-body">
         <div
           v-for="device in visibleDevices"
           :key="device.Id"
@@ -159,6 +166,66 @@
             </div>
           </div>
         </div>
+      </div>
+      <div v-else class="preview-grid">
+        <article v-for="device in visibleDevices" :key="device.Id" class="preview-card">
+          <button
+            class="preview-screen-button"
+            :class="{ 'preview-screen-button--offline': String(device.Status || '').toLowerCase() !== 'online' }"
+            :title="t('HomeView.StartCast', '启动投屏')"
+            @click="openScreencast(device)"
+          >
+            <div class="preview-screen">
+              <img
+                v-if="getDevicePreviewUrl(device.Id)"
+                class="preview-image"
+                :src="getDevicePreviewUrl(device.Id)"
+                :alt="device.Name || device.Serial || t('Devices.UnknownDevice', '未知设备')"
+              />
+              <div v-else class="preview-placeholder">
+                <div v-if="isDevicePreviewLoading(device.Id)" class="spinner preview-spinner"></div>
+              </div>
+              <div class="preview-play-overlay" aria-hidden="true">
+                <div class="preview-play-icon">
+                  <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 11V29L29 20L14 11Z" fill="currentColor"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <div class="preview-meta">
+            <div class="preview-meta__title">{{ device.Name || device.Serial || t('Devices.UnknownDevice', '未知设备') }}</div>
+            <div class="preview-meta__subtitle">{{ device.IpAddress ? `${device.IpAddress}:${device.Port}` : device.Serial }}</div>
+            <div class="preview-meta__group">{{ formatDeviceGroups(device) }}</div>
+          </div>
+
+          <div class="preview-actions">
+            <button v-if="canAccessFiles" class="preview-action-btn" @click.stop="openFileManager(device)">
+              {{ t('Common.Files', '文件') }}
+            </button>
+            <button v-if="canControlDevices" class="preview-action-btn" @click.stop="openAppManager(device)">
+              {{ t('Common.Apps', '应用') }}
+            </button>
+            <div v-if="canControlDevices || canAccessTerminal || canManageDevices" class="dropdown-container preview-more">
+              <button class="preview-action-btn" @click.stop="toggleMenu(device.Id)">
+                {{ t('HomeView.MoreActions', '更多') }}
+              </button>
+              <div v-if="activeMenuDeviceId === device.Id" class="dropdown-menu preview-dropdown-menu">
+                <button v-if="canControlDevices" class="dropdown-item" @click.stop="openNewDisplayScreencast(device)">{{ t('HomeView.NewDisplay', '新建显示') }}</button>
+                <button v-if="canAccessTerminal" class="dropdown-item" @click.stop="openTerminal(device)">{{ t('HomeView.OpenTerminal', '打开终端') }}</button>
+                <button v-if="canManageDevices" class="dropdown-item" @click.stop="openDeviceSettings(device)">{{ t('DeviceSettings.Title', '设备设置') }}</button>
+                <button v-if="canManageDevices" class="dropdown-item" @click.stop="openRenameDialog(device)">{{ t('HomeView.RenameDevice', '重命名设备') }}</button>
+                <button v-if="canControlDevices" class="dropdown-item" @click.stop="showEncoderList(device)">{{ t('HomeView.EncoderList', '编码器列表') }}</button>
+                <div v-if="canManageDevices" class="dropdown-divider"></div>
+                <button v-if="canManageDevices" class="dropdown-item danger" @click.stop="deleteDevice(device.Id)">
+                  {{ t('HomeView.DeleteDevices', '删除设备') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </article>
       </div>
     </div>
 

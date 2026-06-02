@@ -80,7 +80,7 @@ export default defineComponent({
 
     const { t, currentLocale, languages, setLocale, loadServerLocale } = useI18n();
 
-    const { backgroundMute, newDisplayDpiMode, newDisplayDpiValue, setBackgroundMute, setNewDisplayDpiMode, setNewDisplayDpiValue } = useAppSettings();
+    const { backgroundMute, newDisplayDpiMode, newDisplayDpiValue, previewRefreshInterval, setBackgroundMute, setNewDisplayDpiMode, setNewDisplayDpiValue, setPreviewRefreshInterval } = useAppSettings();
 
     const router = useRouter();
 
@@ -339,6 +339,10 @@ export default defineComponent({
 
     function onNewDisplayDpiValueChange(event: Event) {
       setNewDisplayDpiValue(Number((event.target as HTMLInputElement).value));
+    }
+
+    function onPreviewRefreshIntervalChange(event: Event) {
+      setPreviewRefreshInterval(Number((event.target as HTMLInputElement).value));
     }
 
     function normalizeVersion(value: string) {
@@ -1199,9 +1203,11 @@ export default defineComponent({
       backgroundImages,
       newDisplayDpiMode,
       newDisplayDpiValue,
+      previewRefreshInterval,
       setBackgroundMute,
       setNewDisplayDpiMode,
       setNewDisplayDpiValue,
+      setPreviewRefreshInterval,
       router,
       auth,
       currentUser,
@@ -1275,6 +1281,7 @@ export default defineComponent({
       onUseLocalWebRtcOverrideChange,
       onNewDisplayDpiModeChange,
       onNewDisplayDpiValueChange,
+      onPreviewRefreshIntervalChange,
       normalizeVersion,
       compareVersions,
       openExternalUrl,

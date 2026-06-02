@@ -12,9 +12,11 @@ export const storageKeys = {
   app: {
     backgroundEnabled: 'aylink.settings.backgroundEnabled',
     backgroundMute: 'aylink.settings.backgroundMute',
+    homeDeviceViewMode: 'aylink.settings.homeDeviceViewMode',
     language: 'aylink.ui.language',
     newDisplayDpiMode: 'aylink.settings.newDisplayDpiMode',
     newDisplayDpiValue: 'aylink.settings.newDisplayDpiValue',
+    previewRefreshInterval: 'aylink.settings.previewRefreshInterval',
     themeMode: 'aylink.theme.mode',
     accentColor: 'aylink.theme.accentColor',
   },

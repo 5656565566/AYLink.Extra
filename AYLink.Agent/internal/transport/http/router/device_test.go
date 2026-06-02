@@ -28,6 +28,7 @@ func TestClassifyDeviceRoute(t *testing.T) {
 		{path: "/api/devices/connect/1", want: deviceRouteConnect},
 		{path: "/api/devices/1/terminal/ws", want: deviceRouteTerminalWS},
 		{path: "/api/devices/1/settings", want: deviceRouteSettings},
+		{path: "/api/devices/1/preview", want: deviceRoutePreview},
 		{path: "/api/devices/1/apps", want: deviceRouteApps},
 		{path: "/api/devices/1/apps/install", want: deviceRouteAppInstall},
 		{path: "/api/devices/1/files/download", want: deviceRouteFilesDownload},

@@ -18,6 +18,7 @@ const (
 	deviceRouteGroups
 	deviceRouteEncoders
 	deviceRouteClipboard
+	deviceRoutePreview
 	deviceRouteApps
 	deviceRouteAppLaunch
 	deviceRouteAppDownload
@@ -86,6 +87,8 @@ func handleDeviceResourceRoute(w http.ResponseWriter, r *http.Request, handlers 
 		guards.requireDevicesControl(http.HandlerFunc(handlers.device.ListEncoders)).ServeHTTP(w, r)
 	case deviceRouteClipboard:
 		handleDeviceClipboardRoute(w, r, handlers, guards)
+	case deviceRoutePreview:
+		guards.requireDevicesView(http.HandlerFunc(handlers.device.Preview)).ServeHTTP(w, r)
 	case deviceRouteApps:
 		guards.requireDevicesControl(http.HandlerFunc(handlers.device.ListApps)).ServeHTTP(w, r)
 	case deviceRouteAppLaunch:
@@ -162,6 +165,8 @@ func classifyDeviceRoute(path string) deviceRouteKind {
 		return deviceRouteEncoders
 	case strings.HasSuffix(path, "/clipboard"):
 		return deviceRouteClipboard
+	case strings.HasSuffix(path, "/preview"):
+		return deviceRoutePreview
 	case strings.HasSuffix(path, "/apps/launch"):
 		return deviceRouteAppLaunch
 	case strings.HasSuffix(path, "/apps/download"):

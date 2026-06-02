@@ -338,10 +338,17 @@ func (r *runtime) setClipboard(ctx context.Context, text string, paste bool) err
 func (r *runtime) RequestVideoRefresh() error {
 	r.refreshMu.Lock()
 	if r.refreshRequested {
+		r.logger.Info("scrcpy video refresh skipped", "reason", "refresh_already_inflight")
 		r.refreshMu.Unlock()
 		return nil
 	}
-	if time.Since(r.lastRefreshTime) < videoRefreshDebounce {
+	sinceLastRefresh := time.Since(r.lastRefreshTime)
+	if sinceLastRefresh < videoRefreshDebounce {
+		r.logger.Info("scrcpy video refresh skipped",
+			"reason", "debounced",
+			"sinceLastRefresh", sinceLastRefresh.String(),
+			"debounce", videoRefreshDebounce.String(),
+		)
 		r.refreshMu.Unlock()
 		return nil
 	}
@@ -355,6 +362,10 @@ func (r *runtime) RequestVideoRefresh() error {
 			r.refreshRequested = false
 			r.refreshMu.Unlock()
 		}()
+		r.logger.Info("scrcpy video refresh dispatching reset control",
+			"queueDepth", len(r.controlWrites),
+			"queueCapacity", cap(r.controlWrites),
+		)
 		_ = r.SendControl(domainscrcpy.BuildResetVideoControl())
 	}()
 

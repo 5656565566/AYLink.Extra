@@ -102,7 +102,7 @@ func (s *Service) bindScrcpyControl(peerConnection *pion.PeerConnection, deviceI
 				return
 			}
 			if channel.Label() == "control-meta" && isLocalMetaControlPayload(msg.Data) {
-				handleLocalMetaControlPayload(runtime, msg.Data)
+				handleLocalMetaControlPayload(s.logger, runtime, msg.Data)
 				return
 			}
 			if isExclusiveControlPayload(msg.Data) {
@@ -119,13 +119,16 @@ func isLocalMetaControlPayload(payload []byte) bool {
 	return len(payload) >= 2 && payload[0] == localMetaControlPrefix
 }
 
-func handleLocalMetaControlPayload(runtime domainscrcpy.Runtime, payload []byte) {
+func handleLocalMetaControlPayload(logger logging.Logger, runtime domainscrcpy.Runtime, payload []byte) {
 	if runtime == nil || len(payload) < 2 {
 		return
 	}
 
 	switch payload[1] {
 	case localMetaMsgVideoRefresh:
+		if logger != nil {
+			logger.Info("webrtc video refresh requested", "source", "frontend_meta_control")
+		}
 		_ = runtime.RequestVideoRefresh()
 	}
 }
@@ -432,7 +435,7 @@ func (b *scrcpyVideoBridge) handlePeerConnectionStateLocked(state pion.PeerConne
 func (b *scrcpyVideoBridge) flushPendingLocked() {
 	if len(b.pendingKeyFrame) == 0 {
 		if b.shouldRequestRefreshLocked(time.Now(), "flush_pending_missing_keyframe") {
-			b.requestRefreshLocked()
+			b.requestRefreshLocked("flush_pending_missing_keyframe")
 		}
 		return
 	}
@@ -446,7 +449,7 @@ func (b *scrcpyVideoBridge) flushPendingLocked() {
 		b.pendingGeneration = 0
 		b.state = videoBridgeStateWaitingKeyFrame
 		if b.shouldRequestRefreshLocked(time.Now(), "flush_pending_generation_mismatch") {
-			b.requestRefreshLocked()
+			b.requestRefreshLocked("flush_pending_generation_mismatch")
 		}
 		return
 	}
@@ -481,7 +484,7 @@ func (b *scrcpyVideoBridge) requestRefresh(reason string) {
 	if !b.shouldRequestRefreshLocked(time.Now(), reason) {
 		return
 	}
-	b.requestRefreshLocked()
+	b.requestRefreshLocked(reason)
 }
 
 func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
@@ -492,7 +495,7 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 		if !b.shouldRequestRefreshLocked(time.Now(), "rtcp_not_ready") {
 			return
 		}
-		b.requestRefreshLocked()
+		b.requestRefreshLocked("rtcp_not_ready")
 		return
 	}
 
@@ -500,13 +503,14 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 		return
 	}
 
-	b.requestRefreshLocked()
+	b.requestRefreshLocked("rtcp_stalled_ready")
 }
 
-func (b *scrcpyVideoBridge) requestRefreshLocked() {
-	if b.debugEnabled && b.logger != nil {
-		b.logger.Debug("webrtc video refresh requested",
-			"scope", "runtime",
+func (b *scrcpyVideoBridge) requestRefreshLocked(reason string) {
+	if b.logger != nil {
+		b.logger.Info("webrtc video refresh requested",
+			"source", "backend_bridge",
+			"reason", reason,
 			"generation", b.generation,
 			"state", b.state.String(),
 			"peerConnected", b.peerConnected,

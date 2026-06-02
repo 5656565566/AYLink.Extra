@@ -27,6 +27,8 @@ const (
 	audioPacketQueueSize                      = 32
 	controlQueueSize                          = 256
 	videoRefreshDebounce                      = 10 * time.Second
+	videoRefreshConfirmationWindow            = 12 * time.Second
+	videoRefreshConfirmations                 = 2
 	opusSampleRate                            = 48000
 	opusChannels                              = 2
 	audioGainMultiplier                       = 1.3
@@ -82,6 +84,8 @@ type runtime struct {
 	refreshMu        sync.Mutex
 	refreshRequested bool
 	lastRefreshTime  time.Time
+	lastRefreshAskAt time.Time
+	refreshAskCount  int
 
 	done chan struct{}
 }
@@ -342,6 +346,23 @@ func (r *runtime) RequestVideoRefresh() error {
 		r.refreshMu.Unlock()
 		return nil
 	}
+	now := time.Now()
+	if !r.lastRefreshAskAt.IsZero() && now.Sub(r.lastRefreshAskAt) > videoRefreshConfirmationWindow {
+		r.refreshAskCount = 0
+	}
+	r.lastRefreshAskAt = now
+	r.refreshAskCount++
+	if r.refreshAskCount < videoRefreshConfirmations {
+		r.logger.Info("scrcpy video refresh deferred",
+			"reason", "confirmation_pending",
+			"requestCount", r.refreshAskCount,
+			"confirmationThreshold", videoRefreshConfirmations,
+			"confirmationWindow", videoRefreshConfirmationWindow.String(),
+		)
+		r.refreshMu.Unlock()
+		return nil
+	}
+	r.refreshAskCount = 0
 	sinceLastRefresh := time.Since(r.lastRefreshTime)
 	if sinceLastRefresh < videoRefreshDebounce {
 		r.logger.Info("scrcpy video refresh skipped",

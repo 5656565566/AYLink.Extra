@@ -1,8 +1,8 @@
-﻿package adbkit
+package adbkit
 
 // Device represents a specific Android device
 type Device struct {
-	client    *Client
+	client     *Client
 	descriptor DeviceDescriptor
 }
 

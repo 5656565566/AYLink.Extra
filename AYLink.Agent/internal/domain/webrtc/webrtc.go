@@ -3,16 +3,16 @@ package webrtc
 import "time"
 
 type Ticket struct {
-	Value      string
-	SessionID  string
-	DeviceID   string
-	AppPackage string
-	AppName    string
-	NewDisplay bool
-	NewDisplayWidth *int
+	Value            string
+	SessionID        string
+	DeviceID         string
+	AppPackage       string
+	AppName          string
+	NewDisplay       bool
+	NewDisplayWidth  *int
 	NewDisplayHeight *int
-	NewDisplayDPI *int
-	ExpiresAt  time.Time
+	NewDisplayDPI    *int
+	ExpiresAt        time.Time
 }
 
 type SessionLease struct {

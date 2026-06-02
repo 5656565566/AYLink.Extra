@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	ErrDeviceIDRequired = errors.New("device id required")
+	ErrDeviceIDRequired  = errors.New("device id required")
 	ErrSessionIDRequired = errors.New("session id required")
-	ErrTicketNotFound   = errors.New("ticket not found")
+	ErrTicketNotFound    = errors.New("ticket not found")
 )
 
 type Service struct {
@@ -42,13 +42,13 @@ type controlLease struct {
 const controlLeaseTTL = 1500 * time.Millisecond
 
 type CreateTicketInput struct {
-	DeviceID   string `json:"deviceId"`
-	AppPackage string `json:"appPackage"`
-	AppName    string `json:"appName"`
-	NewDisplay bool   `json:"newDisplay"`
-	NewDisplayWidth *int `json:"newDisplayWidth"`
-	NewDisplayHeight *int `json:"newDisplayHeight"`
-	NewDisplayDPI *int `json:"newDisplayDpi"`
+	DeviceID         string `json:"deviceId"`
+	AppPackage       string `json:"appPackage"`
+	AppName          string `json:"appName"`
+	NewDisplay       bool   `json:"newDisplay"`
+	NewDisplayWidth  *int   `json:"newDisplayWidth"`
+	NewDisplayHeight *int   `json:"newDisplayHeight"`
+	NewDisplayDPI    *int   `json:"newDisplayDpi"`
 }
 
 type CreateTicketResult struct {
@@ -86,16 +86,16 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 	}
 
 	ticket := domainwebrtc.Ticket{
-		Value:      value,
-		SessionID:  value,
-		DeviceID:   input.DeviceID,
-		AppPackage: input.AppPackage,
-		AppName:    input.AppName,
-		NewDisplay: input.NewDisplay,
-		NewDisplayWidth: normalizeNewDisplayDimension(input.NewDisplayWidth),
+		Value:            value,
+		SessionID:        value,
+		DeviceID:         input.DeviceID,
+		AppPackage:       input.AppPackage,
+		AppName:          input.AppName,
+		NewDisplay:       input.NewDisplay,
+		NewDisplayWidth:  normalizeNewDisplayDimension(input.NewDisplayWidth),
 		NewDisplayHeight: normalizeNewDisplayDimension(input.NewDisplayHeight),
-		NewDisplayDPI: normalizeNewDisplayDPI(input.NewDisplayDPI),
-		ExpiresAt:  s.now().Add(s.ticketTTL),
+		NewDisplayDPI:    normalizeNewDisplayDPI(input.NewDisplayDPI),
+		ExpiresAt:        s.now().Add(s.ticketTTL),
 	}
 	s.tickets[value] = ticket
 

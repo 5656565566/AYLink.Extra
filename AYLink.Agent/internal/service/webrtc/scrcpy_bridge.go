@@ -23,6 +23,7 @@ const (
 	defaultAudioSampleDuration = 20 * time.Millisecond
 	videoReadyTimeout          = 5 * time.Second
 	videoStallThreshold        = 3 * time.Second
+	videoStallConfirmations    = 2
 	videoRefreshConfigGrace    = 1500 * time.Millisecond
 	videoRefreshKeyFrameGrace  = 1500 * time.Millisecond
 	localMetaControlPrefix     = 0xFF
@@ -219,6 +220,7 @@ type scrcpyVideoBridge struct {
 	stateSince        time.Time
 	lastConfigAt      time.Time
 	lastKeyFrameAt    time.Time
+	stallReadyCount   int
 }
 
 type videoBridgeState int
@@ -338,6 +340,7 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 	if packet.IsConfig {
 		now := time.Now()
 		b.generation++
+		b.stallReadyCount = 0
 		b.lastConfig = cloneBytes(annexB)
 		b.pendingKeyFrame = nil
 		b.pendingFramePTS = 0
@@ -395,6 +398,7 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 		Duration: b.getDuration(packet.PresentationTimestamp),
 	}); err == nil {
 		now := time.Now()
+		b.stallReadyCount = 0
 		b.lastFrameWriteAt = now
 		if isIDR {
 			b.lastKeyFrameAt = now
@@ -459,6 +463,7 @@ func (b *scrcpyVideoBridge) flushPendingLocked() {
 		Duration: defaultVideoSampleDuration,
 	}); err == nil {
 		now := time.Now()
+		b.stallReadyCount = 0
 		b.lastFrameWriteAt = now
 		b.lastKeyFrameAt = now
 		b.setStateLocked(videoBridgeStateReady, now)
@@ -500,9 +505,27 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 	}
 
 	if !b.lastFrameWriteAt.IsZero() && time.Since(b.lastFrameWriteAt) < videoStallThreshold {
+		b.stallReadyCount = 0
 		return
 	}
 
+	b.stallReadyCount++
+	if b.stallReadyCount < videoStallConfirmations {
+		if b.logger != nil {
+			b.logger.Info("webrtc video refresh deferred",
+				"source", "backend_bridge",
+				"reason", "rtcp_stalled_ready",
+				"stalledCount", b.stallReadyCount,
+				"stalledThreshold", videoStallConfirmations,
+				"generation", b.generation,
+				"state", b.state.String(),
+				"peerConnected", b.peerConnected,
+			)
+		}
+		return
+	}
+
+	b.stallReadyCount = 0
 	b.requestRefreshLocked("rtcp_stalled_ready")
 }
 

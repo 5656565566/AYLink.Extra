@@ -1,4 +1,4 @@
-﻿package adbkit
+package adbkit
 
 const (
 	StatusOkay     = "OKAY"

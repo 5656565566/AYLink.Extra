@@ -1,4 +1,4 @@
-﻿package adbkit
+package adbkit
 
 // SyncStatEntry represents file stat information from sync service
 type SyncStatEntry struct {

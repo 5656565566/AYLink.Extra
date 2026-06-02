@@ -42,7 +42,9 @@ func (f *fakeADBManager) StartServer(context.Context) error { panic("unexpected 
 
 func (f *fakeADBManager) KillServer(context.Context) error { panic("unexpected call") }
 
-func (f *fakeADBManager) Devices(context.Context) ([]domainadb.Device, error) { panic("unexpected call") }
+func (f *fakeADBManager) Devices(context.Context) ([]domainadb.Device, error) {
+	panic("unexpected call")
+}
 
 func (f *fakeADBManager) PairDevice(context.Context, string, int, string) (string, error) {
 	panic("unexpected call")
@@ -63,7 +65,9 @@ func (f *fakeADBManager) CaptureScreenshot(_ context.Context, serial string) (im
 	return f.screenshot, nil
 }
 
-func (f *fakeADBManager) RunCommand(context.Context, string, string) (string, error) { panic("unexpected call") }
+func (f *fakeADBManager) RunCommand(context.Context, string, string) (string, error) {
+	panic("unexpected call")
+}
 
 func (f *fakeADBManager) ListDirectory(context.Context, string, string) ([]domainadb.DirectoryEntry, error) {
 	panic("unexpected call")
@@ -77,7 +81,9 @@ func (f *fakeADBManager) Push(context.Context, string, string, io.Reader, uint32
 	panic("unexpected call")
 }
 
-func (f *fakeADBManager) RenamePath(context.Context, string, string, string) error { panic("unexpected call") }
+func (f *fakeADBManager) RenamePath(context.Context, string, string, string) error {
+	panic("unexpected call")
+}
 
 func (f *fakeADBManager) DeletePath(context.Context, string, string) error { panic("unexpected call") }
 

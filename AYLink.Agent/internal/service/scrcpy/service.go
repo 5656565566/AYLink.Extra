@@ -43,12 +43,12 @@ type Service struct {
 const scrcpyControlMsgResizeDisplay byte = 21
 
 type WebRTCRuntimeOptions struct {
-	AppPackage string
-	AppName    string
-	NewDisplay bool
-	NewDisplayWidth *int
+	AppPackage       string
+	AppName          string
+	NewDisplay       bool
+	NewDisplayWidth  *int
 	NewDisplayHeight *int
-	NewDisplayDPI *int
+	NewDisplayDPI    *int
 }
 
 func NewService(devices DeviceRepository, settings SettingsRepository, backend Backend) *Service {

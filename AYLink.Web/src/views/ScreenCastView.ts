@@ -129,9 +129,9 @@ export default defineComponent({
 
     const VIDEO_FREEZE_WATCHDOG_INTERVAL_MS = 1000;
 
-    const VIDEO_FREEZE_REFRESH_DEBOUNCE_MS = 4000;
-
     const VIDEO_FREEZE_ESCALATION_MS = 7000;
+
+    const VIDEO_FREEZE_CONFIRMATION_COUNT = 2;
 
     const DEFAULT_AUTO_NEW_DISPLAY_DPI = 160;
 
@@ -174,10 +174,6 @@ export default defineComponent({
     const SCRCPY_MSG_SET_SCREEN_POWER_MODE = 10;
 
     const SCRCPY_MSG_RESIZE_DISPLAY = 21;
-
-    const LOCAL_META_CONTROL_PREFIX = 0xff;
-
-    const LOCAL_META_MSG_VIDEO_REFRESH = 0x01;
 
     const SCRCPY_ACTION_DOWN = 0;
 
@@ -444,6 +440,8 @@ export default defineComponent({
     let lastVideoFreezeRecoveryAt = 0;
 
     let lastVideoFreezeRecoveryConnectionId = 0;
+
+    let consecutiveFrozenVideoDetections = 0;
 
     interface PendingPointerMove {
       pointerId: number;
@@ -759,6 +757,7 @@ export default defineComponent({
       lastVideoFrameAt = 0;
       lastVideoFreezeRecoveryAt = 0;
       lastVideoFreezeRecoveryConnectionId = 0;
+      consecutiveFrozenVideoDetections = 0;
     };
 
     const stopVideoFreezeWatchdog = () => {
@@ -766,40 +765,6 @@ export default defineComponent({
         window.clearInterval(videoFreezeWatchdogTimer);
         videoFreezeWatchdogTimer = null;
       }
-    };
-
-    const getRefreshRequestChannel = () => {
-      if (metaControlChannel?.readyState === 'open') {
-        return metaControlChannel;
-      }
-      if (dataChannel?.readyState === 'open') {
-        return dataChannel;
-      }
-      return null;
-    };
-
-    const requestVideoRefreshFromFrontend = (reason: string) => {
-      const channel = getRefreshRequestChannel();
-      if (!channel) {
-        return false;
-      }
-    
-      try {
-        channel.send(buildVideoRefreshMetaMessage() as unknown as ArrayBufferView<ArrayBuffer>);
-        console.warn('[WebRTC] Requested runtime video refresh from frontend.', {
-          reason,
-          deviceId: deviceId.value,
-          tabKey: activeTabKey.value
-        });
-        return true;
-      } catch (error) {
-        console.warn('Failed to request runtime video refresh:', error);
-        return false;
-      }
-    };
-
-    const buildVideoRefreshMetaMessage = () => {
-      return new Uint8Array([LOCAL_META_CONTROL_PREFIX, LOCAL_META_MSG_VIDEO_REFRESH]);
     };
 
     const shouldMonitorFrozenVideo = (connectionId: number) => {
@@ -821,29 +786,46 @@ export default defineComponent({
 
     const handleFrozenVideo = (connectionId: number, reason: string) => {
       if (!shouldMonitorFrozenVideo(connectionId)) {
+        consecutiveFrozenVideoDetections = 0;
         return;
       }
     
       const now = performance.now();
       if (lastVideoFrameAt <= 0 || now - lastVideoFrameAt < VIDEO_FREEZE_THRESHOLD_MS) {
+        consecutiveFrozenVideoDetections = 0;
+        return;
+      }
+
+      consecutiveFrozenVideoDetections += 1;
+      if (consecutiveFrozenVideoDetections < VIDEO_FREEZE_CONFIRMATION_COUNT) {
+        console.warn('[WebRTC] Frozen video detected, waiting for consecutive confirmation before refresh.', {
+          reason,
+          deviceId: deviceId.value,
+          tabKey: activeTabKey.value,
+          consecutiveFrozenVideoDetections,
+          confirmationThreshold: VIDEO_FREEZE_CONFIRMATION_COUNT
+        });
         return;
       }
     
       const sameRecoveryWindow = lastVideoFreezeRecoveryConnectionId === connectionId;
       const sinceLastRecovery = sameRecoveryWindow ? now - lastVideoFreezeRecoveryAt : Number.POSITIVE_INFINITY;
-    
-      if (!sameRecoveryWindow || sinceLastRecovery >= VIDEO_FREEZE_REFRESH_DEBOUNCE_MS) {
-        const requested = requestVideoRefreshFromFrontend(reason);
-        if (requested) {
-          lastVideoFreezeRecoveryAt = now;
-          lastVideoFreezeRecoveryConnectionId = connectionId;
-          status.value = t('Screencast.StatusVideoFrozen', '画面冻结，正在请求关键帧恢复...');
-          return;
-        }
+
+      if (!sameRecoveryWindow) {
+        lastVideoFreezeRecoveryAt = now;
+        lastVideoFreezeRecoveryConnectionId = connectionId;
+        status.value = t('Screencast.StatusVideoFrozen', '画面冻结，正在等待恢复...');
+        console.warn('[WebRTC] Frozen video confirmed, deferring scrcpy reset and waiting before transport recovery.', {
+          reason,
+          deviceId: deviceId.value,
+          tabKey: activeTabKey.value,
+          peerConnectionState: peerConnection?.connectionState ?? null
+        });
+        return;
       }
-    
-      if (sameRecoveryWindow && sinceLastRecovery >= VIDEO_FREEZE_ESCALATION_MS) {
-        console.warn('[WebRTC] Frozen video persisted after refresh request, escalating recovery.', {
+
+      if (sinceLastRecovery >= VIDEO_FREEZE_ESCALATION_MS) {
+        console.warn('[WebRTC] Frozen video persisted without recovery, escalating transport recovery.', {
           reason,
           deviceId: deviceId.value,
           tabKey: activeTabKey.value,
@@ -872,6 +854,7 @@ export default defineComponent({
     
       const updateFrameActivity = () => {
         lastVideoFrameAt = performance.now();
+        consecutiveFrozenVideoDetections = 0;
         if (lastVideoFreezeRecoveryConnectionId === connectionId) {
           lastVideoFreezeRecoveryAt = 0;
           lastVideoFreezeRecoveryConnectionId = 0;
@@ -4162,7 +4145,6 @@ export default defineComponent({
       VIDEO_RECOVERY_TIMEOUT_MS,
       VIDEO_FREEZE_THRESHOLD_MS,
       VIDEO_FREEZE_WATCHDOG_INTERVAL_MS,
-      VIDEO_FREEZE_REFRESH_DEBOUNCE_MS,
       VIDEO_FREEZE_ESCALATION_MS,
       DEFAULT_AUTO_NEW_DISPLAY_DPI,
       MIN_NEW_DISPLAY_DPI,
@@ -4187,8 +4169,6 @@ export default defineComponent({
       SCRCPY_MSG_UHID_INPUT,
       SCRCPY_MSG_UHID_DESTROY,
       SCRCPY_MSG_RESIZE_DISPLAY,
-      LOCAL_META_CONTROL_PREFIX,
-      LOCAL_META_MSG_VIDEO_REFRESH,
       SCRCPY_ACTION_DOWN,
       SCRCPY_ACTION_UP,
       SCRCPY_ACTION_MOVE,
@@ -4334,9 +4314,6 @@ export default defineComponent({
       stopVideoFrameCaptureLoop,
       resetVideoFreezeState,
       stopVideoFreezeWatchdog,
-      getRefreshRequestChannel,
-      requestVideoRefreshFromFrontend,
-      buildVideoRefreshMetaMessage,
       shouldMonitorFrozenVideo,
       handleFrozenVideo,
       startVideoFrameMonitor,

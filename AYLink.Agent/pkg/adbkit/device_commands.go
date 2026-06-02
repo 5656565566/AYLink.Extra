@@ -1,11 +1,10 @@
-﻿package adbkit
+package adbkit
 
 import (
 	"bufio"
 	"io"
 	"net"
 )
-
 
 // ReadAllFromConn reads all data from a connection until closed
 func ReadAllFromConn(conn net.Conn) ([]byte, error) {

@@ -125,13 +125,13 @@ export default defineComponent({
 
     const VIDEO_RECOVERY_TIMEOUT_MS = 8000;
 
-    const VIDEO_FREEZE_THRESHOLD_MS = 2500;
+    const VIDEO_STREAM_STALL_THRESHOLD_MS = 3000;
 
-    const VIDEO_FREEZE_WATCHDOG_INTERVAL_MS = 1000;
+    const VIDEO_STREAM_WATCHDOG_INTERVAL_MS = 1000;
 
-    const VIDEO_FREEZE_ESCALATION_MS = 7000;
+    const VIDEO_STREAM_DIAGNOSTIC_INTERVAL_MS = 5000;
 
-    const VIDEO_FREEZE_CONFIRMATION_COUNT = 2;
+    const VIDEO_STREAM_STALL_CONFIRMATION_COUNT = 2;
 
     const DEFAULT_AUTO_NEW_DISPLAY_DPI = 160;
 
@@ -389,7 +389,7 @@ export default defineComponent({
 
     let videoFrameCallbackHandle: number | null = null;
 
-    let videoFreezeWatchdogTimer: number | null = null;
+    let videoStreamWatchdogTimer: number | null = null;
 
     let lastDisplayResizeRequest: { width: number; height: number } | null = null;
 
@@ -437,11 +437,15 @@ export default defineComponent({
 
     let lastVideoFrameAt = 0;
 
-    let lastVideoFreezeRecoveryAt = 0;
+    let lastVideoStreamPacketAt = 0;
 
-    let lastVideoFreezeRecoveryConnectionId = 0;
+    let lastVideoStreamDiagnosticAt = 0;
 
-    let consecutiveFrozenVideoDetections = 0;
+    let lastInboundVideoPacketsReceived: number | null = null;
+
+    let lastInboundVideoBytesReceived: number | null = null;
+
+    let consecutiveVideoStreamStallDetections = 0;
 
     interface PendingPointerMove {
       pointerId: number;
@@ -753,21 +757,23 @@ export default defineComponent({
       videoFrameCallbackHandle = null;
     };
 
-    const resetVideoFreezeState = () => {
+    const resetVideoStreamWatchdogState = () => {
       lastVideoFrameAt = 0;
-      lastVideoFreezeRecoveryAt = 0;
-      lastVideoFreezeRecoveryConnectionId = 0;
-      consecutiveFrozenVideoDetections = 0;
+      lastVideoStreamPacketAt = 0;
+      lastVideoStreamDiagnosticAt = 0;
+      lastInboundVideoPacketsReceived = null;
+      lastInboundVideoBytesReceived = null;
+      consecutiveVideoStreamStallDetections = 0;
     };
 
-    const stopVideoFreezeWatchdog = () => {
-      if (videoFreezeWatchdogTimer != null) {
-        window.clearInterval(videoFreezeWatchdogTimer);
-        videoFreezeWatchdogTimer = null;
+    const stopVideoStreamWatchdog = () => {
+      if (videoStreamWatchdogTimer != null) {
+        window.clearInterval(videoStreamWatchdogTimer);
+        videoStreamWatchdogTimer = null;
       }
     };
 
-    const shouldMonitorFrozenVideo = (connectionId: number) => {
+    const shouldMonitorVideoStream = (connectionId: number) => {
       if (connectionSchedulerState.suppressAutoReconnect || connectionId !== activeConnectionId) {
         return false;
       }
@@ -784,68 +790,108 @@ export default defineComponent({
       return !!videoElement.value?.srcObject;
     };
 
-    const handleFrozenVideo = (connectionId: number, reason: string) => {
-      if (!shouldMonitorFrozenVideo(connectionId)) {
-        consecutiveFrozenVideoDetections = 0;
+    const getInboundVideoStatsSnapshot = async () => {
+      const videoReceiver = peerConnection?.getReceivers().find(receiver => receiver.track?.kind === 'video');
+      if (!videoReceiver || typeof videoReceiver.getStats !== 'function') {
+        return null;
+      }
+
+      const stats = await videoReceiver.getStats();
+      for (const report of stats.values()) {
+        if (report.type !== 'inbound-rtp' || (report.kind != null && report.kind !== 'video')) {
+          continue;
+        }
+        return {
+          packetsReceived: report.packetsReceived ?? null,
+          bytesReceived: report.bytesReceived ?? null,
+          framesDecoded: report.framesDecoded ?? null,
+          framesDropped: report.framesDropped ?? null,
+          timestamp: report.timestamp ?? null
+        };
+      }
+      return null;
+    };
+
+    const hasInboundVideoStreamAdvanced = (snapshot: Awaited<ReturnType<typeof getInboundVideoStatsSnapshot>>) => {
+      if (!snapshot) {
+        return false;
+      }
+
+      const packetsReceived = typeof snapshot.packetsReceived === 'number' ? snapshot.packetsReceived : null;
+      const bytesReceived = typeof snapshot.bytesReceived === 'number' ? snapshot.bytesReceived : null;
+      const hasBaseline = lastInboundVideoPacketsReceived != null || lastInboundVideoBytesReceived != null;
+      const hasAdvanced =
+        (packetsReceived != null && lastInboundVideoPacketsReceived != null && packetsReceived > lastInboundVideoPacketsReceived) ||
+        (bytesReceived != null && lastInboundVideoBytesReceived != null && bytesReceived > lastInboundVideoBytesReceived);
+
+      lastInboundVideoPacketsReceived = packetsReceived;
+      lastInboundVideoBytesReceived = bytesReceived;
+      return !hasBaseline || hasAdvanced;
+    };
+
+    const handleVideoStreamWatchdog = async (connectionId: number, reason: string) => {
+      if (!shouldMonitorVideoStream(connectionId)) {
+        consecutiveVideoStreamStallDetections = 0;
         return;
       }
-    
+
       const now = performance.now();
-      if (lastVideoFrameAt <= 0 || now - lastVideoFrameAt < VIDEO_FREEZE_THRESHOLD_MS) {
-        consecutiveFrozenVideoDetections = 0;
+      let inboundVideoStats: Awaited<ReturnType<typeof getInboundVideoStatsSnapshot>> = null;
+      try {
+        inboundVideoStats = await getInboundVideoStatsSnapshot();
+      } catch (error) {
+        console.warn('[WebRTC] Failed to read inbound video stats during stream watchdog.', error);
         return;
       }
 
-      consecutiveFrozenVideoDetections += 1;
-      if (consecutiveFrozenVideoDetections < VIDEO_FREEZE_CONFIRMATION_COUNT) {
-        console.warn('[WebRTC] Frozen video detected, waiting for consecutive confirmation before refresh.', {
-          reason,
-          deviceId: deviceId.value,
-          tabKey: activeTabKey.value,
-          consecutiveFrozenVideoDetections,
-          confirmationThreshold: VIDEO_FREEZE_CONFIRMATION_COUNT
-        });
-        return;
-      }
-    
-      const sameRecoveryWindow = lastVideoFreezeRecoveryConnectionId === connectionId;
-      const sinceLastRecovery = sameRecoveryWindow ? now - lastVideoFreezeRecoveryAt : Number.POSITIVE_INFINITY;
-
-      if (!sameRecoveryWindow) {
-        lastVideoFreezeRecoveryAt = now;
-        lastVideoFreezeRecoveryConnectionId = connectionId;
-        status.value = t('Screencast.StatusVideoFrozen', '画面冻结，正在等待恢复...');
-        console.warn('[WebRTC] Frozen video confirmed, deferring scrcpy reset and waiting before transport recovery.', {
-          reason,
-          deviceId: deviceId.value,
-          tabKey: activeTabKey.value,
-          peerConnectionState: peerConnection?.connectionState ?? null
-        });
+      if (hasInboundVideoStreamAdvanced(inboundVideoStats)) {
+        lastVideoStreamPacketAt = now;
+        lastVideoStreamDiagnosticAt = 0;
+        consecutiveVideoStreamStallDetections = 0;
         return;
       }
 
-      if (sinceLastRecovery >= VIDEO_FREEZE_ESCALATION_MS) {
-        console.warn('[WebRTC] Frozen video persisted without recovery, escalating transport recovery.', {
+      if (lastVideoStreamPacketAt <= 0) {
+        lastVideoStreamPacketAt = now;
+        return;
+      }
+
+      if (now - lastVideoStreamPacketAt < VIDEO_STREAM_STALL_THRESHOLD_MS) {
+        consecutiveVideoStreamStallDetections = 0;
+        return;
+      }
+
+      consecutiveVideoStreamStallDetections += 1;
+      if (consecutiveVideoStreamStallDetections < VIDEO_STREAM_STALL_CONFIRMATION_COUNT) {
+        console.warn('[WebRTC] Inbound video RTP stream stopped advancing, waiting for consecutive confirmation.', {
           reason,
           deviceId: deviceId.value,
           tabKey: activeTabKey.value,
-          peerConnectionState: peerConnection?.connectionState ?? null
+          consecutiveVideoStreamStallDetections,
+          confirmationThreshold: VIDEO_STREAM_STALL_CONFIRMATION_COUNT,
+          inboundVideoStats
         });
-        lastVideoFreezeRecoveryAt = now;
-        void (async () => {
-          const restarted = await tryIceRestart(`video_frozen_${reason}`);
-          if (!restarted) {
-            stopConnection();
-            scheduleReconnect(`video_frozen_${reason}`);
-          }
-        })();
+        return;
       }
+
+      if (now - lastVideoStreamDiagnosticAt < VIDEO_STREAM_DIAGNOSTIC_INTERVAL_MS) {
+        return;
+      }
+
+      lastVideoStreamDiagnosticAt = now;
+      console.warn('[WebRTC] Inbound video RTP stream appears stalled while peer connection is still connected.', {
+        reason,
+        deviceId: deviceId.value,
+        tabKey: activeTabKey.value,
+        peerConnectionState: peerConnection?.connectionState ?? null,
+        inboundVideoStats
+      });
     };
 
     const startVideoFrameMonitor = (connectionId: number) => {
       stopVideoFrameCaptureLoop();
-      stopVideoFreezeWatchdog();
-      resetVideoFreezeState();
+      stopVideoStreamWatchdog();
+      resetVideoStreamWatchdogState();
     
       const source = videoElement.value;
       if (!source) {
@@ -854,11 +900,6 @@ export default defineComponent({
     
       const updateFrameActivity = () => {
         lastVideoFrameAt = performance.now();
-        consecutiveFrozenVideoDetections = 0;
-        if (lastVideoFreezeRecoveryConnectionId === connectionId) {
-          lastVideoFreezeRecoveryAt = 0;
-          lastVideoFreezeRecoveryConnectionId = 0;
-        }
       };
     
       const scheduleNextFrame = () => {
@@ -877,9 +918,9 @@ export default defineComponent({
     
       updateFrameActivity();
       scheduleNextFrame();
-      videoFreezeWatchdogTimer = window.setInterval(() => {
-        handleFrozenVideo(connectionId, 'frame_watchdog');
-      }, VIDEO_FREEZE_WATCHDOG_INTERVAL_MS);
+      videoStreamWatchdogTimer = window.setInterval(() => {
+        void handleVideoStreamWatchdog(connectionId, 'inbound_rtp_watchdog');
+      }, VIDEO_STREAM_WATCHDOG_INTERVAL_MS);
     };
 
     const stopPointerMoveFlushLoop = () => {
@@ -2587,8 +2628,8 @@ export default defineComponent({
 
     const cleanupMediaStream = () => {
       stopVideoFrameCaptureLoop();
-      stopVideoFreezeWatchdog();
-      resetVideoFreezeState();
+      stopVideoStreamWatchdog();
+      resetVideoStreamWatchdogState();
       clearPendingReconnect();
       clearPendingResumePlayback();
       lastVideoFrameSize = { width: 0, height: 0 };
@@ -2988,7 +3029,7 @@ export default defineComponent({
     const stopConnection = (preserveForBackground = false, preserveTabKey = activeTabKey.value) => {
       stopScrcpySessionHeartbeat();
       stopFlexDisplayHeartbeat();
-      stopVideoFreezeWatchdog();
+      stopVideoStreamWatchdog();
       clearPendingDisplayResize();
       activePointers.clear();
       pointerGenerations.clear();
@@ -4143,9 +4184,9 @@ export default defineComponent({
       POINTER_MOVE_SAMPLE_INTERVAL_MS,
       SIGNALING_DETACH_DELAY_MS,
       VIDEO_RECOVERY_TIMEOUT_MS,
-      VIDEO_FREEZE_THRESHOLD_MS,
-      VIDEO_FREEZE_WATCHDOG_INTERVAL_MS,
-      VIDEO_FREEZE_ESCALATION_MS,
+      VIDEO_STREAM_STALL_THRESHOLD_MS,
+      VIDEO_STREAM_WATCHDOG_INTERVAL_MS,
+      VIDEO_STREAM_DIAGNOSTIC_INTERVAL_MS,
       DEFAULT_AUTO_NEW_DISPLAY_DPI,
       MIN_NEW_DISPLAY_DPI,
       MAX_NEW_DISPLAY_DPI,
@@ -4259,7 +4300,7 @@ export default defineComponent({
       hasHandledInitialActivation,
       hasUsedInitialConnectionWarmup,
       videoFrameCallbackHandle,
-      videoFreezeWatchdogTimer,
+      videoStreamWatchdogTimer,
       lastDisplayResizeRequest,
       videoContainerResizeObserver,
       dragStartOffset,
@@ -4285,8 +4326,11 @@ export default defineComponent({
       expectedSignalingCloseConnectionId,
       currentScrcpySessionId,
       lastVideoFrameAt,
-      lastVideoFreezeRecoveryAt,
-      lastVideoFreezeRecoveryConnectionId,
+      lastVideoStreamPacketAt,
+      lastVideoStreamDiagnosticAt,
+      lastInboundVideoPacketsReceived,
+      lastInboundVideoBytesReceived,
+      consecutiveVideoStreamStallDetections,
       activeTab,
       hasCastTabs,
       castTabItems,
@@ -4312,10 +4356,10 @@ export default defineComponent({
       hideLastFrameOverlay,
       captureCurrentVideoFrame,
       stopVideoFrameCaptureLoop,
-      resetVideoFreezeState,
-      stopVideoFreezeWatchdog,
-      shouldMonitorFrozenVideo,
-      handleFrozenVideo,
+      resetVideoStreamWatchdogState,
+      stopVideoStreamWatchdog,
+      shouldMonitorVideoStream,
+      handleVideoStreamWatchdog,
       startVideoFrameMonitor,
       stopScrcpySessionHeartbeat,
       startScrcpySessionHeartbeat,

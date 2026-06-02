@@ -14,6 +14,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/ice/v4"
+	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	pion "github.com/pion/webrtc/v4"
 )
 
@@ -21,7 +23,10 @@ type SettingsProvider interface {
 	GetWebRtcNetworkSettings(ctx context.Context) (domainsettings.WebRtcNetworkSettings, error)
 }
 
-const signalingDisconnectGracePeriod = 20 * time.Second
+const (
+	signalingDisconnectGracePeriod = 20 * time.Second
+	nackResponderCachePackets      = 2048
+)
 
 func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, sessionID string, conn *websocket.Conn, settings SettingsProvider, runtime domainscrcpy.Runtime) error {
 	debugWebRTC := s.debugWebRTC
@@ -291,7 +296,24 @@ func (s *Service) buildPeerConfiguration(ctx context.Context, settings SettingsP
 	}
 	rewriteCandidates = buildCandidateRewriter(networkSettings.HostCandidateOverrideEnabled, overrideIPs, publishPort)
 
-	return pion.NewAPI(pion.WithSettingEngine(settingEngine)), config, rewriteCandidates, nil
+	mediaEngine := &pion.MediaEngine{}
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		return nil, pion.Configuration{}, nil, err
+	}
+	interceptorRegistry := &interceptor.Registry{}
+	if err := pion.RegisterDefaultInterceptorsWithOptions(
+		mediaEngine,
+		interceptorRegistry,
+		pion.WithNackResponderOptions(nack.ResponderSize(nackResponderCachePackets)),
+	); err != nil {
+		return nil, pion.Configuration{}, nil, err
+	}
+
+	return pion.NewAPI(
+		pion.WithSettingEngine(settingEngine),
+		pion.WithMediaEngine(mediaEngine),
+		pion.WithInterceptorRegistry(interceptorRegistry),
+	), config, rewriteCandidates, nil
 }
 
 func (s *Service) handleSessionDescription(peerConnection *pion.PeerConnection, envelope map[string]any, writeJSON func(any) error, rewriteCandidates func(pion.ICECandidateInit) []pion.ICECandidateInit) error {

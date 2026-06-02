@@ -309,12 +309,39 @@ func (b *scrcpyVideoBridge) readRTCP(sender *pion.RTPSender) {
 			continue
 		}
 		for _, packet := range packets {
-			switch packet.(type) {
+			switch rtcpPacket := packet.(type) {
+			case *rtcp.TransportLayerNack:
+				if b.logger != nil {
+					nackCount := 0
+					for _, pair := range rtcpPacket.Nacks {
+						pair.Range(func(_ uint16) bool {
+							nackCount++
+							return true
+						})
+					}
+					b.logger.Info("webrtc rtcp nack received",
+						"mediaSSRC", rtcpPacket.MediaSSRC,
+						"senderSSRC", rtcpPacket.SenderSSRC,
+						"nackCount", nackCount,
+					)
+				}
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
 				if b.debugEnabled && b.logger != nil {
 					b.logger.Debug("webrtc rtcp refresh requested", "packetType", fmt.Sprintf("%T", packet))
 				}
 				b.requestRefreshIfStalled()
+			case *rtcp.ReceiverReport:
+				if b.debugEnabled && b.logger != nil {
+					for _, report := range rtcpPacket.Reports {
+						b.logger.Debug("webrtc rtcp receiver report",
+							"ssrc", report.SSRC,
+							"fractionLost", report.FractionLost,
+							"totalLost", report.TotalLost,
+							"jitter", report.Jitter,
+							"lastSequenceNumber", report.LastSequenceNumber,
+						)
+					}
+				}
 			}
 		}
 	}

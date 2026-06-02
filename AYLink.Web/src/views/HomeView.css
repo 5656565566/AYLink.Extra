@@ -128,11 +128,28 @@
   grid-template-columns: minmax(0, 1fr) 220px 150px 180px;
   padding: 16px 24px;
   align-items: center;
+  position: relative;
+  cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .list-row:hover {
   background-color: var(--fluent-control-fill-secondary);
+}
+
+.list-row--selected {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.list-row--selected::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--fluent-accent-default);
 }
 
 .col-info {

@@ -24,11 +24,11 @@ export function useHomeDevices() {
   const { t } = useI18n();
 
   const devices = ref<DeviceSummary[]>([]);
+  const selectedDeviceIds = ref<number[]>([]);
   const loading = ref(true);
   const showAddDialog = ref(false);
   const showMoreActionsMenu = ref(false);
   const showGroupPickerMenu = ref(false);
-  const isMultiSelectMode = ref(false);
   const adding = ref(false);
   const addError = ref('');
   const renaming = ref(false);
@@ -86,6 +86,8 @@ export function useHomeDevices() {
     });
   });
 
+  const selectedDeviceCount = computed(() => selectedDeviceIds.value.length);
+
   const canManageDevices = computed(() => hasPermission('devices.manage'));
   const canControlDevices = computed(() => hasPermission('devices.control'));
   const canAccessFiles = computed(() => hasPermission('files.access'));
@@ -116,8 +118,28 @@ export function useHomeDevices() {
 
   const selectGroup = (groupId: number) => {
     selectedGroupId.value = groupId;
+    selectedDeviceIds.value = [];
     showGroupPickerMenu.value = false;
     groupKeyword.value = '';
+  };
+
+  const isDeviceSelected = (deviceId: number | string) => {
+    const normalizedId = Number(deviceId);
+    return selectedDeviceIds.value.includes(normalizedId);
+  };
+
+  const toggleDeviceSelection = (deviceId: number | string) => {
+    const normalizedId = Number(deviceId);
+    if (!Number.isFinite(normalizedId)) {
+      return;
+    }
+
+    if (selectedDeviceIds.value.includes(normalizedId)) {
+      selectedDeviceIds.value = selectedDeviceIds.value.filter((id) => id !== normalizedId);
+      return;
+    }
+
+    selectedDeviceIds.value = [...selectedDeviceIds.value, normalizedId];
   };
 
   const toggleMenu = (deviceId: number) => {
@@ -159,6 +181,8 @@ export function useHomeDevices() {
 
       if (response.ok) {
         devices.value = await response.json();
+        const validDeviceIds = new Set(devices.value.map((device) => Number(device.Id)));
+        selectedDeviceIds.value = selectedDeviceIds.value.filter((id) => validDeviceIds.has(id));
       }
     } catch (error) {
       if (!isAbortError(error)) {
@@ -214,17 +238,47 @@ export function useHomeDevices() {
     await fetchDevices();
   };
 
-  const toggleMultiSelectMode = () => {
+  const deleteSelectedDevices = async () => {
     showMoreActionsMenu.value = false;
-    isMultiSelectMode.value = !isMultiSelectMode.value;
 
-    notificationService.show({
-      type: 'info',
-      title: t('HomePage.MultiSelectState', '状态切换'),
-      message: isMultiSelectMode.value
-        ? t('HomePage.MultiSelectEnabled', '已开启多选模式')
-        : t('HomePage.MultiSelectDisabled', '已退出多选模式')
-    });
+    if (selectedDeviceIds.value.length === 0) {
+      return;
+    }
+
+    const confirmed = await dialogService.confirm(
+      t('Devices.DeleteConfirmTitle', '移除设备'),
+      t('HomeView.DeleteSelectedDevicesConfirm', '确定要移除选中的设备吗？'),
+      t('Common.Delete', '删除'),
+      t('Common.Cancel', '取消')
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const deviceIds = [...selectedDeviceIds.value];
+    let failureCount = 0;
+
+    await Promise.all(deviceIds.map(async (deviceId) => {
+      try {
+        const response = await apiFetch(`/api/devices/${deviceId}`, { method: 'DELETE' });
+        if (!response.ok) {
+          failureCount += 1;
+        }
+      } catch (error) {
+        failureCount += 1;
+      }
+    }));
+
+    selectedDeviceIds.value = [];
+    await fetchDevices();
+
+    if (failureCount > 0) {
+      notificationService.show({
+        type: 'warning',
+        title: t('Common.OperationFailed', '操作失败'),
+        message: t('HomeView.DeleteSelectedDevicesPartialFailure', '部分设备删除失败，请稍后重试。')
+      });
+    }
   };
 
   const resetAddDeviceForm = () => {
@@ -486,11 +540,12 @@ export function useHomeDevices() {
     t,
     devices,
     visibleDevices,
+    selectedDeviceIds,
+    selectedDeviceCount,
     loading,
     showAddDialog,
     showMoreActionsMenu,
     showGroupPickerMenu,
-    isMultiSelectMode,
     adding,
     addError,
     renaming,
@@ -521,13 +576,15 @@ export function useHomeDevices() {
     formatDeviceGroups,
     toggleGroupPickerMenu,
     selectGroup,
+    isDeviceSelected,
+    toggleDeviceSelection,
     toggleMenu,
     toggleMoreActionsMenu,
     closeMenu,
     fetchDevices,
     fetchAvailableGroups,
     handleRefreshDevices,
-    toggleMultiSelectMode,
+    deleteSelectedDevices,
     addDevice,
     deleteDevice,
     openRenameDialog,

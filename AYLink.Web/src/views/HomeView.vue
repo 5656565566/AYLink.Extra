@@ -65,42 +65,22 @@
                 </svg>
                 {{ t('HomeView.RefreshDevices', '刷新设备') }}
               </button>
-              <button class="dropdown-item" @click.stop="toggleMultiSelectMode">
-                <svg class="item-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M2.5 4H13.5M2.5 8H13.5M2.5 12H13.5M1.5 4H1.51M1.5 8H1.51M1.5 12H1.51" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                {{ t('HomeView.MultiSelectMode', '多选模式') }}
-              </button>
-              <button class="dropdown-item danger" disabled>
+              <button
+                v-if="canManageDevices"
+                class="dropdown-item danger"
+                :disabled="selectedDeviceCount === 0"
+                @click.stop="deleteSelectedDevices"
+              >
                 <svg class="item-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M5.5 3.5V2.5C5.5 1.94772 5.94772 1.5 6.5 1.5H9.5C10.0523 1.5 10.5 1.94772 10.5 2.5V3.5M3 3.5H13M4 3.5V12.5C4 13.3284 4.67157 14 5.5 14H10.5C11.3284 14 12 13.3284 12 12.5V3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                {{ t('HomeView.DeleteDevices', '删除设备') }}
-              </button>
-              <button class="dropdown-item" disabled>
-                <svg class="item-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M5 3L11 8L5 13V3Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-                  <path d="M12 3V13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                </svg>
-                {{ t('HomeView.RunScript', '运行脚本') }}
+                {{ t('HomeView.DeleteSelectedDevices', '删除设备') }}<template v-if="selectedDeviceCount > 0"> ({{ selectedDeviceCount }})</template>
               </button>
               <button class="dropdown-item" disabled>
                 <svg class="item-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M8 2V5M8 11V14M11 8H14M2 8H5M5.5 5.5L4 4M10.5 10.5L12 12M10.5 5.5L12 4M5.5 10.5L4 12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                 </svg>
                 {{ t('HomeView.SyncControl', '同步控制') }}
-              </button>
-              <button class="dropdown-item" disabled>
-                <svg class="item-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
-                {{ t('HomeView.AddGroup', '添加分组') }}
-              </button>
-              <button class="dropdown-item danger" disabled>
-                <svg class="item-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M5.5 3.5V2.5C5.5 1.94772 5.94772 1.5 6.5 1.5H9.5C10.0523 1.5 10.5 1.94772 10.5 2.5V3.5M3 3.5H13M4 3.5V12.5C4 13.3284 4.67157 14 5.5 14H10.5C11.3284 14 12 13.3284 12 12.5V3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                {{ t('HomeView.DeleteGroup', '删除分组') }}
               </button>
             </div>
           </div>
@@ -124,7 +104,13 @@
         <p>{{ t('HomeView.NoDevices', '没有可用的设备，请点击「添加设备」按钮') }}</p>
       </div>
       <div v-else class="list-body">
-        <div v-for="device in visibleDevices" :key="device.Id" class="list-row">
+        <div
+          v-for="device in visibleDevices"
+          :key="device.Id"
+          class="list-row"
+          :class="{ 'list-row--selected': isDeviceSelected(device.Id) }"
+          @click="toggleDeviceSelection(device.Id)"
+        >
           <div class="col-info">
             <div class="device-name">{{ device.Name || device.Serial || t('Devices.UnknownDevice', '未知设备') }}</div>
             <div class="device-ip">{{ device.IpAddress ? `${device.IpAddress}:${device.Port}` : device.Serial }}</div>
@@ -143,13 +129,13 @@
             </div>
           </div>
           <div class="col-actions">
-            <button v-if="canControlDevices" class="icon-btn" :title="t('HomeView.StartCast', '启动投屏')" @click="openScreencast(device)">
+            <button v-if="canControlDevices" class="icon-btn" :title="t('HomeView.StartCast', '启动投屏')" @click.stop="openScreencast(device)">
               <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 3.5L12.5 8L4.5 12.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <button v-if="canAccessFiles" class="icon-btn" :title="t('FilePage.Title', '文件管理')" @click="openFileManager(device)">
+            <button v-if="canAccessFiles" class="icon-btn" :title="t('FilePage.Title', '文件管理')" @click.stop="openFileManager(device)">
               <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 3.5C2 2.67157 2.67157 2 3.5 2H6.5L8 4H12.5C13.3284 4 14 4.67157 14 5.5V12.5C14 13.3284 13.3284 14 12.5 14H3.5C2.67157 14 2 13.3284 2 12.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <button v-if="canControlDevices" class="icon-btn" :title="t('AppPage.Title', '应用管理')" @click="openAppManager(device)">
+            <button v-if="canControlDevices" class="icon-btn" :title="t('AppPage.Title', '应用管理')" @click.stop="openAppManager(device)">
               <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 4.5H13M6 8H13M6 11.5H13M3 4.5H3.01M3 8H3.01M3 11.5H3.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <div v-if="canControlDevices || canAccessTerminal || canManageDevices" class="dropdown-container">

@@ -17,11 +17,12 @@ import (
 )
 
 type App struct {
-	config     config.Config
-	logger     logging.Logger
-	httpServer *http.Server
-	auth       *authservice.Service
-	devices    *deviceservice.Service
+	config           config.Config
+	logger           logging.Logger
+	httpServer       *http.Server
+	auth             *authservice.Service
+	tokenMaintenance *authservice.TokenMaintenance
+	devices          *deviceservice.Service
 }
 
 func New() (*App, error) {
@@ -65,11 +66,12 @@ func New() (*App, error) {
 	}
 
 	return &App{
-		config:     cfg,
-		logger:     logger,
-		httpServer: server,
-		auth:       authSvc,
-		devices:    deviceSvc,
+		config:           cfg,
+		logger:           logger,
+		httpServer:       server,
+		auth:             authSvc,
+		tokenMaintenance: authservice.NewTokenMaintenance(authRepo, logger, 30*time.Minute),
+		devices:          deviceSvc,
 	}, nil
 }
 
@@ -92,6 +94,7 @@ func (a *App) Run(ctx context.Context) error {
 	}()
 
 	go a.runDeviceReconnectLoop(ctx)
+	go a.runTokenMaintenance(ctx)
 
 	select {
 	case <-ctx.Done():
@@ -103,6 +106,14 @@ func (a *App) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func (a *App) runTokenMaintenance(ctx context.Context) {
+	if a.tokenMaintenance == nil {
+		return
+	}
+
+	a.tokenMaintenance.Run(ctx)
 }
 
 func (a *App) runDeviceReconnectLoop(ctx context.Context) {

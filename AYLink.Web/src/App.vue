@@ -18,7 +18,7 @@ const canViewFiles = computed(() => hasPermission('files.access'));
 const canUseScreencast = computed(() => hasPermission('devices.control'));
 const canUseApps = computed(() => hasPermission('devices.control'));
 const canUseTerminal = computed(() => hasPermission('terminal.access'));
-const canViewSettings = computed(() => !!auth.currentUser.value);
+const canViewSettings = computed(() => auth.isAuthenticated.value);
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value;

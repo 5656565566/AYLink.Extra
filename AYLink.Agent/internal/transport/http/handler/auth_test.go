@@ -10,19 +10,25 @@ import (
 	"time"
 
 	domainauth "aylink-agent/internal/domain/auth"
+	authservice "aylink-agent/internal/service/auth"
 	"aylink-agent/internal/transport/http/middleware"
 )
 
 type fakeAuthHandlerService struct {
-	loginResult     *domainauth.LoginResult
-	loginErr        error
-	loginUser       string
-	loginPass       string
-	logoutErr       error
-	logoutAllErr    error
-	logoutAccess    string
-	logoutRefresh   string
-	logoutAllUserID int
+	loginResult      *domainauth.LoginResult
+	loginErr         error
+	loginUser        string
+	loginPass        string
+	refreshResult    *domainauth.LoginResult
+	refreshErr       error
+	currentUser      *domainauth.User
+	currentUserErr   error
+	currentUserToken string
+	logoutErr        error
+	logoutAllErr     error
+	logoutAccess     string
+	logoutRefresh    string
+	logoutAllUserID  int
 }
 
 func (f *fakeAuthHandlerService) Login(_ context.Context, username, password string) (*domainauth.LoginResult, error) {
@@ -31,11 +37,13 @@ func (f *fakeAuthHandlerService) Login(_ context.Context, username, password str
 	return f.loginResult, f.loginErr
 }
 
-func (f *fakeAuthHandlerService) Refresh(context.Context, string) (*domainauth.LoginResult, error) {
-	panic("unexpected call")
+func (f *fakeAuthHandlerService) Refresh(_ context.Context, refreshToken string) (*domainauth.LoginResult, error) {
+	f.logoutRefresh = refreshToken
+	return f.refreshResult, f.refreshErr
 }
-func (f *fakeAuthHandlerService) CurrentUser(context.Context, string) (*domainauth.User, error) {
-	panic("unexpected call")
+func (f *fakeAuthHandlerService) CurrentUser(_ context.Context, accessToken string) (*domainauth.User, error) {
+	f.currentUserToken = accessToken
+	return f.currentUser, f.currentUserErr
 }
 func (f *fakeAuthHandlerService) Logout(_ context.Context, accessToken, refreshToken string) error {
 	f.logoutAccess = accessToken
@@ -109,6 +117,82 @@ func TestAuthHandlerLoginUsesInjectedInterface(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerLoginReturnsUnauthorizedForInvalidCredentials(t *testing.T) {
+	service := &fakeAuthHandlerService{loginErr: authservice.ErrInvalidCredentials}
+	handler := NewAuthHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"tester","password":"bad"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.Login(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+}
+
+func TestAuthHandlerLoginReturnsInternalServerErrorForUnexpectedFailure(t *testing.T) {
+	service := &fakeAuthHandlerService{loginErr: errors.New("database locked")}
+	handler := NewAuthHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"tester","password":"secret"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.Login(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+}
+
+func TestAuthHandlerRefreshReturnsUnauthorizedForInvalidRefreshToken(t *testing.T) {
+	service := &fakeAuthHandlerService{refreshErr: authservice.ErrInvalidRefresh}
+	handler := NewAuthHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", strings.NewReader(`{"refreshToken":"bad"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.Refresh(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+}
+
+func TestAuthHandlerRefreshReturnsInternalServerErrorForUnexpectedFailure(t *testing.T) {
+	service := &fakeAuthHandlerService{refreshErr: errors.New("database locked")}
+	handler := NewAuthHandler(service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", strings.NewReader(`{"refreshToken":"token"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.Refresh(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+}
+
+func TestAuthHandlerMeReturnsInternalServerErrorForUnexpectedFailure(t *testing.T) {
+	service := &fakeAuthHandlerService{
+		currentUserErr: errors.New("database locked"),
+	}
+	handler := NewAuthHandler(service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1, AccessToken: "access-token"}))
+	recorder := httptest.NewRecorder()
+
+	handler.Me(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	if service.currentUserToken != "access-token" {
+		t.Fatalf("expected CurrentUser to receive access token, got %q", service.currentUserToken)
+	}
+}
+
 func TestAuthHandlerLogoutReturnsBadRequestForInvalidJSON(t *testing.T) {
 	handler := NewAuthHandler(&fakeAuthHandlerService{})
 
@@ -155,5 +239,21 @@ func TestAuthHandlerLogoutAllPropagatesServiceError(t *testing.T) {
 	}
 	if service.logoutAllUserID != 9 {
 		t.Fatalf("expected LogoutAll to receive user id 9, got %d", service.logoutAllUserID)
+	}
+}
+
+func TestAuthHandlerUpdateUserReturnsStructuredBadRequestForInvalidUserID(t *testing.T) {
+	handler := NewAuthHandler(&fakeAuthHandlerService{})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/accounts/users/not-a-number", strings.NewReader(`{"username":"tester"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.UpdateUser(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `INVALID_USER_ID`) {
+		t.Fatalf("expected invalid user id payload, got %s", recorder.Body.String())
 	}
 }

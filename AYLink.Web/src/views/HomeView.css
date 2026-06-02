@@ -406,10 +406,17 @@
 .group-picker-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 320px;
-  overflow-y: auto;
+  gap: 4px;
   padding: 8px;
+}
+
+.group-picker-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(calc(5 * 40px + 4 * 4px), calc(100vh - 260px));
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .group-option {

@@ -27,17 +27,22 @@
               >
                 <span class="group-option__name">{{ t('HomeView.AllDevices', '全部设备') }}</span>
               </button>
-              <button
-                v-for="group in filteredAvailableGroups"
-                :key="group.Id"
-                class="group-option"
-                :class="{ selected: selectedGroupId === group.Id }"
-                @click="selectGroup(group.Id)"
-              >
-                <span class="group-option__name">{{ group.Name }}</span>
-              </button>
-              <div v-if="filteredAvailableGroups.length === 0" class="group-picker-empty">
-                {{ t('HomeView.NoGroupsMatched', '没有匹配的分组') }}
+              <div class="group-picker-results">
+                <button
+                  v-for="group in filteredAvailableGroups"
+                  :key="group.Id"
+                  class="group-option"
+                  :class="{ selected: selectedGroupId === group.Id }"
+                  @click="selectGroup(group.Id)"
+                >
+                  <span class="group-option__name">{{ group.Name }}</span>
+                </button>
+                <div v-if="availableGroups.length === 0" class="group-picker-empty">
+                  {{ t('Settings.EmptyDeviceGroups', '暂无设备分组') }}
+                </div>
+                <div v-else-if="hasGroupKeyword && filteredAvailableGroups.length === 0" class="group-picker-empty">
+                  {{ t('HomeView.NoGroupsMatched', '没有匹配的分组') }}
+                </div>
               </div>
             </div>
           </div>

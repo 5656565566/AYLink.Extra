@@ -327,6 +327,60 @@ func TestHTTPSettingsWebRtcRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHTTPSettingsManagementEndpointsLoadForAdmin(t *testing.T) {
+	env := newIntegrationEnv(t)
+	env.createAdminUser(t, "settings-page-admin", "secret")
+	env.createDevice(t, "Settings Device", "settings-device-1")
+
+	tokens := env.login(t, "settings-page-admin", "secret")
+
+	endpoints := []string{
+		"/api/settings/language",
+		"/api/settings/webrtc-network",
+		"/api/devices",
+		"/api/accounts/users",
+		"/api/accounts/roles",
+		"/api/device-groups",
+	}
+
+	for _, endpoint := range endpoints {
+		statusCode, body := env.doJSON(t, http.MethodGet, endpoint, tokens.AccessToken, nil)
+		if statusCode != http.StatusOK {
+			t.Fatalf("expected GET %s to return 200, got %d: %s", endpoint, statusCode, string(body))
+		}
+	}
+}
+
+func TestHTTPSettingsManagementEndpointsEnforcePermissions(t *testing.T) {
+	env := newIntegrationEnv(t)
+	env.createUserWithPermissions(t, "settings-page-user", "secret", []string{"settings.view", "devices.view"})
+	env.createDevice(t, "Visible Device", "visible-device-1")
+
+	tokens := env.login(t, "settings-page-user", "secret")
+
+	statusCode, body := env.doJSON(t, http.MethodGet, "/api/settings/language", tokens.AccessToken, nil)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected settings language GET 200, got %d: %s", statusCode, string(body))
+	}
+
+	statusCode, body = env.doJSON(t, http.MethodGet, "/api/settings/webrtc-network", tokens.AccessToken, nil)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected webrtc settings GET 200, got %d: %s", statusCode, string(body))
+	}
+
+	statusCode, body = env.doJSON(t, http.MethodGet, "/api/devices", tokens.AccessToken, nil)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected devices GET 200, got %d: %s", statusCode, string(body))
+	}
+
+	for _, endpoint := range []string{"/api/accounts/users", "/api/accounts/roles", "/api/device-groups"} {
+		statusCode, body = env.doJSON(t, http.MethodGet, endpoint, tokens.AccessToken, nil)
+		if statusCode != http.StatusForbidden {
+			t.Fatalf("expected GET %s to return 403, got %d: %s", endpoint, statusCode, string(body))
+		}
+	}
+}
+
 func TestHTTPRefreshRotatesTokensAndAllowsAuthenticatedAccess(t *testing.T) {
 	env := newIntegrationEnv(t)
 	env.createAdminUser(t, "refresh-admin", "secret")

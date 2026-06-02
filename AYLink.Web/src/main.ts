@@ -7,9 +7,15 @@ import { initializeI18n } from './services/i18n'
 import { initializeAuth } from './services/auth'
 import './services/background'
 
-initializeTheme()
-void initializeAuth()
-void initializeI18n()
-const app = createApp(App)
-app.use(router)
-app.mount('#app')
+async function bootstrap() {
+  initializeTheme()
+  await initializeAuth()
+  await initializeI18n()
+
+  const app = createApp(App)
+  app.use(router)
+  await router.isReady()
+  app.mount('#app')
+}
+
+void bootstrap()

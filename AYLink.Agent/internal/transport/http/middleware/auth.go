@@ -3,11 +3,14 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
 
 	domainauth "aylink-agent/internal/domain/auth"
+	"aylink-agent/internal/infra/logging"
+	authservice "aylink-agent/internal/service/auth"
 )
 
 // IdentityKey 作为上下文的键 存储用户认证凭据
@@ -19,7 +22,7 @@ type AuthService interface {
 	ValidateAccessToken(ctx context.Context, accessToken string) (*domainauth.Identity, error)
 }
 
-func Auth(authService AuthService) func(http.Handler) http.Handler {
+func Auth(authService AuthService, logger logging.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearerToken(r)
@@ -29,7 +32,19 @@ func Auth(authService AuthService) func(http.Handler) http.Handler {
 			}
 
 			identity, err := authService.ValidateAccessToken(r.Context(), token)
-			if err != nil || identity == nil {
+			if err != nil {
+				if errors.Is(err, authservice.ErrUnauthorized) {
+					writeUnauthorized(w)
+					return
+				}
+
+				if logger != nil {
+					logger.Error("auth middleware validate access token failed", "path", r.URL.Path, "error", err)
+				}
+				writeInternalServerError(w)
+				return
+			}
+			if identity == nil {
 				writeUnauthorized(w)
 				return
 			}
@@ -82,6 +97,19 @@ func writeForbidden(w http.ResponseWriter) {
 			"code":       "FORBIDDEN",
 			"messageKey": "Errors.PermissionDenied",
 			"message":    "Permission denied",
+		},
+	}
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeInternalServerError(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	payload := map[string]any{
+		"error": map[string]string{
+			"code":       "INTERNAL_SERVER_ERROR",
+			"messageKey": "Errors.InternalServerError",
+			"message":    "Internal server error",
 		},
 	}
 	_ = json.NewEncoder(w).Encode(payload)

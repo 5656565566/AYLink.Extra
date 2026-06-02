@@ -3,7 +3,6 @@ import { sendApiRequest } from '../core/http/client';
 import { readLocalString, writeLocalString } from '../core/storage/browserStorage';
 import { storageKeys } from '../core/storage/keys';
 import type { LanguageOption, LanguagePayload, LocalePayload, MessageTree } from '../types/i18n';
-import { getAccessToken } from './auth';
 import { apiFetch } from '../utils/api';
 
 const LANGUAGE_STORAGE_KEY = storageKeys.app.language;
@@ -63,11 +62,6 @@ export async function setLocale(locale: string, persistToServer = true) {
 }
 
 export async function loadServerLocale() {
-  const token = getAccessToken();
-  if (!token) {
-    return;
-  }
-
   const response = await apiFetch('/api/settings/language');
 
   if (!response.ok) {
@@ -121,11 +115,6 @@ async function loadLocaleMessages(locale: string) {
 }
 
 async function saveServerLocale(locale: string) {
-  const token = getAccessToken();
-  if (!token) {
-    return;
-  }
-
   const response = await apiFetch('/api/settings/language', {
     method: 'PUT',
     headers: {

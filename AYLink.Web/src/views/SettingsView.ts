@@ -1,11 +1,12 @@
 import { defineComponent } from 'vue';
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import SettingSection from '../components/SettingSection.vue';
 import SettingItem from '../components/SettingItem.vue';
 import { useI18n } from '../composables/useI18n';
 import { backgroundEnabled, backgroundImages, addBackgroundImages, removeBackgroundImage, setBackgroundEnabled } from '../services/background';
 import { useAppSettings } from '../services/appSettings';
+import { useDialog } from '../services/dialog';
 import { useTheme, type ThemeMode } from '../services/theme';
 import { hasPermission, logout, useAuth } from '../services/auth';
 import { useNotification } from '../services/notification';
@@ -27,6 +28,54 @@ export default defineComponent({
     SettingItem
   },
   setup() {
+    interface DeviceGroupSummary {
+      Id: number;
+      Name: string;
+      Description?: string;
+      DeviceCount?: number;
+    }
+
+    interface DeviceGroupItem extends DeviceGroupSummary {
+      RoleCount?: number;
+      UserCount?: number;
+      CreatedAt?: string;
+      UpdatedAt?: string;
+    }
+
+    interface SettingsDeviceItem {
+      Id: number;
+      Name?: string | null;
+      Serial?: string | null;
+      Status?: string | null;
+      Groups?: DeviceGroupSummary[] | null;
+    }
+
+    interface SettingsRoleSummary {
+      Id: number;
+      Name: string;
+      Description: string;
+    }
+
+    interface SettingsRoleItem {
+      Id: number;
+      Name: string;
+      Description: string;
+      IsInternal: boolean;
+      Permissions: string[];
+      DeviceGroups?: DeviceGroupSummary[] | null;
+    }
+
+    interface SettingsUserItem {
+      Id: number;
+      Username: string;
+      IsActive: boolean;
+      Roles: SettingsRoleSummary[];
+      DirectDeviceGroups?: DeviceGroupSummary[] | null;
+      EffectiveDeviceGroups?: DeviceGroupSummary[] | null;
+      EffectiveDeviceCount?: number;
+      EffectiveDeviceGroupCount?: number;
+    }
+
     const { themeMode, accentColor, setThemeMode, setAccentColor, resetTheme } = useTheme();
 
     const { t, currentLocale, languages, setLocale, loadServerLocale } = useI18n();
@@ -36,18 +85,20 @@ export default defineComponent({
     const router = useRouter();
 
     const auth = useAuth();
+    const dialogService = useDialog();
 
     const currentUser = auth.currentUser;
 
     const notifications = useNotification();
 
-    const canManageAccounts = hasPermission('accounts.manage');
+    const canManageAccounts = computed(() => hasPermission('accounts.manage'));
+    const canManageDevices = computed(() => hasPermission('devices.manage'));
 
-    const canViewRemoteSettings = hasPermission('settings.view');
+    const canViewRemoteSettings = computed(() => hasPermission('settings.view'));
 
-    const canManageRemoteSettings = hasPermission('settings.manage');
+    const canManageRemoteSettings = computed(() => hasPermission('settings.manage'));
 
-    const canChangeOwnPassword = hasPermission('accounts.change-password');
+    const canChangeOwnPassword = computed(() => hasPermission('accounts.change-password'));
 
     const appVersionDescription = ref('1.0.0');
 
@@ -123,8 +174,30 @@ export default defineComponent({
     const showChangePasswordDialog = ref(false);
 
     const showBackgroundDialog = ref(false);
+    const showGroupDialog = ref(false);
 
     const changingPassword = ref(false);
+    const groupManagementLoading = ref(false);
+    const groupManagementSaving = ref(false);
+    const groupManagementError = ref('');
+    const deviceGroupItems = ref<DeviceGroupItem[]>([]);
+    const groupManagementDevices = ref<SettingsDeviceItem[]>([]);
+    const groupManagementUsers = ref<SettingsUserItem[]>([]);
+    const groupManagementRoles = ref<SettingsRoleItem[]>([]);
+    const isGroupManagementListExpanded = ref(true);
+    const groupSearchKeyword = ref('');
+    const deviceSearchKeyword = ref('');
+    const roleSearchKeyword = ref('');
+    const userSearchKeyword = ref('');
+    const groupDialogMode = ref<'create' | 'edit'>('create');
+    const editingGroupId = ref<number | null>(null);
+    const groupForm = ref({
+      name: '',
+      description: '',
+      deviceIds: [] as number[],
+      roleIds: [] as number[],
+      userIds: [] as number[],
+    });
 
     const changePasswordError = ref('');
 
@@ -132,6 +205,52 @@ export default defineComponent({
       currentPassword: '',
       newPassword: '',
       confirmPassword: ''
+    });
+
+    const canManageGroupSection = computed(() => canManageAccounts.value || canManageDevices.value);
+
+    const filteredDeviceGroups = computed(() => {
+      const keyword = groupSearchKeyword.value.trim().toLowerCase();
+      if (!keyword) {
+        return deviceGroupItems.value;
+      }
+      return deviceGroupItems.value.filter((group) => {
+        const haystack = `${group.Name} ${group.Description || ''}`.toLowerCase();
+        return haystack.includes(keyword);
+      });
+    });
+
+    const filteredGroupDevices = computed(() => {
+      const keyword = deviceSearchKeyword.value.trim().toLowerCase();
+      if (!keyword) {
+        return groupManagementDevices.value;
+      }
+      return groupManagementDevices.value.filter((device) => {
+        const haystack = `${device.Name || ''} ${device.Serial || ''}`.toLowerCase();
+        return haystack.includes(keyword);
+      });
+    });
+
+    const filteredGroupRoles = computed(() => {
+      const keyword = roleSearchKeyword.value.trim().toLowerCase();
+      if (!keyword) {
+        return groupManagementRoles.value;
+      }
+      return groupManagementRoles.value.filter((role) => {
+        const haystack = `${role.Name} ${role.Description || ''}`.toLowerCase();
+        return haystack.includes(keyword);
+      });
+    });
+
+    const filteredGroupUsers = computed(() => {
+      const keyword = userSearchKeyword.value.trim().toLowerCase();
+      if (!keyword) {
+        return groupManagementUsers.value;
+      }
+      return groupManagementUsers.value.filter((user) => {
+        const haystack = `${user.Username}`.toLowerCase();
+        return haystack.includes(keyword);
+      });
     });
 
     let isSettingInternally = false;
@@ -149,7 +268,7 @@ export default defineComponent({
     watch(
       [webrtcTransportPolicy, webrtcServers, webrtcHostCandidateOverrideEnabled, webrtcHostCandidateOverrideIPsText, webrtcHostCandidatePortMin, webrtcHostCandidatePortMax, webrtcSinglePortMuxEnabled, webrtcSinglePortMuxBindPort, webrtcSinglePortMuxPublishPort],
       () => {
-        if (isSettingInternally || !canManageRemoteSettings) return;
+        if (isSettingInternally || !canManageRemoteSettings.value) return;
 
         webrtcSaving.value = true;
         webrtcStatusMessage.value = t('Settings.Saving', '保存中...');
@@ -197,7 +316,7 @@ export default defineComponent({
     }
 
     function onLocaleChange(event: Event) {
-      void setLocale((event.target as HTMLSelectElement).value, canManageRemoteSettings);
+      void setLocale((event.target as HTMLSelectElement).value, canManageRemoteSettings.value);
     }
 
     function onBackgroundMuteChange(event: Event) {
@@ -513,6 +632,337 @@ export default defineComponent({
       router.push({ name: 'account-settings' });
     }
 
+    function resetGroupForm() {
+      editingGroupId.value = null;
+      groupDialogMode.value = 'create';
+      groupForm.value = {
+        name: '',
+        description: '',
+        deviceIds: [],
+        roleIds: [],
+        userIds: [],
+      };
+      groupManagementError.value = '';
+      deviceSearchKeyword.value = '';
+      roleSearchKeyword.value = '';
+      userSearchKeyword.value = '';
+    }
+
+    function openCreateGroupDialog() {
+      resetGroupForm();
+      showGroupDialog.value = true;
+    }
+
+    function toggleGroupManagementList() {
+      isGroupManagementListExpanded.value = !isGroupManagementListExpanded.value;
+    }
+
+    function populateGroupFormFromGroup(group: DeviceGroupItem) {
+      editingGroupId.value = group.Id;
+      groupForm.value.name = group.Name;
+      groupForm.value.description = group.Description || '';
+      groupForm.value.deviceIds = groupManagementDevices.value
+        .filter((device) => Array.isArray(device.Groups) && device.Groups.some((item) => item.Id === group.Id))
+        .map((device) => device.Id);
+      groupForm.value.roleIds = groupManagementRoles.value
+        .filter((role) => Array.isArray(role.DeviceGroups) && role.DeviceGroups.some((item) => item.Id === group.Id))
+        .map((role) => role.Id);
+      groupForm.value.userIds = groupManagementUsers.value
+        .filter((user) => Array.isArray(user.DirectDeviceGroups) && user.DirectDeviceGroups.some((item) => item.Id === group.Id))
+        .map((user) => user.Id);
+    }
+
+    async function openEditGroupDialog(group: DeviceGroupItem) {
+      resetGroupForm();
+      groupDialogMode.value = 'edit';
+
+      await loadGroupManagementData();
+
+      const latestGroup = deviceGroupItems.value.find((item) => item.Id === group.Id) || group;
+      populateGroupFormFromGroup(latestGroup);
+      showGroupDialog.value = true;
+    }
+
+    function closeGroupDialog() {
+      showGroupDialog.value = false;
+      resetGroupForm();
+    }
+
+    function toggleGroupFormSelection(collection: 'deviceIds' | 'roleIds' | 'userIds', id: number, checked: boolean) {
+      const next = new Set(groupForm.value[collection]);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      groupForm.value[collection] = [...next];
+    }
+
+    function onGroupSelectionChange(collection: 'deviceIds' | 'roleIds' | 'userIds', id: number, event: Event) {
+      toggleGroupFormSelection(collection, id, (event.target as HTMLInputElement).checked);
+    }
+
+    function hasGroupSelection(collection: 'deviceIds' | 'roleIds' | 'userIds', id: number) {
+      return groupForm.value[collection].includes(id);
+    }
+
+    async function loadGroupManagementData() {
+      if (!canManageGroupSection.value) {
+        return;
+      }
+
+      groupManagementLoading.value = true;
+      groupManagementError.value = '';
+
+      try {
+        const requests: Promise<Response>[] = [apiFetch('/api/device-groups')];
+        if (canManageDevices.value) {
+          requests.push(apiFetch('/api/devices'));
+        }
+        if (canManageAccounts.value) {
+          requests.push(apiFetch('/api/accounts/users'));
+        }
+
+        const responses = await Promise.all(requests);
+        const [groupsResponse, devicesResponse, accountsResponse] = responses;
+
+        if (!groupsResponse.ok) {
+          throw new Error(await readApiErrorMessage(groupsResponse, t('Settings.LoadFailed', '加载失败')));
+        }
+
+        const groupsPayload = await groupsResponse.json() as { items?: DeviceGroupItem[] };
+        deviceGroupItems.value = groupsPayload.items || [];
+
+        if (devicesResponse) {
+          if (!devicesResponse.ok) {
+            throw new Error(await readApiErrorMessage(devicesResponse, t('Settings.LoadFailed', '加载失败')));
+          }
+          groupManagementDevices.value = await devicesResponse.json() as SettingsDeviceItem[];
+        } else {
+          groupManagementDevices.value = [];
+        }
+
+        if (accountsResponse) {
+          if (!accountsResponse.ok) {
+            throw new Error(await readApiErrorMessage(accountsResponse, t('Settings.LoadFailed', '加载失败')));
+          }
+          const accountsPayload = await accountsResponse.json() as { users?: SettingsUserItem[]; roles?: SettingsRoleItem[] };
+          groupManagementUsers.value = accountsPayload.users || [];
+          groupManagementRoles.value = accountsPayload.roles || [];
+        } else {
+          groupManagementUsers.value = [];
+          groupManagementRoles.value = [];
+        }
+      } catch (error) {
+        groupManagementError.value = error instanceof Error ? error.message : t('Settings.LoadFailed', '加载失败');
+      } finally {
+        groupManagementLoading.value = false;
+      }
+    }
+
+    async function saveDeviceGroupAssignments(groupId: number) {
+      if (!canManageDevices.value) {
+        return;
+      }
+
+      for (const device of groupManagementDevices.value) {
+        const currentGroupIds = new Set((device.Groups || []).map((item) => item.Id));
+        const shouldInclude = groupForm.value.deviceIds.includes(device.Id);
+
+        if (shouldInclude) {
+          currentGroupIds.add(groupId);
+        } else {
+          currentGroupIds.delete(groupId);
+        }
+
+        const nextGroupIds = [...currentGroupIds].sort((left, right) => left - right);
+        const currentNormalized = [...new Set((device.Groups || []).map((item) => item.Id))].sort((left, right) => left - right);
+        if (JSON.stringify(nextGroupIds) === JSON.stringify(currentNormalized)) {
+          continue;
+        }
+
+        const response = await apiFetch(`/api/devices/${device.Id}/groups`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ groupIds: nextGroupIds })
+        });
+        if (!response.ok) {
+          throw new Error(await readApiErrorMessage(response, t('Settings.SaveFailed', '保存失败')));
+        }
+      }
+    }
+
+    async function saveRoleGroupAssignments(groupId: number) {
+      if (!canManageAccounts.value) {
+        return;
+      }
+
+      for (const role of groupManagementRoles.value) {
+        const currentGroupIds = new Set((role.DeviceGroups || []).map((item) => item.Id));
+        const shouldInclude = groupForm.value.roleIds.includes(role.Id);
+
+        if (shouldInclude) {
+          currentGroupIds.add(groupId);
+        } else {
+          currentGroupIds.delete(groupId);
+        }
+
+        const nextGroupIds = [...currentGroupIds].sort((left, right) => left - right);
+        const currentNormalized = [...new Set((role.DeviceGroups || []).map((item) => item.Id))].sort((left, right) => left - right);
+        if (JSON.stringify(nextGroupIds) === JSON.stringify(currentNormalized)) {
+          continue;
+        }
+
+        const response = await apiFetch(`/api/accounts/roles/${role.Id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: role.Name,
+            description: role.Description,
+            permissions: role.Permissions,
+            deviceGroupIds: nextGroupIds,
+          })
+        });
+        if (!response.ok) {
+          throw new Error(await readApiErrorMessage(response, t('Settings.SaveFailed', '保存失败')));
+        }
+      }
+    }
+
+    async function saveUserGroupAssignments(groupId: number) {
+      if (!canManageAccounts.value) {
+        return;
+      }
+
+      for (const user of groupManagementUsers.value) {
+        const currentGroupIds = new Set((user.DirectDeviceGroups || []).map((item) => item.Id));
+        const shouldInclude = groupForm.value.userIds.includes(user.Id);
+
+        if (shouldInclude) {
+          currentGroupIds.add(groupId);
+        } else {
+          currentGroupIds.delete(groupId);
+        }
+
+        const nextGroupIds = [...currentGroupIds].sort((left, right) => left - right);
+        const currentNormalized = [...new Set((user.DirectDeviceGroups || []).map((item) => item.Id))].sort((left, right) => left - right);
+        if (JSON.stringify(nextGroupIds) === JSON.stringify(currentNormalized)) {
+          continue;
+        }
+
+        const response = await apiFetch(`/api/accounts/users/${user.Id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: user.Username,
+            isActive: user.IsActive,
+            roleIds: user.Roles.map((role) => role.Id),
+            deviceGroupIds: nextGroupIds,
+          })
+        });
+        if (!response.ok) {
+          throw new Error(await readApiErrorMessage(response, t('Settings.SaveFailed', '保存失败')));
+        }
+      }
+    }
+
+    async function saveGroupDialog() {
+      const name = groupForm.value.name.trim();
+      if (!name) {
+        groupManagementError.value = t('Settings.GroupNameRequired', '分组名称不能为空');
+        return;
+      }
+
+      groupManagementSaving.value = true;
+      groupManagementError.value = '';
+
+      try {
+        let groupId = editingGroupId.value;
+
+        if (groupDialogMode.value === 'create') {
+          const response = await apiFetch('/api/device-groups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              description: groupForm.value.description.trim(),
+            })
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(resolveApiErrorMessage(payload, t('Settings.SaveFailed', '保存失败')));
+          }
+          groupId = payload?.group?.Id ?? null;
+        } else if (groupId) {
+          const response = await apiFetch(`/api/device-groups/${groupId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              description: groupForm.value.description.trim(),
+            })
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(resolveApiErrorMessage(payload, t('Settings.SaveFailed', '保存失败')));
+          }
+        }
+
+        if (!groupId) {
+          throw new Error(t('Settings.SaveFailed', '保存失败'));
+        }
+
+        await saveDeviceGroupAssignments(groupId);
+        await saveRoleGroupAssignments(groupId);
+        await saveUserGroupAssignments(groupId);
+
+        notifications.show({
+          type: 'success',
+          title: t('Settings.SaveSuccess', '保存成功'),
+          message: groupDialogMode.value === 'create'
+            ? t('Settings.GroupCreateSuccess', '设备分组已创建')
+            : t('Settings.GroupSaveSuccess', '设备分组已更新')
+        });
+
+        closeGroupDialog();
+        await loadGroupManagementData();
+      } catch (error) {
+        groupManagementError.value = error instanceof Error ? error.message : t('Settings.SaveFailed', '保存失败');
+      } finally {
+        groupManagementSaving.value = false;
+      }
+    }
+
+    async function deleteDeviceGroup(group: DeviceGroupItem) {
+      const confirmed = await dialogService.confirm(
+        t('Settings.DeleteDeviceGroupTitle', '删除设备分组'),
+        t('Settings.GroupDeleteConfirm', '确定要删除这个分组吗？'),
+        t('Common.Delete', '删除'),
+        t('Common.Cancel', '取消')
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        const response = await apiFetch(`/api/device-groups/${group.Id}`, {
+          method: 'DELETE'
+        });
+        if (!response.ok) {
+          throw new Error(await readApiErrorMessage(response, t('Settings.SaveFailed', '保存失败')));
+        }
+
+        notifications.show({
+          type: 'success',
+          title: t('Settings.SaveSuccess', '保存成功'),
+          message: t('Settings.GroupDeleteSuccess', '设备分组已删除')
+        });
+        await loadGroupManagementData();
+      } catch (error) {
+        groupManagementError.value = error instanceof Error ? error.message : t('Settings.SaveFailed', '保存失败');
+      }
+    }
+
     function closeChangePasswordDialog() {
       showChangePasswordDialog.value = false;
       changePasswordError.value = '';
@@ -607,7 +1057,7 @@ export default defineComponent({
     }
 
     async function loadWebRtcSettings() {
-      if (!canViewRemoteSettings) {
+      if (!canViewRemoteSettings.value) {
         return;
       }
 
@@ -620,7 +1070,7 @@ export default defineComponent({
     }
 
     async function saveWebRtcSettings() {
-      if (!canManageRemoteSettings) {
+      if (!canManageRemoteSettings.value) {
         return;
       }
 
@@ -656,7 +1106,7 @@ export default defineComponent({
     }
 
     async function submitChangePassword() {
-      if (!canChangeOwnPassword) {
+      if (!canChangeOwnPassword.value) {
         return;
       }
 
@@ -702,22 +1152,35 @@ export default defineComponent({
       }
     }
 
-    onMounted(() => {
+    async function initializeSettingsData() {
       loadLocalWebRtcSettings();
+
       void loadAppVersion().catch((error) => {
         console.error('Failed to load app version:', error);
         appVersionDescription.value = t('Settings.VersionUnavailable', '版本信息不可用');
       });
 
-      if (canViewRemoteSettings) {
-        void loadServerLocale();
-      }
-      if (canViewRemoteSettings) {
-        void loadWebRtcSettings().catch((error) => {
+      const tasks: Array<Promise<unknown>> = [];
+
+      if (canViewRemoteSettings.value) {
+        tasks.push(loadServerLocale());
+        tasks.push(loadWebRtcSettings().catch((error) => {
           console.error('Failed to load WebRTC settings:', error);
           webrtcStatusMessage.value = error instanceof Error ? error.message : t('Settings.LoadFailed', '加载失败');
-        });
+        }));
       }
+
+      if (canManageGroupSection.value) {
+        tasks.push(loadGroupManagementData());
+      }
+
+      if (tasks.length > 0) {
+        await Promise.allSettled(tasks);
+      }
+    }
+
+    onMounted(() => {
+      void initializeSettingsData();
     });
 
     return {
@@ -744,9 +1207,11 @@ export default defineComponent({
       currentUser,
       notifications,
       canManageAccounts,
+      canManageDevices,
       canViewRemoteSettings,
       canManageRemoteSettings,
       canChangeOwnPassword,
+      canManageGroupSection,
       appVersionDescription,
       currentAppVersion,
       currentReleaseTag,
@@ -774,7 +1239,26 @@ export default defineComponent({
       isLocalWebRtcServersListExpanded,
       showChangePasswordDialog,
       showBackgroundDialog,
+      showGroupDialog,
       changingPassword,
+      groupManagementLoading,
+      groupManagementSaving,
+      groupManagementError,
+      deviceGroupItems,
+      groupManagementDevices,
+      groupManagementUsers,
+      groupManagementRoles,
+      isGroupManagementListExpanded,
+      groupSearchKeyword,
+      deviceSearchKeyword,
+      roleSearchKeyword,
+      userSearchKeyword,
+      groupDialogMode,
+      groupForm,
+      filteredDeviceGroups,
+      filteredGroupDevices,
+      filteredGroupRoles,
+      filteredGroupUsers,
       changePasswordError,
       changePasswordForm,
       isSettingInternally,
@@ -817,13 +1301,24 @@ export default defineComponent({
       saveLocalWebRtcSettings,
       loadLocalWebRtcSettings,
       openAccountManagement,
+      openCreateGroupDialog,
+      toggleGroupManagementList,
+      openEditGroupDialog,
+      closeGroupDialog,
+      toggleGroupFormSelection,
+      onGroupSelectionChange,
+      hasGroupSelection,
+      loadGroupManagementData,
+      saveGroupDialog,
+      deleteDeviceGroup,
       closeChangePasswordDialog,
       handleLogout,
       loadAppVersion,
       checkForUpdates,
       loadWebRtcSettings,
       saveWebRtcSettings,
-      submitChangePassword
+      submitChangePassword,
+      initializeSettingsData
     };
   }
 });

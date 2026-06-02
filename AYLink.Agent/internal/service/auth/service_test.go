@@ -50,6 +50,8 @@ type fakeRepository struct {
 	deleteAllAccessErr    error
 	deleteAccessErr       error
 	revokeByHashErr       error
+	touchAccessErr        error
+	cleanupErr            error
 }
 
 func mustCreateSalt(t *testing.T) string {
@@ -168,11 +170,11 @@ func (f *fakeRepository) DeleteAllAccessTokensForUser(context.Context, int) erro
 }
 func (f *fakeRepository) TouchAccessToken(_ context.Context, tokenHash string, _ time.Time) error {
 	f.touchedAccessHash = tokenHash
-	return nil
+	return f.touchAccessErr
 }
 func (f *fakeRepository) CleanupExpiredTokens(context.Context, time.Time) error {
 	f.cleanupCalled = true
-	return nil
+	return f.cleanupErr
 }
 
 func TestCreateUserRejectsEmptyPassword(t *testing.T) {
@@ -328,9 +330,6 @@ func TestRefreshRevokesOldTokenAndCreatesNewSession(t *testing.T) {
 	if result == nil || !result.Success {
 		t.Fatalf("expected successful refresh result, got %+v", result)
 	}
-	if !repo.cleanupCalled {
-		t.Fatal("expected CleanupExpiredTokens to be called")
-	}
 	if repo.revokedTokenID != 55 {
 		t.Fatalf("expected old refresh token id 55 to be revoked, got %d", repo.revokedTokenID)
 	}
@@ -361,8 +360,34 @@ func TestValidateAccessTokenTouchesTokenAndLoadsPermissions(t *testing.T) {
 	if repo.touchedAccessHash != hashToken("access-token") {
 		t.Fatalf("expected access token hash to be touched, got %s", repo.touchedAccessHash)
 	}
+	if repo.cleanupCalled {
+		t.Fatal("did not expect CleanupExpiredTokens during access token validation")
+	}
 	if len(identity.Permissions) != 2 {
 		t.Fatalf("expected 2 permissions, got %+v", identity.Permissions)
+	}
+}
+
+func TestValidateAccessTokenIgnoresCleanupAndTouchFailuresForValidToken(t *testing.T) {
+	repo := &fakeRepository{
+		accessTokenUser: &domainauth.UserRecord{
+			ID:       9,
+			Username: "tester",
+			IsActive: true,
+		},
+		accessTokenExpiresAt: time.Now().UTC().Add(time.Hour),
+		permissions:          []string{"devices.view"},
+		cleanupErr:           errors.New("database is locked"),
+		touchAccessErr:       errors.New("database is locked"),
+	}
+	service := NewService(repo, stubLogger{})
+
+	identity, err := service.ValidateAccessToken(context.Background(), "access-token")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if identity == nil || identity.UserID != 9 {
+		t.Fatalf("expected identity for user 9, got %+v", identity)
 	}
 }
 

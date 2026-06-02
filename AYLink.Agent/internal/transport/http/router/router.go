@@ -107,7 +107,7 @@ func New(deps Dependencies) http.Handler {
 	i18nHandler := handler.NewI18NHandler(i18nservice.NewService(), settingsService)
 	settingsHandler := handler.NewSettingsHandler(settingsService)
 
-	authMiddleware := middleware.Auth(authService)
+	authMiddleware := middleware.Auth(authService, deps.Logger)
 	guards := newRouteGuards(authMiddleware)
 	handlers := routeHandlers{
 		status:      statusHandler,

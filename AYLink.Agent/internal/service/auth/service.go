@@ -39,6 +39,7 @@ var (
 	ErrCurrentPassword    = errors.New("Current password is incorrect")
 	ErrRoleNameRequired   = errors.New("role name is required")
 	ErrRoleNotFound       = errors.New("role not found")
+	ErrInvalidPermissions = errors.New("invalid permissions")
 )
 
 var AllPermissions = []string{
@@ -123,9 +124,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*domainauth
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, ErrInvalidRefresh
 	}
-	if err := s.repo.CleanupExpiredTokens(ctx, time.Now().UTC()); err != nil {
-		return nil, err
-	}
 
 	tokenRecord, user, err := s.repo.GetRefreshToken(ctx, hashToken(refreshToken))
 	if err != nil {
@@ -159,9 +157,6 @@ func (s *Service) ValidateAccessToken(ctx context.Context, accessToken string) (
 	if strings.TrimSpace(accessToken) == "" {
 		return nil, ErrUnauthorized
 	}
-	if err := s.repo.CleanupExpiredTokens(ctx, time.Now().UTC()); err != nil {
-		return nil, err
-	}
 
 	user, expiresAt, err := s.repo.GetAccessTokenIdentity(ctx, hashToken(accessToken))
 	if err != nil {
@@ -180,7 +175,9 @@ func (s *Service) ValidateAccessToken(ctx context.Context, accessToken string) (
 		return nil, err
 	}
 	if err := s.repo.TouchAccessToken(ctx, hashToken(accessToken), time.Now().UTC()); err != nil {
-		return nil, err
+		if s.logger != nil {
+			s.logger.Warn("touch access token failed during validation", "userId", user.ID, "error", err)
+		}
 	}
 	return &domainauth.Identity{
 		UserID:               user.ID,
@@ -601,7 +598,7 @@ func validatePermissions(permissions []string) ([]string, error) {
 	}
 
 	if len(invalid) > 0 {
-		return nil, errors.New("Invalid permissions: " + strings.Join(invalid, ", "))
+		return nil, fmt.Errorf("%w: %s", ErrInvalidPermissions, strings.Join(invalid, ", "))
 	}
 	return result, nil
 }

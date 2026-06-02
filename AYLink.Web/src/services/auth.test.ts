@@ -42,6 +42,7 @@ describe('auth service', () => {
 
   it('refreshes access token with singleflight behavior', async () => {
     window.localStorage.setItem(storageKeys.auth.refreshToken, 'refresh-token');
+    window.localStorage.setItem(storageKeys.auth.refreshTokenExpiresAt, new Date(Date.now() + 60_000).toISOString());
 
     let resolveRefresh: undefined | ((value: Response) => void);
     sendApiRequestMock.mockImplementation(
@@ -134,5 +135,52 @@ describe('auth service', () => {
     expect(window.localStorage.getItem(storageKeys.auth.accessTokenExpiresAt)).toBeNull();
     expect(window.localStorage.getItem(storageKeys.auth.refreshToken)).toBeNull();
     expect(window.localStorage.getItem(storageKeys.auth.refreshTokenExpiresAt)).toBeNull();
+  });
+
+  it('clears stale stored identity when no tokens are available during initialization', async () => {
+    window.localStorage.setItem(storageKeys.auth.user, JSON.stringify({
+      Id: 9,
+      Username: 'stale-user',
+      IsActive: true,
+      Roles: [],
+      Permissions: ['accounts.manage']
+    }));
+    window.localStorage.setItem(storageKeys.auth.permissions, JSON.stringify(['accounts.manage']));
+
+    const authModule = await import('./auth');
+    const auth = authModule.useAuth();
+
+    await authModule.initializeAuth();
+
+    expect(auth.isAuthenticated.value).toBe(false);
+    expect(auth.currentUser.value).toBeNull();
+    expect(window.localStorage.getItem(storageKeys.auth.user)).toBeNull();
+    expect(window.localStorage.getItem(storageKeys.auth.permissions)).toBeNull();
+  });
+
+  it('fails authenticated session check and clears session when access and refresh both fail', async () => {
+    window.localStorage.setItem(storageKeys.auth.accessToken, 'expired-access');
+    window.localStorage.setItem(storageKeys.auth.refreshToken, 'expired-refresh');
+    window.localStorage.setItem(storageKeys.auth.user, JSON.stringify({
+      Id: 1,
+      Username: 'demo',
+      IsActive: true,
+      Roles: [],
+      Permissions: ['devices.view']
+    }));
+    window.localStorage.setItem(storageKeys.auth.permissions, JSON.stringify(['devices.view']));
+
+    sendApiRequestMock
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+
+    const authModule = await import('./auth');
+    const auth = authModule.useAuth();
+
+    await expect(authModule.ensureAuthenticatedSession()).resolves.toBe(false);
+    expect(auth.isAuthenticated.value).toBe(false);
+    expect(auth.currentUser.value).toBeNull();
+    expect(window.localStorage.getItem(storageKeys.auth.accessToken)).toBeNull();
+    expect(window.localStorage.getItem(storageKeys.auth.refreshToken)).toBeNull();
   });
 });

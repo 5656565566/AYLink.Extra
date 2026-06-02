@@ -35,6 +35,18 @@ func WriteError(w http.ResponseWriter, statusCode int, code, messageKey, message
 	})
 }
 
+func WriteInvalidJSON(w http.ResponseWriter) {
+	WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+}
+
+func WriteUnauthorized(w http.ResponseWriter) {
+	WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Errors.Unauthorized", "Unauthorized")
+}
+
+func WriteInternalServerError(w http.ResponseWriter, code, messageKey, message string) {
+	WriteError(w, http.StatusInternalServerError, code, messageKey, message)
+}
+
 func WriteMethodNotAllowed(w http.ResponseWriter, allowedMethod string) {
 	w.Header().Set("Allow", allowedMethod)
 	WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Errors.MethodNotAllowed", "请求方法不被允许")

@@ -28,10 +28,8 @@ describe('http client', () => {
 
     const client = await import('./client');
     client.registerAuthSessionHandlers({
-      clearSession: vi.fn(),
-      ensureFreshAccessToken: vi.fn(async () => {}),
+      ensureFreshAccessToken: vi.fn(async () => true),
       getAccessToken: () => 'access-token',
-      hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),
       syncSessionFromStorage: vi.fn(),
     });
@@ -52,10 +50,8 @@ describe('http client', () => {
 
     const client = await import('./client');
     client.registerAuthSessionHandlers({
-      clearSession: vi.fn(),
-      ensureFreshAccessToken: vi.fn(async () => {}),
+      ensureFreshAccessToken: vi.fn(async () => true),
       getAccessToken: () => 'access-token',
-      hasActiveAccessToken: () => true,
       refreshAccessToken,
       syncSessionFromStorage: vi.fn(),
     });
@@ -67,27 +63,63 @@ describe('http client', () => {
     expect(response.status).toBe(200);
   });
 
-  it('clears session and calls unauthorized handler when refresh fails', async () => {
+  it('calls unauthorized handler when refresh fails', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const clearSession = vi.fn();
     const unauthorizedHandler = vi.fn();
 
     const client = await import('./client');
     client.registerUnauthorizedHandler(unauthorizedHandler);
     client.registerAuthSessionHandlers({
-      clearSession,
-      ensureFreshAccessToken: vi.fn(async () => {}),
+      ensureFreshAccessToken: vi.fn(async () => true),
       getAccessToken: () => 'access-token',
-      hasActiveAccessToken: () => false,
       refreshAccessToken: vi.fn(async () => false),
       syncSessionFromStorage: vi.fn(),
     });
 
     await client.sendApiRequest('/api/devices');
 
-    expect(clearSession).toHaveBeenCalledTimes(1);
+    expect(unauthorizedHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls unauthorized handler when the request session cannot be prepared', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+
+    const unauthorizedHandler = vi.fn();
+
+    const client = await import('./client');
+    client.registerUnauthorizedHandler(unauthorizedHandler);
+    client.registerAuthSessionHandlers({
+      ensureFreshAccessToken: vi.fn(async () => false),
+      getAccessToken: () => '',
+      refreshAccessToken: vi.fn(async () => false),
+      syncSessionFromStorage: vi.fn(),
+    });
+
+    const response = await client.sendApiRequest('/api/devices');
+
+    expect(response.status).toBe(401);
+    expect(unauthorizedHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls unauthorized handler even when an old access token is still present after refresh fails', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const unauthorizedHandler = vi.fn();
+
+    const client = await import('./client');
+    client.registerUnauthorizedHandler(unauthorizedHandler);
+    client.registerAuthSessionHandlers({
+      ensureFreshAccessToken: vi.fn(async () => true),
+      getAccessToken: () => 'stale-access-token',
+      refreshAccessToken: vi.fn(async () => false),
+      syncSessionFromStorage: vi.fn(),
+    });
+
+    await client.sendApiRequest('/api/devices');
+
     expect(unauthorizedHandler).toHaveBeenCalledTimes(1);
   });
 
@@ -96,10 +128,8 @@ describe('http client', () => {
 
     const client = await import('./client');
     client.registerAuthSessionHandlers({
-      clearSession: vi.fn(),
-      ensureFreshAccessToken: vi.fn(async () => {}),
+      ensureFreshAccessToken: vi.fn(async () => true),
       getAccessToken: () => 'access-token',
-      hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),
       syncSessionFromStorage: vi.fn(),
     });
@@ -121,10 +151,8 @@ describe('http client', () => {
 
     const client = await import('./client');
     client.registerAuthSessionHandlers({
-      clearSession: vi.fn(),
-      ensureFreshAccessToken: vi.fn(async () => {}),
+      ensureFreshAccessToken: vi.fn(async () => true),
       getAccessToken: () => 'access-token',
-      hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),
       syncSessionFromStorage: vi.fn(),
     });
@@ -151,10 +179,8 @@ describe('http client', () => {
 
     const client = await import('./client');
     client.registerAuthSessionHandlers({
-      clearSession: vi.fn(),
-      ensureFreshAccessToken: vi.fn(async () => {}),
+      ensureFreshAccessToken: vi.fn(async () => true),
       getAccessToken: () => 'access-token',
-      hasActiveAccessToken: () => true,
       refreshAccessToken: vi.fn(async () => false),
       syncSessionFromStorage: vi.fn(),
     });

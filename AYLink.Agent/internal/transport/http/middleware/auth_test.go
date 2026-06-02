@@ -2,12 +2,14 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	domainauth "aylink-agent/internal/domain/auth"
+	authservice "aylink-agent/internal/service/auth"
 )
 
 type fakeAuthService struct {
@@ -20,7 +22,7 @@ func (f fakeAuthService) ValidateAccessToken(context.Context, string) (*domainau
 }
 
 func TestAuthRejectsMissingBearerToken(t *testing.T) {
-	handler := Auth(fakeAuthService{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Auth(fakeAuthService{}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -41,7 +43,7 @@ func TestAuthInjectsIdentityIntoContext(t *testing.T) {
 		AccessToken:          "token-value",
 		AccessTokenExpiresAt: time.Now().Add(time.Hour),
 	}
-	handler := Auth(fakeAuthService{identity: expected})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Auth(fakeAuthService{identity: expected}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actual, ok := r.Context().Value(IdentityKey).(*domainauth.Identity)
 		if !ok || actual == nil || actual.UserID != expected.UserID {
 			t.Fatalf("expected identity to be injected into context")
@@ -56,6 +58,36 @@ func TestAuthInjectsIdentityIntoContext(t *testing.T) {
 
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", recorder.Code)
+	}
+}
+
+func TestAuthReturnsUnauthorizedForUnauthorizedError(t *testing.T) {
+	handler := Auth(fakeAuthService{err: authservice.ErrUnauthorized}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer token-value")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+}
+
+func TestAuthReturnsInternalServerErrorForUnexpectedValidationFailure(t *testing.T) {
+	handler := Auth(fakeAuthService{err: errors.New("database is locked")}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer token-value")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
 	}
 }
 

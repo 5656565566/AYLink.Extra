@@ -160,6 +160,175 @@ func TestAuthRepositoryUpdateUserReplacesRolesAndPermissions(t *testing.T) {
 	}
 }
 
+func TestAuthRepositoryListUsersHydratesDeviceAccessScope(t *testing.T) {
+	db := newTestDB(t)
+	authRepo := NewAuthRepository(db)
+	deviceRepo := NewDeviceRepository(db)
+	groupRepo := NewDeviceGroupRepository(db)
+	ctx := context.Background()
+
+	adminRole, err := authRepo.GetRoleByName(ctx, "Administrator")
+	if err != nil {
+		t.Fatalf("GetRoleByName(Administrator) error = %v", err)
+	}
+	viewerRole, err := authRepo.CreateRole(ctx, "Scoped Viewer", "Scoped device access", []string{"devices.view"}, nil)
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+
+	groupA, err := groupRepo.Create(ctx, "Warehouse A", "Warehouse devices")
+	if err != nil {
+		t.Fatalf("Create() groupA error = %v", err)
+	}
+	groupB, err := groupRepo.Create(ctx, "Warehouse B", "Backup devices")
+	if err != nil {
+		t.Fatalf("Create() groupB error = %v", err)
+	}
+
+	deviceOne := &domaindevice.Device{
+		Name:      "Pixel A",
+		Serial:    "serial-a",
+		Status:    "online",
+		LastSeen:  time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := deviceRepo.Insert(ctx, deviceOne); err != nil {
+		t.Fatalf("Insert(deviceOne) error = %v", err)
+	}
+	if err := groupRepo.SetGroupsForDevice(ctx, deviceOne.ID, []int{groupA.ID}); err != nil {
+		t.Fatalf("SetGroupsForDevice(deviceOne) error = %v", err)
+	}
+
+	deviceTwo := &domaindevice.Device{
+		Name:      "Pixel B",
+		Serial:    "serial-b",
+		Status:    "online",
+		LastSeen:  time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := deviceRepo.Insert(ctx, deviceTwo); err != nil {
+		t.Fatalf("Insert(deviceTwo) error = %v", err)
+	}
+	if err := groupRepo.SetGroupsForDevice(ctx, deviceTwo.ID, []int{groupB.ID}); err != nil {
+		t.Fatalf("SetGroupsForDevice(deviceTwo) error = %v", err)
+	}
+
+	deviceThree := &domaindevice.Device{
+		Name:      "Pixel Unassigned",
+		Serial:    "serial-unassigned",
+		Status:    "online",
+		LastSeen:  time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := deviceRepo.Insert(ctx, deviceThree); err != nil {
+		t.Fatalf("Insert(deviceThree) error = %v", err)
+	}
+
+	if err := authRepo.SetDeviceGroupsForRole(ctx, viewerRole.ID, []int{groupA.ID}); err != nil {
+		t.Fatalf("SetDeviceGroupsForRole() error = %v", err)
+	}
+
+	user, err := authRepo.CreateUser(ctx, "scoped-user", "hash", "salt", []int{viewerRole.ID}, []int{groupB.ID})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if user == nil {
+		t.Fatal("expected created user")
+	}
+	if user.EffectiveDeviceGroupCount != 2 {
+		t.Fatalf("expected 2 effective groups at create time, got %d", user.EffectiveDeviceGroupCount)
+	}
+
+	adminUser, err := authRepo.CreateUser(ctx, "admin-user", "hash", "salt", []int{adminRole.ID}, nil)
+	if err != nil {
+		t.Fatalf("CreateUser(admin-user) error = %v", err)
+	}
+	if adminUser == nil {
+		t.Fatal("expected created admin user")
+	}
+
+	users, err := authRepo.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(users) < 2 {
+		t.Fatalf("expected at least 2 users, got %d", len(users))
+	}
+
+	var scopedUser *domainauth.User
+	for index := range users {
+		if users[index].Username == "scoped-user" {
+			scopedUser = &users[index]
+			break
+		}
+	}
+	if scopedUser == nil {
+		t.Fatalf("expected scoped-user in %+v", users)
+	}
+	if len(scopedUser.DirectDeviceGroups) != 1 || scopedUser.DirectDeviceGroups[0].Name != "Warehouse B" {
+		t.Fatalf("expected direct Warehouse B group, got %+v", scopedUser.DirectDeviceGroups)
+	}
+	if scopedUser.EffectiveDeviceGroupCount != 2 {
+		t.Fatalf("expected 2 effective groups, got %d", scopedUser.EffectiveDeviceGroupCount)
+	}
+	if scopedUser.EffectiveDeviceCount != 3 {
+		t.Fatalf("expected access to 3 devices, got %d", scopedUser.EffectiveDeviceCount)
+	}
+}
+
+func TestAuthRepositoryListRolesHydratesPermissionsAndDeviceGroups(t *testing.T) {
+	db := newTestDB(t)
+	authRepo := NewAuthRepository(db)
+	groupRepo := NewDeviceGroupRepository(db)
+	ctx := context.Background()
+
+	group, err := groupRepo.Create(ctx, "Testing Group", "Testing devices")
+	if err != nil {
+		t.Fatalf("Create() group error = %v", err)
+	}
+
+	role, err := authRepo.CreateRole(ctx, "QA Operator", "QA role", []string{"devices.view", "devices.control"}, []int{group.ID})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	if role == nil {
+		t.Fatal("expected created role")
+	}
+
+	roles, err := authRepo.ListRoles(ctx)
+	if err != nil {
+		t.Fatalf("ListRoles() error = %v", err)
+	}
+
+	var qaRole *domainauth.Role
+	for index := range roles {
+		if roles[index].ID == role.ID {
+			qaRole = &roles[index]
+			break
+		}
+	}
+	if qaRole == nil {
+		t.Fatalf("expected QA Operator role in %+v", roles)
+	}
+	if len(qaRole.Permissions) != 2 {
+		t.Fatalf("expected 2 permissions, got %+v", qaRole.Permissions)
+	}
+	if len(qaRole.DeviceGroups) != 1 || qaRole.DeviceGroups[0].Name != "Testing Group" {
+		t.Fatalf("expected Testing Group device scope, got %+v", qaRole.DeviceGroups)
+	}
+
+	roleByName, err := authRepo.GetRoleByName(ctx, "qa operator")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error = %v", err)
+	}
+	if roleByName == nil || len(roleByName.DeviceGroups) != 1 || roleByName.DeviceGroups[0].ID != group.ID {
+		t.Fatalf("expected hydrated role by name, got %+v", roleByName)
+	}
+}
+
 func TestAuthRepositoryCreateSessionAndCleanupExpiredTokens(t *testing.T) {
 	db := newTestDB(t)
 	repo := NewAuthRepository(db)

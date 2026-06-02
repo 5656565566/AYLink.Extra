@@ -13,6 +13,9 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	if err := initialize(db); err != nil {
 		db.Close()
 		return nil, err
@@ -23,6 +26,10 @@ func Open(path string) (*sql.DB, error) {
 
 func initialize(db *sql.DB) error {
 	queries := []string{
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA busy_timeout = 5000`,
+		`PRAGMA synchronous = NORMAL`,
+		`PRAGMA foreign_keys = ON`,
 		`CREATE TABLE IF NOT EXISTS Devices (
 			Id INTEGER PRIMARY KEY AUTOINCREMENT,
 			Name TEXT NOT NULL,

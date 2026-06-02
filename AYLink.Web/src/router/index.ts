@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
 import { registerUnauthorizedHandler } from '../core/http/client';
 import HomeView from '../views/HomeView.vue';
-import { getDefaultAuthorizedRoute, hasPermission, initializeAuth, useAuth } from '../services/auth';
+import { ensureAuthenticatedSession, getDefaultAuthorizedRoute, initializeAuth, useAuth } from '../services/auth';
 import { useNotification } from '../services/notification';
 import { t } from '../services/i18n';
 
@@ -77,21 +77,25 @@ registerUnauthorizedHandler(() => {
 });
 
 router.beforeEach(async (to, _from, next) => {
-  await initializeAuth();
-  const { isAuthenticated } = useAuth();
+  const auth = useAuth();
 
-  if (to.meta.requiresAuth && !isAuthenticated.value) {
-    next({ name: 'login', query: { redirect: to.fullPath } });
-    return;
+  if (to.meta.requiresAuth) {
+    const isAuthenticated = await ensureAuthenticatedSession();
+    if (!isAuthenticated) {
+      next({ name: 'login', query: { redirect: to.fullPath } });
+      return;
+    }
   }
 
-  if (to.name === 'login' && isAuthenticated.value) {
+  await initializeAuth();
+
+  if (to.name === 'login' && auth.isAuthenticated.value) {
     next(getDefaultAuthorizedRoute());
     return;
   }
 
   const requiredPermission = typeof to.meta.permission === 'string' ? to.meta.permission : '';
-  if (requiredPermission && !hasPermission(requiredPermission)) {
+  if (requiredPermission && !auth.hasPermission(requiredPermission)) {
     notifications.show({
       type: 'warning',
       title: t('Common.PermissionDenied', '权限不足'),

@@ -457,6 +457,87 @@
           <button class="fluent-btn" @click="handleLogout">{{ t('Common.Logout', '退出登录') }}</button>
         </SettingItem>
       </SettingSection>
+
+      <SettingSection v-if="canManageGroupSection" :title="t('Settings.DeviceGroupManagement', '分组管理')">
+        <div class="group-management-toolbar-card">
+          <div class="group-management-toolbar">
+            <input
+              v-model.trim="groupSearchKeyword"
+              type="text"
+              class="fluent-input group-management-toolbar__search"
+              :placeholder="t('Settings.GroupSearchPlaceholder', '搜索分组名称或描述')"
+            />
+            <div class="group-management-toolbar__actions">
+              <button class="fluent-btn" :disabled="groupManagementLoading" @click="loadGroupManagementData">
+                {{ t('Common.Refresh', '刷新') }}
+              </button>
+              <button class="fluent-btn primary" @click="openCreateGroupDialog">
+                {{ t('Settings.CreateDeviceGroup', '新建设备分组') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="groupManagementError" class="group-management-message group-management-message--error">
+          {{ groupManagementError }}
+        </div>
+        <div v-else-if="groupManagementLoading" class="group-management-message">
+          {{ t('Settings.Loading', '加载中...') }}
+        </div>
+        <div v-else-if="filteredDeviceGroups.length === 0" class="group-management-message">
+          {{ t('Settings.EmptyDeviceGroups', '暂无设备分组') }}
+        </div>
+        <div v-else class="group-management-section">
+          <div class="group-management-section__header" :class="{ expanded: isGroupManagementListExpanded }" @click="toggleGroupManagementList">
+            <span class="group-management-section__title">
+              {{ t('Settings.DeviceGroupList', '分组列表') }}
+            </span>
+            <span class="group-management-section__summary">
+              {{ t('Settings.GroupCountSummary', '共 {0} 个分组', filteredDeviceGroups.length) }}
+            </span>
+            <svg class="group-management-section__chevron" :class="{ expanded: isGroupManagementListExpanded }" viewBox="0 0 24 24" width="20" height="20">
+              <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+            </svg>
+          </div>
+          <div class="group-management-section__body" :class="{ expanded: isGroupManagementListExpanded }">
+            <div class="group-management-list">
+              <article v-for="group in filteredDeviceGroups" :key="group.Id" class="group-card">
+                <div class="group-card__header">
+                  <div class="group-card__title-wrap">
+                    <h3 class="group-card__title">{{ group.Name }}</h3>
+                    <p v-if="group.Description" class="group-card__description">{{ group.Description }}</p>
+                    <p v-else class="group-card__description group-card__description--muted">
+                      {{ t('Settings.NoDescription', '暂无描述') }}
+                    </p>
+                  </div>
+                  <div class="group-card__actions">
+                    <button class="fluent-btn" @click="openEditGroupDialog(group)">
+                      {{ t('Settings.Manage', '管理') }}
+                    </button>
+                    <button class="fluent-btn fluent-btn-danger" @click="deleteDeviceGroup(group)">
+                      {{ t('Common.Delete', '删除') }}
+                    </button>
+                  </div>
+                </div>
+                <div class="group-card__metrics">
+                  <div class="group-card__metric">
+                    <span class="group-card__metric-label">{{ t('Common.Devices', '设备') }}</span>
+                    <span class="group-card__metric-value">{{ group.DeviceCount ?? 0 }}</span>
+                  </div>
+                  <div v-if="canManageAccounts" class="group-card__metric">
+                    <span class="group-card__metric-label">{{ t('Settings.Roles', '角色') }}</span>
+                    <span class="group-card__metric-value">{{ group.RoleCount ?? 0 }}</span>
+                  </div>
+                  <div v-if="canManageAccounts" class="group-card__metric">
+                    <span class="group-card__metric-label">{{ t('Settings.Users', '用户') }}</span>
+                    <span class="group-card__metric-value">{{ group.UserCount ?? 0 }}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </SettingSection>
     </div>
 
     <div v-if="showChangePasswordDialog" class="dialog-overlay" @click.self="closeChangePasswordDialog">
@@ -481,6 +562,152 @@
             {{ changingPassword ? t('Settings.Saving', '保存中...') : t('Settings.ChangePassword', '修改密码') }}
           </button>
           <button class="transparent" :disabled="changingPassword" @click="closeChangePasswordDialog">{{ t('Common.Back', '返回') }}</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="showGroupDialog" class="dialog-overlay" @click.self="closeGroupDialog">
+      <div class="dialog dialog--wide">
+        <div class="dialog-header">
+          <h3 class="dialog-title">
+            {{ groupDialogMode === 'create' ? t('Settings.CreateDeviceGroup', '新建设备分组') : t('Settings.EditDeviceGroup', '编辑设备分组') }}
+          </h3>
+        </div>
+        <div class="dialog-content dialog-content--group">
+          <div class="group-dialog-form">
+            <div class="form-group">
+              <label class="group-dialog-form__label">{{ t('Settings.GroupName', '分组名称') }}</label>
+              <input
+                v-model.trim="groupForm.name"
+                type="text"
+                class="fluent-input"
+                :placeholder="t('Settings.GroupNamePlaceholder', '请输入设备分组名称')"
+              />
+            </div>
+            <div class="form-group">
+              <label class="group-dialog-form__label">{{ t('Settings.Description', '描述') }}</label>
+              <textarea
+                v-model.trim="groupForm.description"
+                class="fluent-textarea"
+                rows="3"
+                :placeholder="t('Settings.GroupDescriptionPlaceholder', '可以写这个分组的用途或归属范围')"
+              ></textarea>
+            </div>
+          </div>
+
+          <div class="group-dialog-grid">
+            <section v-if="canManageDevices" class="group-dialog-panel">
+              <div class="group-dialog-panel__header">
+                <div>
+                  <h4 class="group-dialog-panel__title">{{ t('Common.Devices', '设备') }}</h4>
+                  <p class="group-dialog-panel__summary">
+                    {{ t('Settings.SelectedCount', '已选择 {0} 项', groupForm.deviceIds.length) }}
+                  </p>
+                </div>
+              </div>
+              <input
+                v-model.trim="deviceSearchKeyword"
+                type="text"
+                class="fluent-input group-dialog-panel__search"
+                :placeholder="t('Settings.DeviceSearchPlaceholder', '搜索设备名称或序列号')"
+              />
+              <div class="group-dialog-selection-list">
+                <label v-for="device in filteredGroupDevices" :key="device.Id" class="group-dialog-selection-item">
+                  <input
+                    type="checkbox"
+                    :checked="hasGroupSelection('deviceIds', device.Id)"
+                    @change="onGroupSelectionChange('deviceIds', device.Id, $event)"
+                  />
+                  <div class="group-dialog-selection-item__content">
+                    <span class="group-dialog-selection-item__title">{{ device.Name || device.Serial || `#${device.Id}` }}</span>
+                    <span class="group-dialog-selection-item__meta">{{ device.Serial || device.Status || t('Settings.UnknownDevice', '未命名设备') }}</span>
+                  </div>
+                </label>
+                <div v-if="filteredGroupDevices.length === 0" class="group-dialog-empty">
+                  {{ t('Settings.NoMatchingDevices', '没有匹配的设备') }}
+                </div>
+              </div>
+            </section>
+
+            <section v-if="canManageAccounts" class="group-dialog-panel">
+              <div class="group-dialog-panel__header">
+                <div>
+                  <h4 class="group-dialog-panel__title">{{ t('Settings.Roles', '角色') }}</h4>
+                  <p class="group-dialog-panel__summary">
+                    {{ t('Settings.SelectedCount', '已选择 {0} 项', groupForm.roleIds.length) }}
+                  </p>
+                </div>
+              </div>
+              <input
+                v-model.trim="roleSearchKeyword"
+                type="text"
+                class="fluent-input group-dialog-panel__search"
+                :placeholder="t('Settings.RoleSearchPlaceholder', '搜索角色名称或描述')"
+              />
+              <div class="group-dialog-selection-list">
+                <label v-for="role in filteredGroupRoles" :key="role.Id" class="group-dialog-selection-item">
+                  <input
+                    type="checkbox"
+                    :checked="hasGroupSelection('roleIds', role.Id)"
+                    @change="onGroupSelectionChange('roleIds', role.Id, $event)"
+                  />
+                  <div class="group-dialog-selection-item__content">
+                    <span class="group-dialog-selection-item__title">{{ role.Name }}</span>
+                    <span class="group-dialog-selection-item__meta">{{ role.Description || t('Settings.NoDescription', '暂无描述') }}</span>
+                  </div>
+                </label>
+                <div v-if="filteredGroupRoles.length === 0" class="group-dialog-empty">
+                  {{ t('Settings.NoMatchingRoles', '没有匹配的角色') }}
+                </div>
+              </div>
+            </section>
+
+            <section v-if="canManageAccounts" class="group-dialog-panel">
+              <div class="group-dialog-panel__header">
+                <div>
+                  <h4 class="group-dialog-panel__title">{{ t('Settings.Users', '用户') }}</h4>
+                  <p class="group-dialog-panel__summary">
+                    {{ t('Settings.SelectedCount', '已选择 {0} 项', groupForm.userIds.length) }}
+                  </p>
+                </div>
+              </div>
+              <input
+                v-model.trim="userSearchKeyword"
+                type="text"
+                class="fluent-input group-dialog-panel__search"
+                :placeholder="t('Settings.UserSearchPlaceholder', '搜索用户名')"
+              />
+              <div class="group-dialog-selection-list">
+                <label v-for="user in filteredGroupUsers" :key="user.Id" class="group-dialog-selection-item">
+                  <input
+                    type="checkbox"
+                    :checked="hasGroupSelection('userIds', user.Id)"
+                    @change="onGroupSelectionChange('userIds', user.Id, $event)"
+                  />
+                  <div class="group-dialog-selection-item__content">
+                    <span class="group-dialog-selection-item__title">{{ user.Username }}</span>
+                    <span class="group-dialog-selection-item__meta">
+                      {{ user.Roles.map((role) => role.Name).join(' / ') || t('Settings.NoAssignedRole', '未分配角色') }}
+                    </span>
+                  </div>
+                </label>
+                <div v-if="filteredGroupUsers.length === 0" class="group-dialog-empty">
+                  {{ t('Settings.NoMatchingUsers', '没有匹配的用户') }}
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div v-if="groupManagementError" class="group-management-message group-management-message--error">
+            {{ groupManagementError }}
+          </div>
+        </div>
+        <div class="dialog-footer-grid dialog-footer-grid--group">
+          <button class="primary" :disabled="groupManagementSaving" @click="saveGroupDialog">
+            {{ groupManagementSaving ? t('Settings.Saving', '保存中...') : t('Settings.Save', '保存') }}
+          </button>
+          <button class="transparent" :disabled="groupManagementSaving" @click="closeGroupDialog">
+            {{ t('Common.Cancel', '取消') }}
+          </button>
         </div>
       </div>
     </div>

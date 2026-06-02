@@ -49,29 +49,10 @@ export function useHomeDevices() {
   const selectedGroupId = ref<number>(0);
   const groupKeyword = ref('');
   const devicesRequest = createLatestRequestController();
+  const groupOptionsRequest = createLatestRequestController();
   const encodersRequest = createLatestRequestController();
 
-  const availableGroups = computed<DeviceGroupSummary[]>(() => {
-    const deduped = new Map<number, DeviceGroupSummary>();
-
-    for (const device of devices.value) {
-      const deviceGroups = Array.isArray(device.Groups) ? device.Groups : [];
-      for (const group of deviceGroups) {
-        if (!group || typeof group.Id !== 'number') {
-          continue;
-        }
-        if (!deduped.has(group.Id)) {
-          deduped.set(group.Id, {
-            Id: group.Id,
-            Name: String(group.Name || '').trim() || t('HomeView.UnknownGroup', '未命名分组'),
-            Source: group.Source || null,
-          });
-        }
-      }
-    }
-
-    return Array.from(deduped.values()).sort((left, right) => left.Name.localeCompare(right.Name));
-  });
+  const availableGroups = ref<DeviceGroupSummary[]>([]);
 
   const filteredAvailableGroups = computed(() => {
     const keyword = groupKeyword.value.trim().toLowerCase();
@@ -84,6 +65,8 @@ export function useHomeDevices() {
       return haystack.includes(keyword);
     });
   });
+
+  const hasGroupKeyword = computed(() => groupKeyword.value.trim().length > 0);
 
   const selectedGroup = computed(() => {
     if (selectedGroupId.value === 0) {
@@ -119,8 +102,13 @@ export function useHomeDevices() {
       .join(' / ');
   };
 
-  const toggleGroupPickerMenu = () => {
-    showGroupPickerMenu.value = !showGroupPickerMenu.value;
+  const toggleGroupPickerMenu = async () => {
+    const willOpen = !showGroupPickerMenu.value;
+    if (willOpen) {
+      await Promise.all([fetchDevices(), fetchAvailableGroups()]);
+    }
+
+    showGroupPickerMenu.value = willOpen;
     groupKeyword.value = '';
     showMoreActionsMenu.value = false;
     activeMenuDeviceId.value = null;
@@ -171,9 +159,6 @@ export function useHomeDevices() {
 
       if (response.ok) {
         devices.value = await response.json();
-        if (selectedGroupId.value !== 0 && !availableGroups.value.some((group) => group.Id === selectedGroupId.value)) {
-          selectedGroupId.value = 0;
-        }
       }
     } catch (error) {
       if (!isAbortError(error)) {
@@ -184,6 +169,43 @@ export function useHomeDevices() {
         loading.value = false;
       }
       devicesRequest.finalize(requestId);
+    }
+  };
+
+  const fetchAvailableGroups = async () => {
+    const { requestId, signal } = groupOptionsRequest.begin();
+
+    try {
+      const response = await apiFetch('/api/device-groups/options', {
+        signal,
+        timeoutMs: 15000,
+      });
+      if (!groupOptionsRequest.isLatest(requestId)) {
+        return;
+      }
+
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({ items: [] as DeviceGroupSummary[] })) as { items?: DeviceGroupSummary[] };
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        availableGroups.value = items
+          .filter((group): group is DeviceGroupSummary => !!group && typeof group.Id === 'number')
+          .map((group) => ({
+            Id: group.Id,
+            Name: String(group.Name || '').trim() || t('HomeView.UnknownGroup', '未命名分组'),
+            Source: group.Source || null,
+          }))
+          .sort((left: DeviceGroupSummary, right: DeviceGroupSummary) => left.Name.localeCompare(right.Name));
+
+        if (selectedGroupId.value !== 0 && !availableGroups.value.some((group) => group.Id === selectedGroupId.value)) {
+          selectedGroupId.value = 0;
+        }
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.error('Failed to fetch device groups', error);
+      }
+    } finally {
+      groupOptionsRequest.finalize(requestId);
     }
   };
 
@@ -447,11 +469,13 @@ export function useHomeDevices() {
 
   onMounted(() => {
     fetchDevices();
+    fetchAvailableGroups();
     document.addEventListener('click', closeMenu);
   });
 
   onUnmounted(() => {
     devicesRequest.dispose();
+    groupOptionsRequest.dispose();
     encodersRequest.dispose();
     document.removeEventListener('click', closeMenu);
   });
@@ -489,6 +513,7 @@ export function useHomeDevices() {
     groupKeyword,
     availableGroups,
     filteredAvailableGroups,
+    hasGroupKeyword,
     canManageDevices,
     canControlDevices,
     canAccessFiles,
@@ -500,6 +525,7 @@ export function useHomeDevices() {
     toggleMoreActionsMenu,
     closeMenu,
     fetchDevices,
+    fetchAvailableGroups,
     handleRefreshDevices,
     toggleMultiSelectMode,
     addDevice,

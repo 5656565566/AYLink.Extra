@@ -32,13 +32,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "LoginPage.InvalidCredentials", "用户名或密码错误")
+		WriteInvalidJSON(w)
 		return
 	}
 
 	result, err := h.service.Login(r.Context(), payload.Username, payload.Password)
 	if err != nil {
-		WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "LoginPage.InvalidCredentials", "用户名或密码错误")
+		writeLoginError(w, err)
 		return
 	}
 
@@ -56,13 +56,13 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "Errors.InvalidRefreshToken", "Invalid refresh token")
+		WriteInvalidJSON(w)
 		return
 	}
 
 	result, err := h.service.Refresh(r.Context(), payload.RefreshToken)
 	if err != nil {
-		WriteError(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "Errors.InvalidRefreshToken", "Invalid refresh token")
+		writeRefreshError(w, err)
 		return
 	}
 
@@ -77,13 +77,13 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 	identity := getIdentity(r)
 	if identity == nil {
-		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Errors.Unauthorized", "Unauthorized")
+		WriteUnauthorized(w)
 		return
 	}
 
 	user, err := h.service.CurrentUser(r.Context(), identity.AccessToken)
 	if err != nil {
-		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Errors.Unauthorized", "Unauthorized")
+		writeCurrentUserError(w, err)
 		return
 	}
 
@@ -104,7 +104,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeOptionalJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 	accessToken := extractBearerToken(r)
@@ -126,7 +126,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	identity := getIdentity(r)
 	if identity == nil {
-		w.WriteHeader(http.StatusUnauthorized)
+		WriteUnauthorized(w)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 
@@ -156,7 +156,7 @@ func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 
 	identity := getIdentity(r)
 	if identity == nil {
-		w.WriteHeader(http.StatusUnauthorized)
+		WriteUnauthorized(w)
 		return
 	}
 
@@ -238,7 +238,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := idFromPath(r.URL.Path, "/api/accounts/users/")
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "INVALID_USER_ID", "Errors.InvalidUserId", "无效的用户 ID")
 		return
 	}
 
@@ -250,7 +250,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 
@@ -282,12 +282,12 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	// Route: /api/accounts/users/{id}/reset-password
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		w.WriteHeader(http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "INVALID_USER_ID", "Errors.InvalidUserId", "无效的用户 ID")
 		return
 	}
 	userID, err := strconv.Atoi(parts[4])
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "INVALID_USER_ID", "Errors.InvalidUserId", "无效的用户 ID")
 		return
 	}
 
@@ -295,7 +295,7 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		NewPassword string `json:"newPassword"`
 	}
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 
@@ -316,12 +316,12 @@ func (h *AuthHandler) SetUserActive(w http.ResponseWriter, r *http.Request, isAc
 
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		w.WriteHeader(http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "INVALID_USER_ID", "Errors.InvalidUserId", "无效的用户 ID")
 		return
 	}
 	userID, err := strconv.Atoi(parts[4])
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "INVALID_USER_ID", "Errors.InvalidUserId", "无效的用户 ID")
 		return
 	}
 
@@ -399,7 +399,7 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 
 	roleID, err := idFromPath(r.URL.Path, "/api/accounts/roles/")
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "INVALID_ROLE_ID", "Errors.InvalidRoleId", "无效的角色 ID")
 		return
 	}
 
@@ -411,7 +411,7 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 
@@ -469,6 +469,8 @@ func writeAuthServiceError(
 	defaultMessage string,
 ) {
 	switch {
+	case errors.Is(err, authservice.ErrInvalidPermissions):
+		WriteError(w, statusCode, code, "Errors.InvalidPermissions", "包含无效的权限项")
 	case errors.Is(err, authservice.ErrUsernameRequired):
 		WriteError(w, statusCode, code, "Errors.UsernameRequired", "用户名不能为空")
 	case errors.Is(err, authservice.ErrPasswordEmpty):
@@ -476,9 +478,9 @@ func writeAuthServiceError(
 	case errors.Is(err, authservice.ErrUsernameExists):
 		WriteError(w, statusCode, code, "Errors.UsernameExists", "用户名已存在")
 	case errors.Is(err, authservice.ErrCurrentUserLocked):
-		WriteError(w, statusCode, code, "Errors.CurrentUserDisableForbidden", "不能禁用当前登录账号")
+		WriteError(w, http.StatusConflict, code, "Errors.CurrentUserDisableForbidden", "不能禁用当前登录账号")
 	case errors.Is(err, authservice.ErrUserNotFound):
-		WriteError(w, statusCode, code, "Errors.UserNotFound", "用户不存在")
+		WriteError(w, http.StatusNotFound, code, "Errors.UserNotFound", "用户不存在")
 	case errors.Is(err, authservice.ErrCurrentPassword):
 		WriteError(w, statusCode, code, "Errors.CurrentPasswordIncorrect", "当前密码不正确")
 	case errors.Is(err, authservice.ErrRoleNameRequired):
@@ -486,8 +488,37 @@ func writeAuthServiceError(
 	case errors.Is(err, authservice.ErrRoleExists):
 		WriteError(w, statusCode, code, "Errors.RoleExists", "角色名称已存在")
 	case errors.Is(err, authservice.ErrRoleNotFound):
-		WriteError(w, statusCode, code, "Errors.RoleNotFound", "角色不存在")
+		WriteError(w, http.StatusNotFound, code, "Errors.RoleNotFound", "角色不存在")
+	case errors.Is(err, authservice.ErrInvalidCredentials), errors.Is(err, authservice.ErrInvalidRefresh), errors.Is(err, authservice.ErrUnauthorized):
+		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Errors.Unauthorized", "Unauthorized")
 	default:
-		WriteError(w, statusCode, code, defaultKey, defaultMessage)
+		WriteError(w, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Errors.InternalServerError", "服务器内部错误")
 	}
+}
+
+func writeLoginError(w http.ResponseWriter, err error) {
+	if errors.Is(err, authservice.ErrInvalidCredentials) {
+		WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "LoginPage.InvalidCredentials", "用户名或密码错误")
+		return
+	}
+
+	WriteError(w, http.StatusInternalServerError, "LOGIN_FAILED", "Errors.LoginFailed", "登录失败")
+}
+
+func writeRefreshError(w http.ResponseWriter, err error) {
+	if errors.Is(err, authservice.ErrInvalidRefresh) {
+		WriteError(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "Errors.InvalidRefreshToken", "Invalid refresh token")
+		return
+	}
+
+	WriteError(w, http.StatusInternalServerError, "REFRESH_FAILED", "Errors.RefreshFailed", "刷新登录状态失败")
+}
+
+func writeCurrentUserError(w http.ResponseWriter, err error) {
+	if errors.Is(err, authservice.ErrUnauthorized) {
+		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Errors.Unauthorized", "Unauthorized")
+		return
+	}
+
+	WriteError(w, http.StatusInternalServerError, "CURRENT_USER_FAILED", "Errors.CurrentUserFailed", "加载当前登录用户失败")
 }

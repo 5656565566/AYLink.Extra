@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,11 +18,13 @@ import (
 )
 
 type fakeDeviceService struct {
-	listResult   []domaindevice.Device
-	listErr      error
-	createInput  deviceservice.CreateInput
-	createResult *domaindevice.Device
-	createErr    error
+	listResult    []domaindevice.Device
+	listErr       error
+	createInput   deviceservice.CreateInput
+	createResult  *domaindevice.Device
+	createErr     error
+	connectResult *domaindevice.Device
+	connectErr    error
 }
 
 func (f *fakeDeviceService) List(context.Context) ([]domaindevice.Device, error) {
@@ -35,7 +38,7 @@ func (f *fakeDeviceService) Create(_ context.Context, input deviceservice.Create
 
 func (f *fakeDeviceService) Delete(context.Context, int) error { return nil }
 func (f *fakeDeviceService) Connect(context.Context, int) (*domaindevice.Device, error) {
-	return nil, nil
+	return f.connectResult, f.connectErr
 }
 func (f *fakeDeviceService) Rename(context.Context, int, string) (*domaindevice.Device, error) {
 	return nil, nil
@@ -139,5 +142,24 @@ func TestDeviceHandlerCreatePassesPayloadToService(t *testing.T) {
 	}
 	if service.createInput.Serial != "serial-2" || service.createInput.Name != "Pixel" || service.createInput.PairingPort != 1234 || service.createInput.PairingCode != "654321" {
 		t.Fatalf("expected payload to be forwarded, got %+v", service.createInput)
+	}
+}
+
+func TestDeviceHandlerConnectReturnsInternalServerErrorForUnexpectedFailure(t *testing.T) {
+	service := &fakeDeviceService{
+		connectErr: errors.New("adb connect failed"),
+	}
+	handler := NewDeviceHandler(service, nil, nil, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/connect/7", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.Connect(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `DEVICE_CONNECT_FAILED`) {
+		t.Fatalf("expected device connect failure payload, got %s", recorder.Body.String())
 	}
 }

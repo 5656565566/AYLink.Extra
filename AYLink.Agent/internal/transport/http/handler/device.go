@@ -78,7 +78,7 @@ func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	var payload deviceservice.CreateInput
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 	device, err := h.service.Create(r.Context(), payload)
@@ -154,7 +154,7 @@ func (h *DeviceHandler) Connect(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		WriteError(w, http.StatusBadRequest, "DEVICE_CONNECT_FAILED", "Errors.DeviceConnectFailed", err.Error())
+		WriteInternalServerError(w, "DEVICE_CONNECT_FAILED", "Errors.DeviceConnectFailed", "设备连接失败")
 		return
 	}
 
@@ -180,7 +180,7 @@ func (h *DeviceHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"Name"`
 	}
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 
@@ -236,7 +236,7 @@ func (h *DeviceHandler) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := domaindevice.DefaultSettingsProfile()
 	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		WriteInvalidJSON(w)
 		return
 	}
 	settings, err := h.settingsService.SaveByDeviceID(r.Context(), id, payload)

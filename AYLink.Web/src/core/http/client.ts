@@ -10,10 +10,8 @@ export interface ApiRequestOptions extends RequestInit {
 }
 
 interface AuthSessionHandlers {
-  clearSession: () => void;
-  ensureFreshAccessToken: () => Promise<void>;
+  ensureFreshAccessToken: () => Promise<boolean>;
   getAccessToken: () => string;
-  hasActiveAccessToken: () => boolean;
   refreshAccessToken: () => Promise<boolean>;
   syncSessionFromStorage: () => void;
 }
@@ -91,7 +89,13 @@ export async function sendApiRequest(url: string, options: ApiRequestOptions = {
   }
 
   if (requiresAuth) {
-    await authSessionHandlers?.ensureFreshAccessToken?.();
+    const ensured = await authSessionHandlers?.ensureFreshAccessToken?.();
+    if (ensured === false) {
+      if (handleUnauthorized) {
+        unauthorizedHandler?.();
+      }
+      return new Response(null, { status: 401 });
+    }
   }
 
   if (requiresAuth && !authSessionHandlers?.getAccessToken()) {
@@ -142,12 +146,7 @@ export async function sendApiRequest(url: string, options: ApiRequestOptions = {
         return sendApiRequest(url, options, true);
       }
 
-      if (authSessionHandlers?.hasActiveAccessToken()) {
-        return response;
-      }
-
       if (handleUnauthorized) {
-        authSessionHandlers?.clearSession();
         unauthorizedHandler?.();
       }
     } else if (handleForbidden && response.status === 403) {

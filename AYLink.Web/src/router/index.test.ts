@@ -27,12 +27,14 @@ vi.mock('../services/i18n', () => ({
 
 vi.mock('../services/auth', () => ({
   initializeAuth: routerTestState.initializeAuth,
+  ensureAuthenticatedSession: vi.fn(async () => routerTestState.isAuthenticated),
   hasPermission: (permission: string) => routerTestState.permissions.includes(permission),
   getDefaultAuthorizedRoute: routerTestState.getDefaultAuthorizedRoute,
   useAuth: () => ({
     isAuthenticated: {
       value: routerTestState.isAuthenticated
-    }
+    },
+    hasPermission: (permission: string) => routerTestState.permissions.includes(permission)
   })
 }));
 

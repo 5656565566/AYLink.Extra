@@ -29,6 +29,14 @@ import {
   scheduleReconnect as scheduleReconnectFlow,
   scheduleStartConnection as scheduleStartConnectionFlow
 } from '../features/screencast/connectionScheduler';
+import {
+  useVideoStreamHealth
+} from '../features/screencast/useVideoStreamHealth';
+import { useScreencastMediaTracks } from '../features/screencast/useScreencastMediaTracks';
+import {
+  useScrcpyControlChannels,
+  type PendingPointerControlPayload
+} from '../features/screencast/useScrcpyControlChannels';
 import { useCastDeviceContext } from '../features/screencast/useCastDeviceContext';
 import { useCastTabs } from '../features/screencast/useCastTabs';
 import { useCastSessionPersistence } from '../features/screencast/useCastSessionPersistence';
@@ -90,11 +98,6 @@ export default defineComponent({
       }>;
     }
 
-    interface PendingPointerControlPayload {
-      payload: Uint8Array;
-      onSent?: () => void;
-    }
-
     interface SignalErrorMessagePayload {
       type: 'error';
       code?: string;
@@ -121,7 +124,7 @@ export default defineComponent({
 
     const POINTER_MOVE_SAMPLE_INTERVAL_MS = 1000 / 120;
 
-    const SIGNALING_DETACH_DELAY_MS = 3000;
+    const SIGNALING_STABLE_DETACH_MS = 20000;
 
     const VIDEO_RECOVERY_TIMEOUT_MS = 8000;
 
@@ -349,8 +352,6 @@ export default defineComponent({
 
     const pendingPointerMoves = new Map<number, PendingPointerMove>();
 
-    const pendingPointerControlPayloads: PendingPointerControlPayload[] = [];
-
     let peerConnection: RTCPeerConnection | null = null;
 
     let ws: WebSocket | null = null;
@@ -367,6 +368,101 @@ export default defineComponent({
 
     const connectionSchedulerState = createCastConnectionSchedulerState();
 
+    const videoStreamHealth = useVideoStreamHealth({
+      stableDetachMs: SIGNALING_STABLE_DETACH_MS,
+      stallThresholdMs: VIDEO_STREAM_STALL_THRESHOLD_MS,
+      watchdogIntervalMs: VIDEO_STREAM_WATCHDOG_INTERVAL_MS,
+      diagnosticIntervalMs: VIDEO_STREAM_DIAGNOSTIC_INTERVAL_MS,
+      stallConfirmationCount: VIDEO_STREAM_STALL_CONFIRMATION_COUNT,
+      getActiveConnectionId: () => activeConnectionId,
+      isAutoReconnectSuppressed: () => connectionSchedulerState.suppressAutoReconnect,
+      isScreencastVisible: () => document.visibilityState === 'visible' && route.name === 'screencast',
+      getPeerConnection: () => peerConnection,
+      getSignalingSocket: () => ws,
+      getVideoTrack: () => remoteTracks.get('video'),
+      hasVideoTrack: () => remoteTracks.has('video'),
+      hasVideoSource: () => !!videoElement.value?.srcObject,
+      getVideoElement: () => videoElement.value,
+      syncVideoFrameSize: () => syncVideoFrameSize(),
+      getDeviceId: () => deviceId.value,
+      getTabKey: () => activeTabKey.value
+    });
+
+    const mediaTracks = useScreencastMediaTracks({
+      remoteTracks,
+      getVideoStream: () => remoteVideoStream,
+      setVideoStream: (stream) => {
+        remoteVideoStream = stream;
+      },
+      getAudioStream: () => remoteAudioStream,
+      setAudioStream: (stream) => {
+        remoteAudioStream = stream;
+      },
+      getVideoElement: () => videoElement.value,
+      getAudioElement: () => audioElement.value,
+      getPersistentAudioElement: () => getPersistentAudioElement(),
+      getConnectionId: () => activeConnectionId,
+      shouldReconnectOnVideoEnded: () => !connectionSchedulerState.suppressAutoReconnect,
+      getDeviceId: () => deviceId.value,
+      getTabKey: () => activeTabKey.value,
+      getWebSocketReadyState: () => ws?.readyState ?? null,
+      getPeerConnectionState: () => peerConnection?.connectionState ?? null,
+      onVideoTrackBound: (connectionId) => {
+        startVideoFrameMonitor(connectionId);
+        clearPendingVideoRecovery();
+        scheduleSignalingDetach(connectionId);
+      },
+      onAudioTrackBound: () => {
+        syncBackgroundMuteState();
+      },
+      onTrackChanged: () => {
+        persistCurrentConnection();
+      },
+      onVideoTrackEnded: (connectionId) => {
+        markActiveVideoStreamUnstable(connectionId, 'remote_video_track_ended');
+        stopConnection();
+        scheduleReconnect('remote_video_track_ended');
+      }
+    });
+
+    const controlChannels = useScrcpyControlChannels({
+      controlBufferLimit: CONTROL_CHANNEL_BUFFER_LIMIT,
+      pointerMoveBufferLimit: POINTER_MOVE_BUFFER_LIMIT,
+      isDroppableControlPayload: (payload) => isDroppableControlPayload(payload),
+      onControlChannelChanged: (channel) => {
+        dataChannel = channel;
+      },
+      onMetaControlChannelChanged: (channel) => {
+        metaControlChannel = channel;
+      },
+      onPointerMoveChannelChanged: (channel) => {
+        pointerMoveChannel = channel;
+      },
+      onControlChannelOpen: () => {
+        status.value = t('Screencast.StatusControlConnected', '控制通道已连接');
+        flushPendingPointerReleases();
+        initializeHidDevices();
+        lastDisplayResizeRequest = null;
+        scheduleDisplayResize(0);
+      },
+      onControlBufferedAmountLow: () => {
+        flushPendingPointerReleases();
+      },
+      onPointerMoveChannelOpen: () => {
+        flushPendingPointerMoves();
+        flushPendingPointerReleases();
+      },
+      onPointerMoveBufferedAmountLow: () => {
+        flushPendingPointerMoves();
+        flushPendingPointerReleases();
+      },
+      onPersistConnection: () => {
+        persistCurrentConnection();
+      }
+    });
+
+    const pendingPointerControlPayloads = controlChannels.pendingPointerControlPayloads;
+
     let pendingResumePlaybackTimer: number | null = null;
 
     let pendingDisplayResizeTimer: number | null = null;
@@ -374,8 +470,6 @@ export default defineComponent({
     let flexDisplayHeartbeatTimer: number | null = null;
 
     let pendingVideoRecoveryTimer: number | null = null;
-
-    let pendingSignalingDetachTimer: number | null = null;
 
     let pendingIceRestartFallbackTimer: number | null = null;
 
@@ -386,10 +480,6 @@ export default defineComponent({
     let hasHandledInitialActivation = false;
 
     let hasUsedInitialConnectionWarmup = false;
-
-    let videoFrameCallbackHandle: number | null = null;
-
-    let videoStreamWatchdogTimer: number | null = null;
 
     let lastDisplayResizeRequest: { width: number; height: number } | null = null;
 
@@ -423,29 +513,11 @@ export default defineComponent({
 
     let pointerReleaseFlushHandle: number | null = null;
 
-    let pointerControlFlushHandle: number | null = null;
-
     let lastPointerMoveFlushAt = 0;
 
     let isIceRestartInFlight = false;
 
-    let detachedSignalingConnectionId = 0;
-
-    let expectedSignalingCloseConnectionId = 0;
-
     let currentScrcpySessionId = '';
-
-    let lastVideoFrameAt = 0;
-
-    let lastVideoStreamPacketAt = 0;
-
-    let lastVideoStreamDiagnosticAt = 0;
-
-    let lastInboundVideoPacketsReceived: number | null = null;
-
-    let lastInboundVideoBytesReceived: number | null = null;
-
-    let consecutiveVideoStreamStallDetections = 0;
 
     interface PendingPointerMove {
       pointerId: number;
@@ -744,183 +816,23 @@ export default defineComponent({
     };
 
     const stopVideoFrameCaptureLoop = () => {
-      if (videoFrameCallbackHandle == null || !videoElement.value || typeof videoElement.value.cancelVideoFrameCallback !== 'function') {
-        videoFrameCallbackHandle = null;
-        return;
-      }
-    
-      try {
-        videoElement.value.cancelVideoFrameCallback(videoFrameCallbackHandle);
-      } catch (error) {
-        console.warn('Failed to cancel video frame callback:', error);
-      }
-      videoFrameCallbackHandle = null;
+      videoStreamHealth.stopVideoFrameCaptureLoop();
     };
 
     const resetVideoStreamWatchdogState = () => {
-      lastVideoFrameAt = 0;
-      lastVideoStreamPacketAt = 0;
-      lastVideoStreamDiagnosticAt = 0;
-      lastInboundVideoPacketsReceived = null;
-      lastInboundVideoBytesReceived = null;
-      consecutiveVideoStreamStallDetections = 0;
+      videoStreamHealth.resetWatchdogState();
     };
 
     const stopVideoStreamWatchdog = () => {
-      if (videoStreamWatchdogTimer != null) {
-        window.clearInterval(videoStreamWatchdogTimer);
-        videoStreamWatchdogTimer = null;
-      }
+      videoStreamHealth.stopWatchdog();
     };
 
-    const shouldMonitorVideoStream = (connectionId: number) => {
-      if (connectionSchedulerState.suppressAutoReconnect || connectionId !== activeConnectionId) {
-        return false;
-      }
-      if (document.visibilityState !== 'visible' || route.name !== 'screencast') {
-        return false;
-      }
-      if (!peerConnection || peerConnection.connectionState !== 'connected') {
-        return false;
-      }
-      const videoTrack = remoteTracks.get('video');
-      if (!videoTrack || videoTrack.readyState !== 'live') {
-        return false;
-      }
-      return !!videoElement.value?.srcObject;
-    };
+    const shouldMonitorVideoStream = (connectionId: number) => videoStreamHealth.shouldMonitorVideoStream(connectionId);
 
-    const getInboundVideoStatsSnapshot = async () => {
-      const videoReceiver = peerConnection?.getReceivers().find(receiver => receiver.track?.kind === 'video');
-      if (!videoReceiver || typeof videoReceiver.getStats !== 'function') {
-        return null;
-      }
-
-      const stats = await videoReceiver.getStats();
-      for (const report of stats.values()) {
-        if (report.type !== 'inbound-rtp' || (report.kind != null && report.kind !== 'video')) {
-          continue;
-        }
-        return {
-          packetsReceived: report.packetsReceived ?? null,
-          bytesReceived: report.bytesReceived ?? null,
-          framesDecoded: report.framesDecoded ?? null,
-          framesDropped: report.framesDropped ?? null,
-          timestamp: report.timestamp ?? null
-        };
-      }
-      return null;
-    };
-
-    const hasInboundVideoStreamAdvanced = (snapshot: Awaited<ReturnType<typeof getInboundVideoStatsSnapshot>>) => {
-      if (!snapshot) {
-        return false;
-      }
-
-      const packetsReceived = typeof snapshot.packetsReceived === 'number' ? snapshot.packetsReceived : null;
-      const bytesReceived = typeof snapshot.bytesReceived === 'number' ? snapshot.bytesReceived : null;
-      const hasBaseline = lastInboundVideoPacketsReceived != null || lastInboundVideoBytesReceived != null;
-      const hasAdvanced =
-        (packetsReceived != null && lastInboundVideoPacketsReceived != null && packetsReceived > lastInboundVideoPacketsReceived) ||
-        (bytesReceived != null && lastInboundVideoBytesReceived != null && bytesReceived > lastInboundVideoBytesReceived);
-
-      lastInboundVideoPacketsReceived = packetsReceived;
-      lastInboundVideoBytesReceived = bytesReceived;
-      return !hasBaseline || hasAdvanced;
-    };
-
-    const handleVideoStreamWatchdog = async (connectionId: number, reason: string) => {
-      if (!shouldMonitorVideoStream(connectionId)) {
-        consecutiveVideoStreamStallDetections = 0;
-        return;
-      }
-
-      const now = performance.now();
-      let inboundVideoStats: Awaited<ReturnType<typeof getInboundVideoStatsSnapshot>> = null;
-      try {
-        inboundVideoStats = await getInboundVideoStatsSnapshot();
-      } catch (error) {
-        console.warn('[WebRTC] Failed to read inbound video stats during stream watchdog.', error);
-        return;
-      }
-
-      if (hasInboundVideoStreamAdvanced(inboundVideoStats)) {
-        lastVideoStreamPacketAt = now;
-        lastVideoStreamDiagnosticAt = 0;
-        consecutiveVideoStreamStallDetections = 0;
-        return;
-      }
-
-      if (lastVideoStreamPacketAt <= 0) {
-        lastVideoStreamPacketAt = now;
-        return;
-      }
-
-      if (now - lastVideoStreamPacketAt < VIDEO_STREAM_STALL_THRESHOLD_MS) {
-        consecutiveVideoStreamStallDetections = 0;
-        return;
-      }
-
-      consecutiveVideoStreamStallDetections += 1;
-      if (consecutiveVideoStreamStallDetections < VIDEO_STREAM_STALL_CONFIRMATION_COUNT) {
-        console.warn('[WebRTC] Inbound video RTP stream stopped advancing, waiting for consecutive confirmation.', {
-          reason,
-          deviceId: deviceId.value,
-          tabKey: activeTabKey.value,
-          consecutiveVideoStreamStallDetections,
-          confirmationThreshold: VIDEO_STREAM_STALL_CONFIRMATION_COUNT,
-          inboundVideoStats
-        });
-        return;
-      }
-
-      if (now - lastVideoStreamDiagnosticAt < VIDEO_STREAM_DIAGNOSTIC_INTERVAL_MS) {
-        return;
-      }
-
-      lastVideoStreamDiagnosticAt = now;
-      console.warn('[WebRTC] Inbound video RTP stream appears stalled while peer connection is still connected.', {
-        reason,
-        deviceId: deviceId.value,
-        tabKey: activeTabKey.value,
-        peerConnectionState: peerConnection?.connectionState ?? null,
-        inboundVideoStats
-      });
-    };
+    const handleVideoStreamWatchdog = (connectionId: number, reason: string) => videoStreamHealth.handleWatchdog(connectionId, reason);
 
     const startVideoFrameMonitor = (connectionId: number) => {
-      stopVideoFrameCaptureLoop();
-      stopVideoStreamWatchdog();
-      resetVideoStreamWatchdogState();
-    
-      const source = videoElement.value;
-      if (!source) {
-        return;
-      }
-    
-      const updateFrameActivity = () => {
-        lastVideoFrameAt = performance.now();
-      };
-    
-      const scheduleNextFrame = () => {
-        if (!videoElement.value || videoElement.value !== source || connectionId !== activeConnectionId) {
-          return;
-        }
-        if (typeof source.requestVideoFrameCallback !== 'function') {
-          return;
-        }
-        videoFrameCallbackHandle = source.requestVideoFrameCallback(() => {
-          updateFrameActivity();
-          syncVideoFrameSize();
-          scheduleNextFrame();
-        });
-      };
-    
-      updateFrameActivity();
-      scheduleNextFrame();
-      videoStreamWatchdogTimer = window.setInterval(() => {
-        void handleVideoStreamWatchdog(connectionId, 'inbound_rtp_watchdog');
-      }, VIDEO_STREAM_WATCHDOG_INTERVAL_MS);
+      videoStreamHealth.start(connectionId);
     };
 
     const stopPointerMoveFlushLoop = () => {
@@ -935,15 +847,10 @@ export default defineComponent({
     };
 
     const getHighFrequencyControlChannel = () =>
-      pointerMoveChannel?.readyState === 'open'
-        ? pointerMoveChannel
-        : dataChannel;
+      controlChannels.getHighFrequencyControlChannel();
 
     const stopPointerControlFlushLoop = () => {
-      if (pointerControlFlushHandle != null) {
-        window.cancelAnimationFrame(pointerControlFlushHandle);
-        pointerControlFlushHandle = null;
-      }
+      controlChannels.stopPointerControlFlushLoop();
     };
 
     const stopPointerReleaseFlushLoop = () => {
@@ -954,66 +861,19 @@ export default defineComponent({
     };
 
     const flushPendingPointerControlPayloads = () => {
-      if (!dataChannel || dataChannel.readyState !== 'open') {
-        return;
-      }
-    
-      while (pendingPointerControlPayloads.length > 0) {
-        if (dataChannel.bufferedAmount > CONTROL_CHANNEL_BUFFER_LIMIT) {
-          schedulePointerControlFlush();
-          return;
-        }
-    
-        const pendingPayload = pendingPointerControlPayloads[0];
-        try {
-          dataChannel.send(pendingPayload.payload as unknown as ArrayBufferView<ArrayBuffer>);
-          pendingPointerControlPayloads.shift();
-          pendingPayload.onSent?.();
-        } catch (error) {
-          console.warn('Pointer control send failed:', error);
-          schedulePointerControlFlush();
-          return;
-        }
-      }
-    
-      stopPointerControlFlushLoop();
+      controlChannels.flushPendingPointerControlPayloads();
     };
 
     const schedulePointerControlFlush = () => {
-      if (pointerControlFlushHandle != null || pendingPointerControlPayloads.length === 0) {
-        return;
-      }
-    
-      pointerControlFlushHandle = window.requestAnimationFrame(() => {
-        pointerControlFlushHandle = null;
-        flushPendingPointerControlPayloads();
-      });
+      flushPendingPointerControlPayloads();
     };
 
     const enqueuePointerControlPayloads = (...payloads: PendingPointerControlPayload[]) => {
-      if (payloads.length === 0) {
-        return true;
-      }
-    
-      pendingPointerControlPayloads.push(...payloads);
-      flushPendingPointerControlPayloads();
-      if (pendingPointerControlPayloads.length > 0) {
-        schedulePointerControlFlush();
-      }
-      return true;
+      return controlChannels.enqueuePointerControlPayloads(...payloads);
     };
 
     const enqueuePointerPayloadBuffers = (payloads: Uint8Array[], onLastSent?: () => void) => {
-      if (payloads.length === 0) {
-        return false;
-      }
-    
-      return enqueuePointerControlPayloads(
-        ...payloads.map((payload, index) => ({
-          payload,
-          onSent: onLastSent && index === payloads.length - 1 ? onLastSent : undefined
-        }))
-      );
+      return controlChannels.enqueuePointerPayloadBuffers(payloads, onLastSent);
     };
 
     const normalizeNewDisplayDpiValue = (value: number | null | undefined) => {
@@ -1526,64 +1386,15 @@ export default defineComponent({
     };
 
     const setupControlChannel = (channel: RTCDataChannel) => {
-      dataChannel = channel;
-      dataChannel.bufferedAmountLowThreshold = Math.floor(CONTROL_CHANNEL_BUFFER_LIMIT / 2);
-      persistCurrentConnection();
-      dataChannel.onopen = () => {
-        status.value = t('Screencast.StatusControlConnected', '控制通道已连接');
-        flushPendingPointerControlPayloads();
-        flushPendingPointerReleases();
-        initializeHidDevices();
-        lastDisplayResizeRequest = null;
-        scheduleDisplayResize(0);
-        persistCurrentConnection();
-      };
-      dataChannel.onbufferedamountlow = () => {
-        flushPendingPointerControlPayloads();
-        flushPendingPointerReleases();
-      };
-      dataChannel.onclose = () => {
-        if (dataChannel === channel) {
-          dataChannel = null;
-          persistCurrentConnection();
-        }
-      };
-      dataChannel.onmessage = (event) => console.log('Data channel message:', event.data);
+      controlChannels.setupControlChannel(channel);
     };
 
     const setupMetaControlChannel = (channel: RTCDataChannel) => {
-      metaControlChannel = channel;
-      persistCurrentConnection();
-      metaControlChannel.onopen = () => {
-        persistCurrentConnection();
-      };
-      metaControlChannel.onclose = () => {
-        if (metaControlChannel === channel) {
-          metaControlChannel = null;
-          persistCurrentConnection();
-        }
-      };
+      controlChannels.setupMetaControlChannel(channel);
     };
 
     const setupPointerMoveChannel = (channel: RTCDataChannel) => {
-      pointerMoveChannel = channel;
-      pointerMoveChannel.bufferedAmountLowThreshold = Math.floor(POINTER_MOVE_BUFFER_LIMIT / 2);
-      persistCurrentConnection();
-      pointerMoveChannel.onopen = () => {
-        flushPendingPointerMoves();
-        flushPendingPointerReleases();
-        persistCurrentConnection();
-      };
-      pointerMoveChannel.onbufferedamountlow = () => {
-        flushPendingPointerMoves();
-        flushPendingPointerReleases();
-      };
-      pointerMoveChannel.onclose = () => {
-        if (pointerMoveChannel === channel) {
-          pointerMoveChannel = null;
-          persistCurrentConnection();
-        }
-      };
+      controlChannels.setupPointerMoveChannel(channel);
     };
 
     const clearPendingReconnect = () => {
@@ -1605,16 +1416,15 @@ export default defineComponent({
     };
 
     const clearPendingSignalingDetach = () => {
-      if (pendingSignalingDetachTimer != null) {
-        window.clearTimeout(pendingSignalingDetachTimer);
-        pendingSignalingDetachTimer = null;
-      }
+      videoStreamHealth.clearPendingSignalingDetach();
     };
 
     const resetSignalingDetachState = () => {
-      clearPendingSignalingDetach();
-      detachedSignalingConnectionId = 0;
-      expectedSignalingCloseConnectionId = 0;
+      videoStreamHealth.resetSignalingDetachState();
+    };
+
+    const markActiveVideoStreamUnstable = (connectionId: number, reason: string) => {
+      videoStreamHealth.markUnstable(connectionId, reason);
     };
 
     const clearStartConnectionState = () => {
@@ -1704,32 +1514,7 @@ export default defineComponent({
     };
 
     const scheduleSignalingDetach = (connectionId: number) => {
-      if (pendingSignalingDetachTimer != null || detachedSignalingConnectionId === connectionId) {
-        return;
-      }
-      if (!ws || ws.readyState !== WebSocket.OPEN || !peerConnection || peerConnection.connectionState !== 'connected' || !remoteTracks.has('video')) {
-        return;
-      }
-    
-      const targetSocket = ws;
-      pendingSignalingDetachTimer = window.setTimeout(() => {
-        pendingSignalingDetachTimer = null;
-        if (connectionId !== activeConnectionId || ws !== targetSocket || targetSocket.readyState !== WebSocket.OPEN) {
-          return;
-        }
-        if (!peerConnection || peerConnection.connectionState !== 'connected' || !remoteTracks.has('video')) {
-          return;
-        }
-    
-        console.info('[WebRTC] Closing signaling websocket after stable connection established.', {
-          connectionId,
-          deviceId: deviceId.value,
-          tabKey: activeTabKey.value
-        });
-        detachedSignalingConnectionId = connectionId;
-        expectedSignalingCloseConnectionId = connectionId;
-        targetSocket.close(1000, 'signaling-detached');
-      }, SIGNALING_DETACH_DELAY_MS);
+      videoStreamHealth.scheduleSignalingDetach(connectionId);
     };
 
     const tryIceRestart = async (reason: string) => {
@@ -1990,26 +1775,15 @@ export default defineComponent({
     };
 
     const sendBinaryControlMessage = (payload: Uint8Array, channel = dataChannel) => {
-      if (!channel || channel.readyState !== 'open') return;
-      if (channel.bufferedAmount > CONTROL_CHANNEL_BUFFER_LIMIT && isDroppableControlPayload(payload)) {
-        return;
-      }
-      try {
-        channel.send(payload as unknown as ArrayBufferView<ArrayBuffer>);
-      } catch (error) {
-        console.warn('Binary control send failed:', error);
-      }
+      controlChannels.sendBinaryControlMessage(payload, channel);
     };
 
     const getMetaControlChannel = () => {
-      if (metaControlChannel?.readyState === 'open') {
-        return metaControlChannel;
-      }
-      return dataChannel;
+      return controlChannels.getMetaControlChannel();
     };
 
     const sendMetaControlMessage = (payload: Uint8Array) => {
-      sendBinaryControlMessage(payload, getMetaControlChannel());
+      controlChannels.sendMetaControlMessage(payload);
     };
 
     const hidSession = createHidSession({
@@ -2493,60 +2267,6 @@ export default defineComponent({
       target.setPointerCapture?.(event.pointerId);
     };
 
-    const replaceSingleTrack = (stream: MediaStream, track: MediaStreamTrack) => {
-      for (const existingTrack of stream.getTracks()) {
-        stream.removeTrack(existingTrack);
-      }
-    
-      stream.addTrack(track);
-    };
-
-    const applyLowLatencyTrackHints = (event: RTCTrackEvent) => {
-      const receiver = event.receiver as RTCRtpReceiver & {
-        playoutDelayHint?: number;
-        jitterBufferTarget?: number | null;
-      };
-    
-      if (event.track.kind === 'video') {
-        event.track.contentHint = 'motion';
-      }
-    
-      if ('playoutDelayHint' in receiver) {
-        receiver.playoutDelayHint = 0;
-      }
-    
-      if ('jitterBufferTarget' in receiver) {
-        receiver.jitterBufferTarget = 0;
-      }
-    };
-
-    const bindVideoTrack = (event: RTCTrackEvent) => {
-      if (!videoElement.value) return;
-    
-      replaceSingleTrack(remoteVideoStream, event.track);
-      if (videoElement.value.srcObject !== remoteVideoStream) {
-        videoElement.value.srcObject = remoteVideoStream;
-      }
-      startVideoFrameMonitor(activeConnectionId);
-      clearPendingVideoRecovery();
-      scheduleSignalingDetach(activeConnectionId);
-    };
-
-    const bindAudioTrack = (event: RTCTrackEvent) => {
-      const backgroundAudioElement = getPersistentAudioElement();
-      replaceSingleTrack(remoteAudioStream, event.track);
-      if (audioElement.value) {
-        if (audioElement.value.srcObject !== remoteAudioStream) {
-          audioElement.value.srcObject = remoteAudioStream;
-        }
-      }
-      if (backgroundAudioElement.srcObject !== remoteAudioStream) {
-        backgroundAudioElement.srcObject = remoteAudioStream;
-      }
-    
-      syncBackgroundMuteState();
-    };
-
     const requestFullscreen = async () => {
       const target = shellElement.value ?? videoContainer.value ?? videoElement.value;
       if (!target || document.fullscreenElement === target) return;
@@ -2574,55 +2294,8 @@ export default defineComponent({
     };
 
     const attachRemoteTrack = async (event: RTCTrackEvent) => {
-      console.log('[WebRTC] Track arrived:', event.track.kind, 'streams:', event.streams?.length || 0);
-    
-      if (event.track.kind !== 'audio' && event.track.kind !== 'video') {
-        return;
-      }
-    
-      applyLowLatencyTrackHints(event);
-    
-      const trackKind = event.track.kind;
-      remoteTracks.set(trackKind, event.track);
-      event.track.onended = () => {
-        if (remoteTracks.get(trackKind) === event.track) {
-          remoteTracks.delete(trackKind);
-          if (trackKind === 'video') {
-            remoteVideoStream = new MediaStream();
-            if (videoElement.value) {
-              videoElement.value.srcObject = null;
-            }
-          } else {
-            remoteAudioStream = new MediaStream();
-            if (audioElement.value) {
-              audioElement.value.srcObject = null;
-            }
-            getPersistentAudioElement().srcObject = null;
-          }
-          persistCurrentConnection();
-    
-          if (trackKind === 'video' && !connectionSchedulerState.suppressAutoReconnect) {
-            console.warn('[WebRTC] Remote video track ended.', {
-              deviceId: deviceId.value,
-              tabKey: activeTabKey.value,
-              wsReadyState: ws?.readyState ?? null,
-              peerConnectionState: peerConnection?.connectionState ?? null
-            });
-            stopConnection();
-            scheduleReconnect('remote_video_track_ended');
-          }
-        }
-      };
-    
-      if (trackKind === 'video') {
-        bindVideoTrack(event);
-      } else {
-        bindAudioTrack(event);
-      }
-      persistCurrentConnection();
-    
+      await mediaTracks.attachRemoteTrack(event);
       scheduleResumeMediaPlayback();
-    
       syncVideoFrameSize();
     };
 
@@ -2634,20 +2307,7 @@ export default defineComponent({
       clearPendingResumePlayback();
       lastVideoFrameSize = { width: 0, height: 0 };
       shouldShowLastFrameOverlay.value = false;
-      if (videoElement.value) {
-        videoElement.value.pause();
-        videoElement.value.srcObject = null;
-      }
-      if (audioElement.value) {
-        audioElement.value.pause();
-        audioElement.value.srcObject = null;
-      }
-      const backgroundAudioElement = getPersistentAudioElement();
-      backgroundAudioElement.pause();
-      backgroundAudioElement.srcObject = null;
-      remoteTracks.clear();
-      remoteVideoStream = new MediaStream();
-      remoteAudioStream = new MediaStream();
+      mediaTracks.cleanupMediaElements();
     };
 
     const wirePeerConnectionEventHandlers = (connectionId: number, targetPeerConnection: RTCPeerConnection) => {
@@ -2681,22 +2341,23 @@ export default defineComponent({
           tabKey: activeTabKey.value
         });
     
-      if (peerConnection.connectionState === 'connected') {
-        isConnecting.value = false;
-        clearPendingReconnect();
-        clearPendingIceRestartFallback();
-        isIceRestartInFlight = false;
-        connectionSchedulerState.reconnectAttempt = 0;
-        startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
-        startVideoFrameMonitor(connectionId);
-        scheduleDisplayResize(150);
-        scheduleSignalingDetach(connectionId);
-        if (!remoteTracks.has('video')) {
+        if (peerConnection.connectionState === 'connected') {
+          isConnecting.value = false;
+          clearPendingReconnect();
+          clearPendingIceRestartFallback();
+          isIceRestartInFlight = false;
+          connectionSchedulerState.reconnectAttempt = 0;
+          startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
+          startVideoFrameMonitor(connectionId);
+          scheduleDisplayResize(150);
+          scheduleSignalingDetach(connectionId);
+          if (!remoteTracks.has('video')) {
             scheduleVideoRecovery(connectionId, 'peer_connected_without_video');
           }
         }
     
         if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'closed') {
+          markActiveVideoStreamUnstable(connectionId, `peer_connection_${peerConnection.connectionState}`);
           isConnecting.value = false;
           if (peerConnection.connectionState === 'closed') {
             stopConnection();
@@ -2736,6 +2397,7 @@ export default defineComponent({
           return;
         }
     
+        markActiveVideoStreamUnstable(connectionId, `ice_connection_${currentIceState}`);
         if (currentIceState === 'closed') {
           stopConnection();
           scheduleReconnect('ice_connection_closed');
@@ -2828,13 +2490,12 @@ export default defineComponent({
         if (connectionId !== activeConnectionId || ws !== targetSocket) {
           return;
         }
-        const wasIntentionalDetach = expectedSignalingCloseConnectionId === connectionId;
-        expectedSignalingCloseConnectionId = 0;
+        const wasIntentionalDetach = videoStreamHealth.consumeExpectedSignalingClose(connectionId);
         ws = null;
         clearPersistedConnection(persistedTabKey);
         const currentState = peerConnection?.connectionState;
         if (currentState === 'connected' || currentState === 'connecting') {
-          detachedSignalingConnectionId = connectionId;
+          videoStreamHealth.markSignalingClosedWhileActive(connectionId);
           status.value = wasIntentionalDetach
             ? t('Screencast.StatusMediaDirect', '媒体已直连，信令已断开')
             : t('Screencast.StatusSignalingDetached', '信令连接已断开，媒体链路继续运行');
@@ -2847,7 +2508,7 @@ export default defineComponent({
           return;
         }
     
-        detachedSignalingConnectionId = 0;
+        resetSignalingDetachState();
         status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
         stopConnection();
         scheduleReconnect('websocket_closed');
@@ -2885,6 +2546,7 @@ export default defineComponent({
       stopConnection();
       enableAutoReconnect();
       resetSignalingDetachState();
+      resetVideoStreamWatchdogState();
       connectionSchedulerState.isStartConnectionInFlight = true;
       connectionSchedulerState.activeConnectionTargetKey = targetTabKey;
       isConnecting.value = true;
@@ -2987,10 +2649,12 @@ export default defineComponent({
       pendingPointerReleases.clear();
       queuedPointerReleases.clear();
       pendingPointerMoves.clear();
-      pendingPointerControlPayloads.length = 0;
+      controlChannels.clearPendingPointerControlPayloads();
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = '';
       stopVideoFrameCaptureLoop();
+      stopVideoStreamWatchdog();
+      resetVideoStreamWatchdogState();
       resetSignalingDetachState();
       stopPointerControlFlushLoop();
       stopPointerReleaseFlushLoop();
@@ -3039,7 +2703,7 @@ export default defineComponent({
       pendingPointerReleases.clear();
       queuedPointerReleases.clear();
       pendingPointerMoves.clear();
-      pendingPointerControlPayloads.length = 0;
+      controlChannels.clearPendingPointerControlPayloads();
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = '';
       resetSignalingDetachState();
@@ -4182,7 +3846,7 @@ export default defineComponent({
       CONTROL_CHANNEL_BUFFER_LIMIT,
       MOUSE_COMPAT_SUPPRESSION_MS,
       POINTER_MOVE_SAMPLE_INTERVAL_MS,
-      SIGNALING_DETACH_DELAY_MS,
+      SIGNALING_STABLE_DETACH_MS,
       VIDEO_RECOVERY_TIMEOUT_MS,
       VIDEO_STREAM_STALL_THRESHOLD_MS,
       VIDEO_STREAM_WATCHDOG_INTERVAL_MS,
@@ -4274,6 +3938,7 @@ export default defineComponent({
       remoteVideoStream,
       remoteAudioStream,
       remoteTracks,
+      mediaTracks,
       activePointers,
       pointerGenerations,
       pointerSnapshots,
@@ -4289,18 +3954,16 @@ export default defineComponent({
       activeMousePointerId,
       lastVideoFrameSize,
       connectionSchedulerState,
+      videoStreamHealth,
       pendingResumePlaybackTimer,
       pendingDisplayResizeTimer,
       flexDisplayHeartbeatTimer,
       pendingVideoRecoveryTimer,
-      pendingSignalingDetachTimer,
       pendingIceRestartFallbackTimer,
       pendingCandidates,
       activeConnectionId,
       hasHandledInitialActivation,
       hasUsedInitialConnectionWarmup,
-      videoFrameCallbackHandle,
-      videoStreamWatchdogTimer,
       lastDisplayResizeRequest,
       videoContainerResizeObserver,
       dragStartOffset,
@@ -4319,18 +3982,10 @@ export default defineComponent({
       pointerMoveFlushHandle,
       pointerMoveSampleTimer,
       pointerReleaseFlushHandle,
-      pointerControlFlushHandle,
       lastPointerMoveFlushAt,
+      controlChannels,
       isIceRestartInFlight,
-      detachedSignalingConnectionId,
-      expectedSignalingCloseConnectionId,
       currentScrcpySessionId,
-      lastVideoFrameAt,
-      lastVideoStreamPacketAt,
-      lastVideoStreamDiagnosticAt,
-      lastInboundVideoPacketsReceived,
-      lastInboundVideoBytesReceived,
-      consecutiveVideoStreamStallDetections,
       activeTab,
       hasCastTabs,
       castTabItems,
@@ -4488,10 +4143,6 @@ export default defineComponent({
       closeClipboardWindow,
       toggleClipboardWindow,
       startClipboardDrag,
-      replaceSingleTrack,
-      applyLowLatencyTrackHints,
-      bindVideoTrack,
-      bindAudioTrack,
       requestFullscreen,
       toggleFullscreen,
       toggleFillMode,

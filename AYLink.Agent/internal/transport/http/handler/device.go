@@ -91,7 +91,13 @@ func (h *DeviceHandler) Preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := h.previewService.Get(r.Context(), id)
+	width, err := previewWidthFromQuery(r)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_PREVIEW_WIDTH", "HomeView.PreviewWidthInvalid", "预览宽度无效")
+		return
+	}
+
+	payload, err := h.previewService.Get(r.Context(), id, width)
 	if err != nil {
 		h.writeDevicePreviewError(w, err)
 		return
@@ -793,6 +799,23 @@ func deviceIDFromPath(path string) (int, error) {
 		value = value[:index]
 	}
 	return strconv.Atoi(value)
+}
+
+func previewWidthFromQuery(r *http.Request) (int, error) {
+	if r == nil {
+		return 0, nil
+	}
+
+	rawValue := strings.TrimSpace(r.URL.Query().Get("width"))
+	if rawValue == "" {
+		return 0, nil
+	}
+
+	width, err := strconv.Atoi(rawValue)
+	if err != nil || width <= 0 {
+		return 0, errors.New("invalid preview width")
+	}
+	return width, nil
 }
 
 func sanitizeDownloadFilename(name string) string {

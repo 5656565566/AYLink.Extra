@@ -120,7 +120,7 @@ type SettingsService interface {
 }
 
 type DevicePreviewService interface {
-	Get(ctx context.Context, deviceID int) ([]byte, error)
+	Get(ctx context.Context, deviceID int, width int) ([]byte, error)
 }
 
 type TerminalSession interface {

@@ -50,12 +50,13 @@ func NewService(deviceResolver DeviceResolver, adb domainadb.Manager) *Service {
 	}
 }
 
-func (s *Service) Get(ctx context.Context, deviceID int) ([]byte, error) {
+func (s *Service) Get(ctx context.Context, deviceID int, width int) ([]byte, error) {
 	if s.deviceResolver == nil || s.adb == nil {
 		return nil, errors.New("device preview service is unavailable")
 	}
 
-	cacheKey := fmt.Sprintf("%d:%d:%d", deviceID, defaultPreviewWidth, defaultPreviewQuality)
+	normalizedWidth := normalizePreviewWidth(width)
+	cacheKey := fmt.Sprintf("%d:%d:%d", deviceID, normalizedWidth, defaultPreviewQuality)
 
 	for {
 		s.mu.Lock()
@@ -88,7 +89,7 @@ func (s *Service) Get(ctx context.Context, deviceID int) ([]byte, error) {
 		inflight := entry.inflight
 		s.mu.Unlock()
 
-		data, err := s.capturePreview(ctx, deviceID)
+		data, err := s.capturePreview(ctx, deviceID, normalizedWidth)
 
 		s.mu.Lock()
 		if err == nil {
@@ -109,7 +110,7 @@ func (s *Service) Get(ctx context.Context, deviceID int) ([]byte, error) {
 	}
 }
 
-func (s *Service) capturePreview(ctx context.Context, deviceID int) ([]byte, error) {
+func (s *Service) capturePreview(ctx context.Context, deviceID int, width int) ([]byte, error) {
 	serial, err := s.deviceResolver.ResolveSerialForAccess(ctx, deviceID)
 	if err != nil {
 		return nil, err
@@ -120,13 +121,20 @@ func (s *Service) capturePreview(ctx context.Context, deviceID int) ([]byte, err
 		return nil, err
 	}
 
-	preview := renderPortraitPreview(screenshot, defaultPreviewWidth)
+	preview := renderPortraitPreview(screenshot, width)
 	var buffer bytes.Buffer
 	if err := jpeg.Encode(&buffer, preview, &jpeg.Options{Quality: defaultPreviewQuality}); err != nil {
 		return nil, err
 	}
 
 	return buffer.Bytes(), nil
+}
+
+func normalizePreviewWidth(width int) int {
+	if width <= 0 {
+		return defaultPreviewWidth
+	}
+	return width
 }
 
 func renderPortraitPreview(src image.Image, width int) image.Image {

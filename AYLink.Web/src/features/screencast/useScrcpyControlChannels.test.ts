@@ -144,6 +144,18 @@ describe('useScrcpyControlChannels', () => {
     expect(harness.controlChannels.getHighFrequencyControlChannel()).toBe(controlChannel);
   });
 
+  it('does not fall back to the control channel when a dedicated meta send is required', () => {
+    const harness = createHarness();
+    const controlChannel = new TestDataChannel();
+    harness.controlChannels.setupControlChannel(controlChannel as unknown as RTCDataChannel);
+
+    harness.controlChannels.sendMetaControlMessage(new Uint8Array([0xff, 0x02]), {
+      requireDedicatedChannel: true
+    });
+
+    expect(controlChannel.sent).toEqual([]);
+  });
+
   it('clears channel references on close', () => {
     const harness = createHarness();
     const controlChannel = new TestDataChannel();

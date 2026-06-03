@@ -5,6 +5,12 @@ function createVideoStreamHealthHarness() {
   let activeConnectionId = 1;
   let packetsReceived = 0;
   let bytesReceived = 0;
+  const videoElement = {
+    paused: false,
+    ended: false,
+    seeking: false,
+    readyState: HTMLMediaElement.HAVE_ENOUGH_DATA
+  } as unknown as HTMLVideoElement;
   const logger = {
     debug: vi.fn(),
     info: vi.fn(),
@@ -35,7 +41,7 @@ function createVideoStreamHealthHarness() {
       }
     ]
   } as unknown as RTCPeerConnection;
-  const videoTrack = { readyState: 'live' } as MediaStreamTrack;
+  const videoTrack = { readyState: 'live', muted: false } as unknown as MediaStreamTrack;
 
   const health = useVideoStreamHealth({
     stableDetachMs: 20000,
@@ -51,7 +57,7 @@ function createVideoStreamHealthHarness() {
     getVideoTrack: () => videoTrack,
     hasVideoTrack: () => true,
     hasVideoSource: () => true,
-    getVideoElement: () => null,
+    getVideoElement: () => videoElement,
     syncVideoFrameSize: vi.fn(),
     getDeviceId: () => 'device-1',
     getTabKey: () => 'tab-1',
@@ -67,6 +73,12 @@ function createVideoStreamHealthHarness() {
     advanceVideoPackets: () => {
       packetsReceived += 1;
       bytesReceived += 100;
+    },
+    setVideoReadyState: (readyState: number) => {
+      (videoElement as { readyState: number }).readyState = readyState;
+    },
+    setVideoTrackMuted: (muted: boolean) => {
+      (videoTrack as { muted: boolean }).muted = muted;
     },
     setActiveConnectionId: (connectionId: number) => {
       activeConnectionId = connectionId;
@@ -134,12 +146,13 @@ describe('useVideoStreamHealth', () => {
 
   it('does not repeatedly log unstable transitions while inbound RTP remains idle', async () => {
     vi.useFakeTimers();
-    const { health, logger, advanceVideoPackets } = createVideoStreamHealthHarness();
+    const { health, logger, advanceVideoPackets, setVideoTrackMuted } = createVideoStreamHealthHarness();
 
     await vi.advanceTimersByTimeAsync(1);
     advanceVideoPackets();
     await health.handleWatchdog(1, 'test');
 
+    setVideoTrackMuted(true);
     await vi.advanceTimersByTimeAsync(4000);
     await health.handleWatchdog(1, 'test');
     await vi.advanceTimersByTimeAsync(1000);
@@ -154,12 +167,13 @@ describe('useVideoStreamHealth', () => {
 
   it('notifies when inbound RTP stall is confirmed', async () => {
     vi.useFakeTimers();
-    const { health, onVideoStreamStalledConfirmed, advanceVideoPackets } = createVideoStreamHealthHarness();
+    const { health, onVideoStreamStalledConfirmed, advanceVideoPackets, setVideoTrackMuted } = createVideoStreamHealthHarness();
 
     await vi.advanceTimersByTimeAsync(1);
     advanceVideoPackets();
     await health.handleWatchdog(1, 'test');
 
+    setVideoTrackMuted(true);
     await vi.advanceTimersByTimeAsync(4000);
     await health.handleWatchdog(1, 'test');
     await vi.advanceTimersByTimeAsync(1000);
@@ -174,5 +188,22 @@ describe('useVideoStreamHealth', () => {
       signalingAttached: true,
       peerConnectionState: 'connected'
     }));
+  });
+
+  it('does not treat intentionally static video as a confirmed stall when playback is not starved', async () => {
+    vi.useFakeTimers();
+    const { health, logger, onVideoStreamStalledConfirmed, advanceVideoPackets } = createVideoStreamHealthHarness();
+
+    await vi.advanceTimersByTimeAsync(1);
+    advanceVideoPackets();
+    await health.handleWatchdog(1, 'test');
+
+    await vi.advanceTimersByTimeAsync(4000);
+    await health.handleWatchdog(1, 'test');
+    await vi.advanceTimersByTimeAsync(4000);
+    await health.handleWatchdog(1, 'test');
+
+    expect(onVideoStreamStalledConfirmed).not.toHaveBeenCalled();
+    expect(logger.debug.mock.calls.filter(([message]) => message === '[WebRTC] Inbound video RTP stream is idle without playback starvation; treating the frame as intentionally static.')).toHaveLength(1);
   });
 });

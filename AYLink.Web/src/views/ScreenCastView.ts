@@ -1983,8 +1983,8 @@ export default defineComponent({
       return controlChannels.getMetaControlChannel();
     };
 
-    const sendMetaControlMessage = (payload: Uint8Array) => {
-      controlChannels.sendMetaControlMessage(payload);
+    const sendMetaControlMessage = (payload: Uint8Array, options?: { requireDedicatedChannel?: boolean }) => {
+      controlChannels.sendMetaControlMessage(payload, options);
     };
 
     const buildLocalMetaControlMessage = (messageType: number) => {
@@ -2000,7 +2000,7 @@ export default defineComponent({
         return false;
       }
 
-      sendMetaControlMessage(buildLocalMetaControlMessage(0x02));
+      sendMetaControlMessage(buildLocalMetaControlMessage(0x02), { requireDedicatedChannel: true });
       console.info('[WebRTC] Requested cached video key frame replay over meta control channel.', {
         reason,
         deviceId: deviceId.value,
@@ -2904,7 +2904,6 @@ export default defineComponent({
       activePointers.clear();
       pointerGenerations.clear();
       scrcpyPointerIds.clear();
-      currentScrcpySessionId = '';
       nextScrcpyPointerId = 0n;
       pendingPointerReleases.clear();
       queuedPointerReleases.clear();
@@ -2927,6 +2926,7 @@ export default defineComponent({
         return;
       }
     
+      currentScrcpySessionId = '';
       activeConnectionId++;
       releaseHidDevices();
     

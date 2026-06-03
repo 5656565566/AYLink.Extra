@@ -66,6 +66,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   let lastInboundVideoPacketsReceived: number | null = null;
   let lastInboundVideoBytesReceived: number | null = null;
   let consecutiveVideoStreamStallDetections = 0;
+  let hasLoggedIdleStaticVideo = false;
 
   const stopVideoFrameCaptureLoop = () => {
     const videoElement = options.getVideoElement();
@@ -109,6 +110,28 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     lastInboundVideoPacketsReceived = null;
     lastInboundVideoBytesReceived = null;
     consecutiveVideoStreamStallDetections = 0;
+    hasLoggedIdleStaticVideo = false;
+  };
+
+  const isVideoPlaybackStarved = () => {
+    const haveCurrentData =
+      typeof HTMLMediaElement !== 'undefined'
+        ? HTMLMediaElement.HAVE_CURRENT_DATA
+        : 2;
+    const videoTrack = options.getVideoTrack();
+    if (videoTrack?.muted) {
+      return true;
+    }
+
+    const videoElement = options.getVideoElement();
+    if (!videoElement) {
+      return false;
+    }
+    if (videoElement.paused || videoElement.ended || videoElement.seeking) {
+      return false;
+    }
+
+    return videoElement.readyState < haveCurrentData;
   };
 
   const shouldMonitorVideoStream = (connectionId: number) => {
@@ -256,6 +279,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       lastVideoStreamPacketAt = now;
       lastVideoStreamDiagnosticAt = 0;
       consecutiveVideoStreamStallDetections = 0;
+      hasLoggedIdleStaticVideo = false;
       scheduleSignalingDetach(connectionId);
       return;
     }
@@ -267,6 +291,22 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
     if (now - lastVideoStreamPacketAt < options.stallThresholdMs) {
       consecutiveVideoStreamStallDetections = 0;
+      return;
+    }
+
+    if (!isVideoPlaybackStarved()) {
+      consecutiveVideoStreamStallDetections = 0;
+      lastVideoStreamPacketAt = now;
+      if (!hasLoggedIdleStaticVideo) {
+        hasLoggedIdleStaticVideo = true;
+        logger.debug('[WebRTC] Inbound video RTP stream is idle without playback starvation; treating the frame as intentionally static.', {
+          reason,
+          connectionId,
+          deviceId: options.getDeviceId(),
+          tabKey: options.getTabKey(),
+          inboundVideoStats
+        });
+      }
       return;
     }
 

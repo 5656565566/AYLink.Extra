@@ -107,7 +107,7 @@ func TestServiceGetCachesSuccessfulPreview(t *testing.T) {
 	service := NewService(resolver, adb)
 	service.cacheTTL = time.Hour
 
-	first, err := service.Get(context.Background(), 7)
+	first, err := service.Get(context.Background(), 7, defaultPreviewWidth)
 	if err != nil {
 		t.Fatalf("Get() first error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestServiceGetCachesSuccessfulPreview(t *testing.T) {
 		t.Fatal("expected preview bytes from first capture")
 	}
 
-	second, err := service.Get(context.Background(), 7)
+	second, err := service.Get(context.Background(), 7, defaultPreviewWidth)
 	if err != nil {
 		t.Fatalf("Get() second error = %v", err)
 	}
@@ -136,7 +136,7 @@ func TestServiceGetReturnsStalePreviewWhenRefreshFails(t *testing.T) {
 	service := NewService(resolver, adb)
 	service.cacheTTL = time.Millisecond
 
-	cached, err := service.Get(context.Background(), 9)
+	cached, err := service.Get(context.Background(), 9, defaultPreviewWidth)
 	if err != nil {
 		t.Fatalf("Get() seed cache error = %v", err)
 	}
@@ -147,7 +147,7 @@ func TestServiceGetReturnsStalePreviewWhenRefreshFails(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	adb.err = errors.New("capture failed")
 
-	stale, err := service.Get(context.Background(), 9)
+	stale, err := service.Get(context.Background(), 9, defaultPreviewWidth)
 	if err != nil {
 		t.Fatalf("Get() stale fallback error = %v", err)
 	}
@@ -164,7 +164,7 @@ func TestServiceGetReturnsErrorWithoutCacheWhenCaptureFails(t *testing.T) {
 	adb := &fakeADBManager{err: errors.New("capture failed")}
 	service := NewService(resolver, adb)
 
-	data, err := service.Get(context.Background(), 11)
+	data, err := service.Get(context.Background(), 11, defaultPreviewWidth)
 	if err == nil {
 		t.Fatal("expected capture error")
 	}
@@ -178,11 +178,34 @@ func TestServiceGetPropagatesResolverErrors(t *testing.T) {
 	adb := &fakeADBManager{screenshot: solidImage(32, 64, color.RGBA{A: 255})}
 	service := NewService(resolver, adb)
 
-	_, err := service.Get(context.Background(), 15)
+	_, err := service.Get(context.Background(), 15, defaultPreviewWidth)
 	if !errors.Is(err, deviceservice.ErrDeviceNotFound) {
 		t.Fatalf("expected device not found error, got %v", err)
 	}
 	if adb.calls != 0 {
 		t.Fatalf("expected no screenshot capture when resolving serial fails, got %d", adb.calls)
+	}
+}
+
+func TestServiceGetSeparatesCacheEntriesByWidth(t *testing.T) {
+	resolver := &fakeDeviceResolver{serial: "serial-4"}
+	adb := &fakeADBManager{screenshot: solidImage(64, 128, color.RGBA{R: 40, G: 80, B: 160, A: 255})}
+	service := NewService(resolver, adb)
+	service.cacheTTL = time.Hour
+
+	first, err := service.Get(context.Background(), 21, 240)
+	if err != nil {
+		t.Fatalf("Get() first width error = %v", err)
+	}
+	second, err := service.Get(context.Background(), 21, 320)
+	if err != nil {
+		t.Fatalf("Get() second width error = %v", err)
+	}
+
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatal("expected preview bytes for both widths")
+	}
+	if adb.calls != 2 {
+		t.Fatalf("expected width-specific cache misses, got %d captures", adb.calls)
 	}
 }

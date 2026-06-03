@@ -75,6 +75,12 @@ func (s *signalingSession) hasConn(conn *websocket.Conn) bool {
 	return s.conn == conn
 }
 
+func (s *signalingSession) hasAttachedConn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn != nil
+}
+
 func (s *signalingSession) writeJSON(payload any) error {
 	s.mu.Lock()
 	if s.closed || s.conn == nil {
@@ -117,7 +123,7 @@ func (s *signalingSession) startDetachedMonitor() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if s.hasConn(nil) {
+				if s.hasAttachedConn() {
 					return
 				}
 				if !s.service.HasSessionLease(s.deviceID, s.sessionID) {

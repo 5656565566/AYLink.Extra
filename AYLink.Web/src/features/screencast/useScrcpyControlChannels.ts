@@ -18,6 +18,10 @@ interface ScrcpyControlChannelsOptions {
   logger?: Pick<Console, 'log' | 'warn'>;
 }
 
+export interface MetaControlSendOptions {
+  requireDedicatedChannel?: boolean;
+}
+
 export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) {
   const logger = options.logger ?? console;
   const pendingPointerControlPayloads: PendingPointerControlPayload[] = [];
@@ -122,7 +126,11 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
     return controlChannel;
   };
 
-  const sendMetaControlMessage = (payload: Uint8Array) => {
+  const sendMetaControlMessage = (payload: Uint8Array, sendOptions?: MetaControlSendOptions) => {
+    if (sendOptions?.requireDedicatedChannel) {
+      sendBinaryControlMessage(payload, metaControlChannel);
+      return;
+    }
     sendBinaryControlMessage(payload, getMetaControlChannel());
   };
 

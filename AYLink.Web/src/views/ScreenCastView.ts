@@ -30,7 +30,8 @@ import {
   scheduleStartConnection as scheduleStartConnectionFlow
 } from '../features/screencast/connectionScheduler';
 import {
-  useVideoStreamHealth
+  useVideoStreamHealth,
+  type VideoStreamStallDetails
 } from '../features/screencast/useVideoStreamHealth';
 import { useScreencastMediaTracks } from '../features/screencast/useScreencastMediaTracks';
 import {
@@ -135,6 +136,10 @@ export default defineComponent({
     const VIDEO_STREAM_DIAGNOSTIC_INTERVAL_MS = 5000;
 
     const VIDEO_STREAM_STALL_CONFIRMATION_COUNT = 2;
+
+    const VIDEO_STREAM_STALL_RECOVERY_OBSERVATION_MS = 3000;
+
+    const VIDEO_STREAM_STALL_RECOVERY_COOLDOWN_MS = 10000;
 
     const DEFAULT_AUTO_NEW_DISPLAY_DPI = 160;
 
@@ -385,7 +390,10 @@ export default defineComponent({
       getVideoElement: () => videoElement.value,
       syncVideoFrameSize: () => syncVideoFrameSize(),
       getDeviceId: () => deviceId.value,
-      getTabKey: () => activeTabKey.value
+      getTabKey: () => activeTabKey.value,
+      onVideoStreamStalledConfirmed: (details) => {
+        handleConfirmedVideoStreamStall(details);
+      }
     });
 
     const mediaTracks = useScreencastMediaTracks({
@@ -471,6 +479,8 @@ export default defineComponent({
 
     let pendingVideoRecoveryTimer: number | null = null;
 
+    let pendingVideoStreamStallObservationTimer: number | null = null;
+
     let pendingIceRestartFallbackTimer: number | null = null;
 
     let pendingCandidates: RTCIceCandidateInit[] = [];
@@ -478,6 +488,8 @@ export default defineComponent({
     let activeConnectionId = 0;
 
     let hasHandledInitialActivation = false;
+
+    let lastVideoStreamStallRecoveryAttemptAt = 0;
 
     let hasUsedInitialConnectionWarmup = false;
 
@@ -929,6 +941,41 @@ export default defineComponent({
 
     const hasLiveConnection = () => {
       return !!peerConnection && peerConnection.connectionState !== 'closed';
+    };
+
+    const buildSignalWebSocketBaseUrl = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      return import.meta.env.DEV ? 'ws://127.0.0.1:5501/webrtc' : `${protocol}//${host}/webrtc`;
+    };
+
+    const requestSignalTicket = async (existingSessionId = '') => {
+      const initialNewDisplaySize = isNewDisplayMode.value ? buildAdaptiveDisplaySize() : null;
+      const normalizedDeviceId = normalizeDeviceId(deviceId.value);
+      const normalizedAppPackage = normalizePackageName(appPackageName.value);
+      if (!normalizedDeviceId) {
+        throw new Error('invalid device id for screencast connection');
+      }
+
+      const ticketResponse = await apiFetch('/api/webrtc-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: normalizedDeviceId,
+          sessionId: existingSessionId || undefined,
+          appPackage: normalizedAppPackage || undefined,
+          appName: appDisplayName.value || undefined,
+          newDisplay: isNewDisplayMode.value,
+          newDisplayWidth: initialNewDisplaySize?.width,
+          newDisplayHeight: initialNewDisplaySize?.height,
+          newDisplayDpi: resolvedNewDisplayDpi.value ?? undefined,
+        })
+      });
+
+      return {
+        normalizedDeviceId,
+        ticketResponse
+      };
     };
 
     const persistCurrentConnection = (tabKey = activeTabKey.value) => {
@@ -1415,6 +1462,13 @@ export default defineComponent({
       }
     };
 
+    const clearPendingVideoStreamStallObservation = () => {
+      if (pendingVideoStreamStallObservationTimer != null) {
+        window.clearTimeout(pendingVideoStreamStallObservationTimer);
+        pendingVideoStreamStallObservationTimer = null;
+      }
+    };
+
     const clearPendingSignalingDetach = () => {
       videoStreamHealth.clearPendingSignalingDetach();
     };
@@ -1455,7 +1509,10 @@ export default defineComponent({
         state: connectionSchedulerState,
         clearPendingReconnect,
         clearPendingIceRestartFallback,
-        clearPendingVideoRecovery,
+        clearPendingVideoRecovery: () => {
+          clearPendingVideoRecovery();
+          clearPendingVideoStreamStallObservation();
+        },
         resetSignalingDetachState,
         onIceRestartReset: () => {
           isIceRestartInFlight = false;
@@ -1514,7 +1571,151 @@ export default defineComponent({
     };
 
     const scheduleSignalingDetach = (connectionId: number) => {
+      clearPendingVideoStreamStallObservation();
       videoStreamHealth.scheduleSignalingDetach(connectionId);
+    };
+
+    const handleConfirmedVideoStreamStall = (details: VideoStreamStallDetails) => {
+      if (connectionSchedulerState.suppressAutoReconnect || details.connectionId !== activeConnectionId) {
+        return;
+      }
+
+      const currentPeerConnection = peerConnection;
+      const currentVideoTrack = remoteTracks.get('video');
+      if (!currentPeerConnection || currentPeerConnection.connectionState !== 'connected' || !currentVideoTrack || currentVideoTrack.readyState !== 'live') {
+        return;
+      }
+
+      const now = Date.now();
+      if (pendingVideoStreamStallObservationTimer != null || now - lastVideoStreamStallRecoveryAttemptAt < VIDEO_STREAM_STALL_RECOVERY_COOLDOWN_MS) {
+        return;
+      }
+
+      lastVideoStreamStallRecoveryAttemptAt = now;
+      const signalingAttached = !!ws && ws.readyState === WebSocket.OPEN;
+      requestVideoKeyFrameReplay('inbound_rtp_stalled');
+      if (!signalingAttached) {
+        console.info('[WebRTC] Confirmed inbound video RTP stall while signaling websocket is detached; attempting signaling reattach before escalating recovery.', {
+          ...details,
+          sessionId: currentScrcpySessionId
+        });
+        void tryReattachSignaling('inbound_rtp_stalled');
+      } else {
+        console.info('[WebRTC] Confirmed inbound video RTP stall; entering recovery observation window before escalating recovery.', details);
+      }
+
+      pendingVideoStreamStallObservationTimer = window.setTimeout(() => {
+        pendingVideoStreamStallObservationTimer = null;
+        if (connectionSchedulerState.suppressAutoReconnect || details.connectionId !== activeConnectionId) {
+          return;
+        }
+
+        const activeVideoTrack = remoteTracks.get('video');
+        if (!peerConnection || peerConnection.connectionState !== 'connected' || !activeVideoTrack || activeVideoTrack.readyState !== 'live') {
+          return;
+        }
+
+        void (async () => {
+          const renegotiated = await tryVideoRenegotiation('inbound_rtp_stalled');
+          if (renegotiated) {
+            return;
+          }
+
+          console.warn('[WebRTC] Video recovery observation window elapsed while inbound RTP stall persisted; deferring heavier recovery until a non-destructive signaling reattach path is available.', {
+            ...details,
+            signalingAttached: !!ws && ws.readyState === WebSocket.OPEN,
+            sessionId: currentScrcpySessionId
+          });
+        })();
+      }, VIDEO_STREAM_STALL_RECOVERY_OBSERVATION_MS);
+    };
+
+    const tryReattachSignaling = async (reason: string) => {
+      if (connectionSchedulerState.suppressAutoReconnect || !peerConnection || peerConnection.connectionState !== 'connected' || !deviceId.value || !currentScrcpySessionId) {
+        return false;
+      }
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return ws.readyState === WebSocket.OPEN;
+      }
+
+      console.warn('[WebRTC] Attempting signaling reattach for active peer connection.', {
+        reason,
+        deviceId: deviceId.value,
+        tabKey: activeTabKey.value,
+        sessionId: currentScrcpySessionId
+      });
+
+      try {
+        const { ticketResponse } = await requestSignalTicket(currentScrcpySessionId);
+        if (!ticketResponse.ok) {
+          console.warn('[WebRTC] Signaling reattach ticket request failed.', {
+            reason,
+            status: ticketResponse.status,
+            deviceId: deviceId.value,
+            tabKey: activeTabKey.value,
+            sessionId: currentScrcpySessionId
+          });
+          return false;
+        }
+
+        const ticketPayload = await ticketResponse.json();
+        currentScrcpySessionId = String(ticketPayload.sessionId ?? currentScrcpySessionId);
+        const socket = new WebSocket(`${buildSignalWebSocketBaseUrl()}?ticket=${encodeURIComponent(String(ticketPayload.ticket ?? ''))}`);
+        ws = socket;
+
+        socket.onopen = () => {
+          if (ws !== socket || !peerConnection || peerConnection.connectionState !== 'connected') {
+            return;
+          }
+          status.value = t('Screencast.StatusConnected', '已连接');
+          startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
+          persistCurrentConnection();
+          console.info('[WebRTC] Signaling websocket reattached to the active peer connection.', {
+            deviceId: deviceId.value,
+            tabKey: activeTabKey.value,
+            sessionId: currentScrcpySessionId
+          });
+        };
+
+        wireWebSocketEventHandlers(activeConnectionId, socket);
+        persistCurrentConnection();
+        return true;
+      } catch (error) {
+        console.error('Failed to reattach signaling websocket:', error);
+        return false;
+      }
+    };
+
+    const tryVideoRenegotiation = async (reason: string) => {
+      if (connectionSchedulerState.suppressAutoReconnect || !peerConnection || !ws || ws.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+      if (peerConnection.connectionState !== 'connected' || peerConnection.signalingState !== 'stable') {
+        return false;
+      }
+      if (isIceRestartInFlight) {
+        return false;
+      }
+
+      console.warn('[WebRTC] Attempting non-destructive video renegotiation after confirmed inbound RTP stall.', {
+        reason,
+        deviceId: deviceId.value,
+        tabKey: activeTabKey.value,
+        sessionId: currentScrcpySessionId
+      });
+
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        if (!peerConnection.localDescription || !ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error('signaling socket not ready for video renegotiation');
+        }
+        ws.send(JSON.stringify(peerConnection.localDescription));
+        return true;
+      } catch (error) {
+        console.error('Video renegotiation failed:', error);
+        return false;
+      }
     };
 
     const tryIceRestart = async (reason: string) => {
@@ -1784,6 +1985,29 @@ export default defineComponent({
 
     const sendMetaControlMessage = (payload: Uint8Array) => {
       controlChannels.sendMetaControlMessage(payload);
+    };
+
+    const buildLocalMetaControlMessage = (messageType: number) => {
+      const payload = new Uint8Array(2);
+      payload[0] = 0xFF;
+      payload[1] = Math.max(0, Math.min(0xFF, messageType)) & 0xFF;
+      return payload;
+    };
+
+    const requestVideoKeyFrameReplay = (reason: string) => {
+      const metaChannel = getMetaControlChannel();
+      if (!metaChannel || metaChannel.readyState !== 'open') {
+        return false;
+      }
+
+      sendMetaControlMessage(buildLocalMetaControlMessage(0x02));
+      console.info('[WebRTC] Requested cached video key frame replay over meta control channel.', {
+        reason,
+        deviceId: deviceId.value,
+        tabKey: activeTabKey.value,
+        sessionId: currentScrcpySessionId
+      });
+      return true;
     };
 
     const hidSession = createHidSession({
@@ -2304,6 +2528,7 @@ export default defineComponent({
       stopVideoStreamWatchdog();
       resetVideoStreamWatchdogState();
       clearPendingReconnect();
+      clearPendingVideoStreamStallObservation();
       clearPendingResumePlayback();
       lastVideoFrameSize = { width: 0, height: 0 };
       shouldShowLastFrameOverlay.value = false;
@@ -2555,28 +2780,8 @@ export default defineComponent({
       const connectionId = ++activeConnectionId;
     
       try {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        let wsUrl = import.meta.env.DEV ? 'ws://127.0.0.1:5501/webrtc' : `${protocol}//${host}/webrtc`;
-        const initialNewDisplaySize = isNewDisplayMode.value ? buildAdaptiveDisplaySize() : null;
-        const normalizedDeviceId = normalizeDeviceId(deviceId.value);
-        const normalizedAppPackage = normalizePackageName(appPackageName.value);
-        if (!normalizedDeviceId) {
-          throw new Error('invalid device id for screencast connection');
-        }
-        const ticketResponse = await apiFetch('/api/webrtc-ticket', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              deviceId: normalizedDeviceId,
-              appPackage: normalizedAppPackage || undefined,
-              appName: appDisplayName.value || undefined,
-              newDisplay: isNewDisplayMode.value,
-              newDisplayWidth: initialNewDisplaySize?.width,
-              newDisplayHeight: initialNewDisplaySize?.height,
-              newDisplayDpi: resolvedNewDisplayDpi.value ?? undefined,
-            })
-          });
+        let wsUrl = buildSignalWebSocketBaseUrl();
+        const { ticketResponse } = await requestSignalTicket();
     
         if (!ticketResponse.ok) {
           status.value = t('Screencast.StatusCreateCredentialFailed', '创建连接凭据失败');
@@ -2660,6 +2865,7 @@ export default defineComponent({
       stopPointerReleaseFlushLoop();
       clearPendingIceRestartFallback();
       clearPendingVideoRecovery();
+      clearPendingVideoStreamStallObservation();
       isIceRestartInFlight = false;
       peerConnection = null;
       ws = null;
@@ -2711,6 +2917,7 @@ export default defineComponent({
       stopPointerReleaseFlushLoop();
       clearPendingIceRestartFallback();
       clearPendingVideoRecovery();
+      clearPendingVideoStreamStallObservation();
       isIceRestartInFlight = false;
     
       if (preserveForBackground && hasLiveConnection()) {

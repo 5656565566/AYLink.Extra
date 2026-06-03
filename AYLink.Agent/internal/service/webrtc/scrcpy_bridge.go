@@ -28,6 +28,7 @@ const (
 	videoRefreshKeyFrameGrace  = 1500 * time.Millisecond
 	localMetaControlPrefix     = 0xFF
 	localMetaMsgVideoRefresh   = 0x01
+	localMetaMsgVideoKeyFrame  = 0x02
 )
 
 var errScrcpyRuntimeUnavailable = errors.New("scrcpy runtime is unavailable")
@@ -126,6 +127,13 @@ func handleLocalMetaControlPayload(logger logging.Logger, runtime domainscrcpy.R
 	}
 
 	switch payload[1] {
+	case localMetaMsgVideoKeyFrame:
+		if logger != nil {
+			logger.Info("webrtc video key frame replay requested", "source", "frontend_meta_control")
+		}
+		if runtime.ReplayLatestVideoKeyFrame() {
+			return
+		}
 	case localMetaMsgVideoRefresh:
 		if logger != nil {
 			logger.Info("webrtc video refresh requested", "source", "frontend_meta_control")
@@ -557,6 +565,19 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 }
 
 func (b *scrcpyVideoBridge) requestRefreshLocked(reason string) {
+	if b.runtime.ReplayLatestVideoKeyFrame() {
+		if b.logger != nil {
+			b.logger.Info("webrtc video refresh satisfied by cached key frame replay",
+				"source", "backend_bridge",
+				"reason", reason,
+				"generation", b.generation,
+				"state", b.state.String(),
+				"peerConnected", b.peerConnected,
+			)
+		}
+		return
+	}
+
 	if b.logger != nil {
 		b.logger.Info("webrtc video refresh requested",
 			"source", "backend_bridge",

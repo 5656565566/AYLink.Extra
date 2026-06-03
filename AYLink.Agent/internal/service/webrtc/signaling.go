@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
@@ -24,105 +23,21 @@ type SettingsProvider interface {
 }
 
 const (
-	signalingDisconnectGracePeriod = 20 * time.Second
-	nackResponderCachePackets      = 2048
+	nackResponderCachePackets = 2048
 )
 
 func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, sessionID string, conn *websocket.Conn, settings SettingsProvider, runtime domainscrcpy.Runtime) error {
-	debugWebRTC := s.debugWebRTC
-	api, config, rewriteCandidates, err := s.buildPeerConfiguration(ctx, settings)
+	session, err := s.getOrCreateSignalingSession(ctx, deviceID, sessionID, settings, runtime)
 	if err != nil {
 		return err
 	}
-	if debugWebRTC {
-		s.logger.Debug("webrtc configuration prepared",
-			"iceServers", len(config.ICEServers),
-			"transportPolicy", config.ICETransportPolicy.String(),
-			"candidateRewrite", rewriteCandidates != nil,
-		)
+
+	previousConn := session.attachConn(conn)
+	if previousConn != nil && previousConn != conn {
+		_ = previousConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "replaced by a newer signaling connection"))
+		_ = previousConn.Close()
 	}
-
-	peerConnection, err := api.NewPeerConnection(config)
-	if err != nil {
-		return err
-	}
-	defer peerConnection.Close()
-
-	if err := s.attachScrcpyVideo(peerConnection, runtime); err != nil {
-		return err
-	}
-	// 若音频可用则尝试挂载音频媒体流轨道
-	_ = s.attachScrcpyAudio(peerConnection, runtime)
-
-	s.bindScrcpyControl(peerConnection, deviceID, sessionID, runtime)
-
-	writeMu := make(chan struct{}, 1)
-	writeMu <- struct{}{}
-	writeJSON := func(payload any) error {
-		<-writeMu
-		defer func() { writeMu <- struct{}{} }()
-		return conn.WriteJSON(payload)
-	}
-
-	peerConnection.OnICECandidate(func(candidate *pion.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-
-		payload := candidate.ToJSON()
-		if debugWebRTC {
-			s.logger.Debug("webrtc local candidate", "candidate", payload.Candidate, "sdpMid", payload.SDPMid, "sdpMLineIndex", payload.SDPMLineIndex)
-		}
-		payloads := []pion.ICECandidateInit{payload}
-		if rewriteCandidates != nil {
-			payloads = rewriteCandidates(payload)
-		}
-		for _, rewrittenPayload := range payloads {
-			if debugWebRTC {
-				s.logger.Debug("webrtc local candidate rewritten", "candidate", rewrittenPayload.Candidate)
-			}
-			_ = writeJSON(rewrittenPayload)
-		}
-	})
-
-	done := make(chan struct{})
-	defer close(done)
-	var stateMu sync.RWMutex
-	currentPeerState := pion.PeerConnectionStateNew
-	peerStateChanged := make(chan struct{}, 1)
-	notifyPeerStateChanged := func() {
-		select {
-		case peerStateChanged <- struct{}{}:
-		default:
-		}
-	}
-
-	peerConnection.OnConnectionStateChange(func(state pion.PeerConnectionState) {
-		stateMu.Lock()
-		currentPeerState = state
-		stateMu.Unlock()
-		notifyPeerStateChanged()
-		if debugWebRTC {
-			s.logger.Debug("webrtc peer connection state changed", "state", state.String())
-		}
-		if state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateClosed {
-			select {
-			case <-done:
-			default:
-				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "peer connection closed"))
-			}
-		}
-	})
-	peerConnection.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
-		if debugWebRTC {
-			s.logger.Debug("webrtc ice connection state changed", "state", state.String())
-		}
-	})
-	peerConnection.OnSignalingStateChange(func(state pion.SignalingState) {
-		if debugWebRTC {
-			s.logger.Debug("webrtc signaling state changed", "state", state.String())
-		}
-	})
+	defer session.detachConn(conn)
 
 	for {
 		select {
@@ -133,19 +48,20 @@ func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, se
 
 		_, data, err := conn.ReadMessage()
 		if err != nil {
-			if debugWebRTC {
-				stateMu.RLock()
-				peerState := currentPeerState
-				stateMu.RUnlock()
+			if s.debugWebRTC {
 				s.logger.Debug("webrtc signaling websocket read ended",
-					"peerState", peerState.String(),
-					"gracePeriod", signalingDisconnectGracePeriod.String(),
+					"sessionId", sessionID,
+					"peerState", session.getPeerState().String(),
 					"err", err,
 				)
 			}
-			if s.waitForPeerConnectionAfterSignalDetach(ctx, deviceID, peerConnection, &stateMu, &currentPeerState, peerStateChanged) {
+			session.detachConn(conn)
+			if s.HasSessionLease(deviceID, sessionID) {
+				session.startDetachedMonitor()
 				return nil
 			}
+			s.removeSignalingSession(sessionID, session)
+			closeSignalingSession(session)
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				return nil
 			}
@@ -159,86 +75,122 @@ func (s *Service) HandleSignalWebSocket(ctx context.Context, deviceID string, se
 
 		switch {
 		case isSessionDescriptionEnvelope(envelope):
-			if debugWebRTC {
-				s.logger.Debug("webrtc received session description", "type", envelope["type"])
+			if s.debugWebRTC {
+				s.logger.Debug("webrtc received session description", "type", envelope["type"], "sessionId", sessionID)
 			}
-			if err := s.handleSessionDescription(peerConnection, envelope, writeJSON, rewriteCandidates); err != nil {
+			if err := s.handleSessionDescription(session.peerConnection, envelope, session.writeJSON, session.rewriteCandidates); err != nil {
 				return err
 			}
 		case isCandidateEnvelope(envelope):
-			if debugWebRTC {
-				s.logger.Debug("webrtc received remote candidate", "candidate", envelope["candidate"])
+			if s.debugWebRTC {
+				s.logger.Debug("webrtc received remote candidate", "candidate", envelope["candidate"], "sessionId", sessionID)
 			}
-			if err := s.handleCandidate(peerConnection, envelope); err != nil && !errors.Is(err, pion.ErrNoRemoteDescription) {
+			if err := s.handleCandidate(session.peerConnection, envelope); err != nil && !errors.Is(err, pion.ErrNoRemoteDescription) {
 				return err
 			}
 		}
 	}
 }
 
-func (s *Service) waitForPeerConnectionAfterSignalDetach(
-	ctx context.Context,
-	deviceID string,
-	peerConnection *pion.PeerConnection,
-	stateMu *sync.RWMutex,
-	currentPeerState *pion.PeerConnectionState,
-	peerStateChanged <-chan struct{},
-) bool {
-	var disconnectTimer *time.Timer
-	stopDisconnectTimer := func() {
-		if disconnectTimer == nil {
+func (s *Service) getOrCreateSignalingSession(ctx context.Context, deviceID string, sessionID string, settings SettingsProvider, runtime domainscrcpy.Runtime) (*signalingSession, error) {
+	s.mu.Lock()
+	existing := s.signaling[sessionID]
+	s.mu.Unlock()
+
+	if existing != nil {
+		if existing.deviceID != deviceID {
+			return nil, fmt.Errorf("signaling session %s belongs to another device", sessionID)
+		}
+		return existing, nil
+	}
+
+	debugWebRTC := s.debugWebRTC
+	api, config, rewriteCandidates, err := s.buildPeerConfiguration(ctx, settings)
+	if err != nil {
+		return nil, err
+	}
+	if debugWebRTC {
+		s.logger.Debug("webrtc configuration prepared",
+			"iceServers", len(config.ICEServers),
+			"transportPolicy", config.ICETransportPolicy.String(),
+			"candidateRewrite", rewriteCandidates != nil,
+			"sessionId", sessionID,
+		)
+	}
+
+	peerConnection, err := api.NewPeerConnection(config)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.attachScrcpyVideo(peerConnection, runtime); err != nil {
+		_ = peerConnection.Close()
+		return nil, err
+	}
+	_ = s.attachScrcpyAudio(peerConnection, runtime)
+	s.bindScrcpyControl(peerConnection, deviceID, sessionID, runtime)
+
+	session := &signalingSession{
+		service:           s,
+		deviceID:          deviceID,
+		sessionID:         sessionID,
+		runtime:           runtime,
+		peerConnection:    peerConnection,
+		rewriteCandidates: rewriteCandidates,
+		currentPeerState:  pion.PeerConnectionStateNew,
+	}
+
+	peerConnection.OnICECandidate(func(candidate *pion.ICECandidate) {
+		if candidate == nil {
 			return
 		}
-		if !disconnectTimer.Stop() {
-			select {
-			case <-disconnectTimer.C:
-			default:
-			}
+
+		payload := candidate.ToJSON()
+		if debugWebRTC {
+			s.logger.Debug("webrtc local candidate", "candidate", payload.Candidate, "sdpMid", payload.SDPMid, "sdpMLineIndex", payload.SDPMLineIndex, "sessionId", sessionID)
 		}
-		disconnectTimer = nil
+		payloads := []pion.ICECandidateInit{payload}
+		if rewriteCandidates != nil {
+			payloads = rewriteCandidates(payload)
+		}
+		for _, rewrittenPayload := range payloads {
+			if debugWebRTC {
+				s.logger.Debug("webrtc local candidate rewritten", "candidate", rewrittenPayload.Candidate, "sessionId", sessionID)
+			}
+			_ = session.writeJSON(rewrittenPayload)
+		}
+	})
+
+	peerConnection.OnConnectionStateChange(func(state pion.PeerConnectionState) {
+		session.setPeerState(state)
+		if debugWebRTC {
+			s.logger.Debug("webrtc peer connection state changed", "state", state.String(), "sessionId", sessionID)
+		}
+		if state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateClosed {
+			s.removeSignalingSession(sessionID, session)
+			closeSignalingSession(session)
+		}
+	})
+	peerConnection.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
+		if debugWebRTC {
+			s.logger.Debug("webrtc ice connection state changed", "state", state.String(), "sessionId", sessionID)
+		}
+	})
+	peerConnection.OnSignalingStateChange(func(state pion.SignalingState) {
+		if debugWebRTC {
+			s.logger.Debug("webrtc signaling state changed", "state", state.String(), "sessionId", sessionID)
+		}
+	})
+
+	s.mu.Lock()
+	if current := s.signaling[sessionID]; current != nil {
+		s.mu.Unlock()
+		_ = peerConnection.Close()
+		return current, nil
 	}
-	defer stopDisconnectTimer()
-
-	for {
-		if !s.HasActiveSessionLease(deviceID) {
-			_ = peerConnection.Close()
-			return true
-		}
-
-		stateMu.RLock()
-		state := *currentPeerState
-		stateMu.RUnlock()
-
-		switch state {
-		case pion.PeerConnectionStateConnected:
-			stopDisconnectTimer()
-		case pion.PeerConnectionStateDisconnected:
-			if disconnectTimer == nil {
-				disconnectTimer = time.NewTimer(signalingDisconnectGracePeriod)
-			}
-		case pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed:
-			return true
-		default:
-			if disconnectTimer == nil {
-				disconnectTimer = time.NewTimer(signalingDisconnectGracePeriod)
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			_ = peerConnection.Close()
-			return true
-		case <-func() <-chan time.Time {
-			if disconnectTimer != nil {
-				return disconnectTimer.C
-			}
-			return make(chan time.Time)
-		}():
-			_ = peerConnection.Close()
-			return true
-		case <-peerStateChanged:
-		}
-	}
+	s.signaling[sessionID] = session
+	s.mu.Unlock()
+	return session, nil
 }
 
 func (s *Service) buildPeerConfiguration(ctx context.Context, settings SettingsProvider) (*pion.API, pion.Configuration, func(pion.ICECandidateInit) []pion.ICECandidateInit, error) {

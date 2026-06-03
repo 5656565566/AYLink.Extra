@@ -18,6 +18,18 @@ interface InboundVideoStatsSnapshot {
   timestamp: number | null;
 }
 
+export interface VideoStreamStallDetails {
+  reason: string;
+  connectionId: number;
+  deviceId: string;
+  tabKey: string;
+  consecutiveVideoStreamStallDetections: number;
+  confirmationThreshold: number;
+  peerConnectionState: RTCPeerConnectionState | null;
+  signalingAttached: boolean;
+  inboundVideoStats: InboundVideoStatsSnapshot | null;
+}
+
 interface VideoStreamHealthOptions {
   stableDetachMs: number;
   stallThresholdMs: number;
@@ -36,6 +48,7 @@ interface VideoStreamHealthOptions {
   syncVideoFrameSize: () => void;
   getDeviceId: () => string;
   getTabKey: () => string;
+  onVideoStreamStalledConfirmed?: (details: VideoStreamStallDetails) => void;
   logger?: Pick<Console, 'debug' | 'info' | 'warn'>;
 }
 
@@ -270,18 +283,27 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       return;
     }
 
+    const stallDetails: VideoStreamStallDetails = {
+      reason,
+      connectionId,
+      deviceId: options.getDeviceId(),
+      tabKey: options.getTabKey(),
+      consecutiveVideoStreamStallDetections,
+      confirmationThreshold: options.stallConfirmationCount,
+      peerConnectionState: options.getPeerConnection()?.connectionState ?? null,
+      signalingAttached: !!options.getSignalingSocket() && options.getSignalingSocket()?.readyState === WebSocket.OPEN,
+      inboundVideoStats
+    };
+
     markUnstable(connectionId, 'inbound_rtp_stalled');
+    options.onVideoStreamStalledConfirmed?.(stallDetails);
     if (now - lastVideoStreamDiagnosticAt < options.diagnosticIntervalMs) {
       return;
     }
 
     lastVideoStreamDiagnosticAt = now;
     logger.debug('[WebRTC] Inbound video RTP stream is idle while peer connection is still connected.', {
-      reason,
-      deviceId: options.getDeviceId(),
-      tabKey: options.getTabKey(),
-      peerConnectionState: options.getPeerConnection()?.connectionState ?? null,
-      inboundVideoStats
+      ...stallDetails
     });
   };
 

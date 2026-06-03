@@ -105,6 +105,7 @@ type Runtime interface {
 	GetClipboard(ctx context.Context) (string, error)
 	SetClipboard(ctx context.Context, text string) error
 	PasteClipboard(ctx context.Context, text string) error
+	ReplayLatestVideoKeyFrame() bool
 	RequestVideoRefresh() error
 	SendControl([]byte) error
 	Close() error

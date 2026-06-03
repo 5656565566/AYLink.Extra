@@ -79,6 +79,7 @@ func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload.DeviceID = strings.TrimSpace(payload.DeviceID)
+	payload.SessionID = strings.TrimSpace(payload.SessionID)
 	payload.AppPackage = strings.TrimSpace(payload.AppPackage)
 	payload.AppName = strings.TrimSpace(payload.AppName)
 	if payload.DeviceID != "" {
@@ -96,6 +97,10 @@ func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, webrtcservice.ErrDeviceIDRequired) {
 			WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
+			return
+		}
+		if errors.Is(err, webrtcservice.ErrSessionNotFound) {
+			WriteError(w, http.StatusBadRequest, "SESSION_NOT_FOUND", "WebRTC.SessionIdRequired", "sessionId 无效或已过期")
 			return
 		}
 		WriteError(w, http.StatusInternalServerError, "WEBRTC_TICKET_FAILED", "WebRTC.TicketFailed", "创建投屏凭据失败")
@@ -363,6 +368,17 @@ func (h *WebRTCHandler) acquireRuntime(
 					}
 					entry.sessionRefs[sessionID]++
 				}
+				entry.lastUsedAt = time.Now().UTC()
+				h.runtimeMu.Unlock()
+				return entry.runtime, false, nil
+			}
+
+			if entry.runtime != nil && sessionID != "" && entry.refCount == 0 && h.service.HasSessionLease(deviceKey, sessionID) {
+				entry.refCount++
+				if entry.sessionRefs == nil {
+					entry.sessionRefs = make(map[string]int)
+				}
+				entry.sessionRefs[sessionID]++
 				entry.lastUsedAt = time.Now().UTC()
 				h.runtimeMu.Unlock()
 				return entry.runtime, false, nil

@@ -10,6 +10,7 @@ function createVideoStreamHealthHarness() {
     info: vi.fn(),
     warn: vi.fn()
   };
+  const onVideoStreamStalledConfirmed = vi.fn();
   const close = vi.fn();
   const socket = {
     readyState: WebSocket.OPEN,
@@ -54,6 +55,7 @@ function createVideoStreamHealthHarness() {
     syncVideoFrameSize: vi.fn(),
     getDeviceId: () => 'device-1',
     getTabKey: () => 'tab-1',
+    onVideoStreamStalledConfirmed,
     logger
   });
 
@@ -61,6 +63,7 @@ function createVideoStreamHealthHarness() {
     health,
     close,
     logger,
+    onVideoStreamStalledConfirmed,
     advanceVideoPackets: () => {
       packetsReceived += 1;
       bytesReceived += 100;
@@ -147,5 +150,29 @@ describe('useVideoStreamHealth', () => {
     await health.handleWatchdog(1, 'test');
 
     expect(logger.debug.mock.calls.filter(([message]) => message === '[WebRTC] Video stream marked unstable; keeping signaling websocket attached.')).toHaveLength(1);
+  });
+
+  it('notifies when inbound RTP stall is confirmed', async () => {
+    vi.useFakeTimers();
+    const { health, onVideoStreamStalledConfirmed, advanceVideoPackets } = createVideoStreamHealthHarness();
+
+    await vi.advanceTimersByTimeAsync(1);
+    advanceVideoPackets();
+    await health.handleWatchdog(1, 'test');
+
+    await vi.advanceTimersByTimeAsync(4000);
+    await health.handleWatchdog(1, 'test');
+    await vi.advanceTimersByTimeAsync(1000);
+    await health.handleWatchdog(1, 'test');
+
+    expect(onVideoStreamStalledConfirmed).toHaveBeenCalledTimes(1);
+    expect(onVideoStreamStalledConfirmed).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'test',
+      connectionId: 1,
+      deviceId: 'device-1',
+      tabKey: 'tab-1',
+      signalingAttached: true,
+      peerConnectionState: 'connected'
+    }));
   });
 });

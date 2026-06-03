@@ -44,6 +44,10 @@ func (f *fakeWebRTCService) HasActiveSessionLease(string) bool {
 	return f.activeLease
 }
 
+func (f *fakeWebRTCService) HasSessionLease(string, string) bool {
+	return f.activeLease
+}
+
 func (f *fakeWebRTCService) ConsumeTicket(context.Context, string) (domainwebrtc.Ticket, error) {
 	panic("unexpected call")
 }

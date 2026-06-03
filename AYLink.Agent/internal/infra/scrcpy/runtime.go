@@ -339,6 +339,43 @@ func (r *runtime) setClipboard(ctx context.Context, text string, paste bool) err
 	}
 }
 
+func (r *runtime) ReplayLatestVideoKeyFrame() bool {
+	r.videoMu.Lock()
+	defer r.videoMu.Unlock()
+
+	select {
+	case <-r.done:
+		return false
+	default:
+	}
+
+	configPacket := r.latestVideoConfig
+	keyFramePacket := r.latestVideoKeyFrame
+	if configPacket.generation == 0 || keyFramePacket.generation == 0 || keyFramePacket.generation != configPacket.generation {
+		return false
+	}
+	if len(r.videoSubscribers) == 0 {
+		return false
+	}
+
+	for _, sub := range r.videoSubscribers {
+		if packet := cloneCachedVideoPacket(configPacket); len(packet.Data) > 0 {
+			offerCriticalVideoPacketToSubscriber(sub, packet)
+		}
+		if packet := cloneCachedVideoPacket(keyFramePacket); len(packet.Data) > 0 {
+			offerCriticalVideoPacketToSubscriber(sub, packet)
+		}
+	}
+
+	if r.logger != nil {
+		r.logger.Info("scrcpy video key frame replayed",
+			"generation", keyFramePacket.generation,
+			"subscriberCount", len(r.videoSubscribers),
+		)
+	}
+	return true
+}
+
 func (r *runtime) RequestVideoRefresh() error {
 	r.refreshMu.Lock()
 	if r.refreshRequested {

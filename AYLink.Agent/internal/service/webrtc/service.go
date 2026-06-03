@@ -17,6 +17,7 @@ import (
 var (
 	ErrDeviceIDRequired  = errors.New("device id required")
 	ErrSessionIDRequired = errors.New("session id required")
+	ErrSessionNotFound   = errors.New("session not found")
 	ErrTicketNotFound    = errors.New("ticket not found")
 )
 
@@ -27,6 +28,7 @@ type Service struct {
 	tickets       map[string]domainwebrtc.Ticket
 	sessionLeases map[string]domainwebrtc.SessionLease
 	controlLeases map[string]controlLease
+	signaling     map[string]*signalingSession
 	udpMuxes      map[int]ice.UDPMux
 	ticketTTL     time.Duration
 	leaseTTL      time.Duration
@@ -43,6 +45,7 @@ const controlLeaseTTL = 1500 * time.Millisecond
 
 type CreateTicketInput struct {
 	DeviceID         string `json:"deviceId"`
+	SessionID        string `json:"sessionId"`
 	AppPackage       string `json:"appPackage"`
 	AppName          string `json:"appName"`
 	NewDisplay       bool   `json:"newDisplay"`
@@ -64,6 +67,7 @@ func NewService(logger logging.Logger) *Service {
 		tickets:       make(map[string]domainwebrtc.Ticket),
 		sessionLeases: make(map[string]domainwebrtc.SessionLease),
 		controlLeases: make(map[string]controlLease),
+		signaling:     make(map[string]*signalingSession),
 		udpMuxes:      make(map[int]ice.UDPMux),
 		ticketTTL:     60 * time.Second,
 		leaseTTL:      45 * time.Second,
@@ -85,9 +89,18 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 		return CreateTicketResult{}, err
 	}
 
+	sessionID := value
+	if input.SessionID != "" {
+		lease, ok := s.sessionLeases[input.SessionID]
+		if !ok || lease.DeviceID != input.DeviceID || !lease.ExpiresAt.After(s.now()) {
+			return CreateTicketResult{}, ErrSessionNotFound
+		}
+		sessionID = input.SessionID
+	}
+
 	ticket := domainwebrtc.Ticket{
 		Value:            value,
-		SessionID:        value,
+		SessionID:        sessionID,
 		DeviceID:         input.DeviceID,
 		AppPackage:       input.AppPackage,
 		AppName:          input.AppName,
@@ -101,7 +114,7 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 
 	return CreateTicketResult{
 		Ticket:           value,
-		SessionID:        value,
+		SessionID:        sessionID,
 		ExpiresInSeconds: int(s.ticketTTL.Seconds()),
 	}, nil
 }
@@ -159,6 +172,9 @@ func (s *Service) ReleaseSession(_ context.Context, deviceID string, sessionID s
 	if controlLease, ok := s.controlLeases[deviceID]; ok && controlLease.SessionID == sessionID {
 		delete(s.controlLeases, deviceID)
 	}
+	signalingSession := s.signaling[sessionID]
+	delete(s.signaling, sessionID)
+	go closeSignalingSession(signalingSession)
 	return nil
 }
 
@@ -193,6 +209,19 @@ func (s *Service) HasActiveSessionLease(deviceID string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) HasSessionLease(deviceID string, sessionID string) bool {
+	if deviceID == "" || sessionID == "" {
+		return false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cleanupLocked()
+	lease, ok := s.sessionLeases[sessionID]
+	return ok && lease.DeviceID == deviceID && lease.ExpiresAt.After(s.now())
 }
 
 func (s *Service) TryAcquireControl(deviceID string, sessionID string) bool {
@@ -234,6 +263,20 @@ func (s *Service) cleanupLocked() {
 		if !lease.ExpiresAt.After(now) {
 			delete(s.controlLeases, key)
 		}
+	}
+}
+
+func (s *Service) removeSignalingSession(sessionID string, session *signalingSession) {
+	if sessionID == "" || session == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current := s.signaling[sessionID]
+	if current == session {
+		delete(s.signaling, sessionID)
 	}
 }
 

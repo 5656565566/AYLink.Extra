@@ -572,6 +572,77 @@ func TestHTTPDevicesListRequiresViewPermission(t *testing.T) {
 	}
 }
 
+func TestHTTPADBStatusRequiresAuth(t *testing.T) {
+	env := newIntegrationEnv(t)
+
+	statusCode, body := env.doJSON(t, http.MethodGet, "/api/adb/status", "", nil)
+	if statusCode != http.StatusUnauthorized {
+		t.Fatalf("expected adb status GET to require auth, got %d: %s", statusCode, string(body))
+	}
+}
+
+func TestHTTPADBEndpointsRequireDevicesManagePermission(t *testing.T) {
+	env := newIntegrationEnv(t)
+	env.createUserWithPermissionsAndGroups(t, "adb-viewer", "secret", []string{"devices.view"}, []int{env.internalAllDevicesGroupID(t)})
+
+	tokens := env.login(t, "adb-viewer", "secret")
+
+	for _, testCase := range []struct {
+		method  string
+		path    string
+		payload any
+	}{
+		{method: http.MethodGet, path: "/api/adb/status"},
+		{method: http.MethodPost, path: "/api/adb/server/start"},
+		{method: http.MethodPost, path: "/api/adb/server/kill"},
+		{
+			method: http.MethodPost,
+			path:   "/api/adb/pair",
+			payload: map[string]any{
+				"host":        "127.0.0.1",
+				"pairingPort": 5555,
+				"pairingCode": "123456",
+			},
+		},
+	} {
+		statusCode, body := env.doJSON(t, testCase.method, testCase.path, tokens.AccessToken, testCase.payload)
+		if statusCode != http.StatusForbidden {
+			t.Fatalf("expected %s %s to require devices.manage, got %d: %s", testCase.method, testCase.path, statusCode, string(body))
+		}
+	}
+}
+
+func TestHTTPADBEndpointsAllowDevicesManagePermission(t *testing.T) {
+	env := newIntegrationEnv(t)
+	env.createUserWithPermissions(t, "adb-manager", "secret", []string{"devices.manage"})
+
+	tokens := env.login(t, "adb-manager", "secret")
+
+	statusCode, body := env.doJSON(t, http.MethodGet, "/api/adb/status", tokens.AccessToken, nil)
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected adb status GET 200, got %d: %s", statusCode, string(body))
+	}
+	if !bytes.Contains(body, []byte(`"serverAddress":"127.0.0.1:5037"`)) {
+		t.Fatalf("expected adb status payload, got %s", string(body))
+	}
+
+	for _, path := range []string{"/api/adb/server/start", "/api/adb/server/kill"} {
+		statusCode, body = env.doJSON(t, http.MethodPost, path, tokens.AccessToken, nil)
+		if statusCode != http.StatusOK {
+			t.Fatalf("expected POST %s 200, got %d: %s", path, statusCode, string(body))
+		}
+	}
+
+	statusCode, body = env.doJSON(t, http.MethodPost, "/api/adb/pair", tokens.AccessToken, map[string]any{
+		"host":        "127.0.0.1",
+		"pairingPort": 5555,
+		"pairingCode": "123456",
+	})
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected adb pair POST 200, got %d: %s", statusCode, string(body))
+	}
+}
+
 func TestHTTPDevicesListReturnsInsertedDevices(t *testing.T) {
 	env := newIntegrationEnv(t)
 	env.createUserWithPermissionsAndGroups(t, "devices-viewer", "secret", []string{"devices.view"}, []int{env.internalAllDevicesGroupID(t)})

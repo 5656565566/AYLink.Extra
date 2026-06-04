@@ -45,12 +45,16 @@ type fakeRepository struct {
 	updatedPasswordSalt   string
 	revokeAllCalled       bool
 	deleteAllAccessCalled bool
+	updateUserAndRevokeCalled     bool
+	updatePasswordAndRevokeCalled bool
 	createUserCalled      bool
 	updateUserCalled      bool
 	deleteUserCalled      bool
 	deletedUserID         int
 	updateUserIsActive    bool
 	updateUserRoleIDs     []int
+	updateUserAndRevokeErr     error
+	updatePasswordAndRevokeErr error
 	revokeAllErr          error
 	deleteAllAccessErr    error
 	deleteAccessErr       error
@@ -97,6 +101,19 @@ func (f *fakeRepository) DeleteUser(_ context.Context, userID int) error {
 	return nil
 }
 
+func (f *fakeRepository) UpdateUserAndRevokeSessions(_ context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
+	f.updateUserAndRevokeCalled = true
+	if f.updateUserAndRevokeErr != nil {
+		return nil, f.updateUserAndRevokeErr
+	}
+	f.updateUserCalled = true
+	f.updateUserIsActive = isActive
+	f.updateUserRoleIDs = append([]int(nil), roleIds...)
+	f.revokeAllCalled = true
+	f.deleteAllAccessCalled = true
+	return &domainauth.User{ID: userID, Username: username, IsActive: isActive}, nil
+}
+
 func (f *fakeRepository) UpdateUserPassword(_ context.Context, userID int, passwordHash, passwordSalt string) error {
 	if userID <= 0 {
 		return errors.New("invalid user id")
@@ -104,6 +121,22 @@ func (f *fakeRepository) UpdateUserPassword(_ context.Context, userID int, passw
 	f.updatePasswordCalled = true
 	f.updatedPasswordHash = passwordHash
 	f.updatedPasswordSalt = passwordSalt
+	return nil
+}
+
+func (f *fakeRepository) UpdateUserPasswordAndRevokeSessions(_ context.Context, userID int, passwordHash, passwordSalt string) error {
+	f.updatePasswordAndRevokeCalled = true
+	if f.updatePasswordAndRevokeErr != nil {
+		return f.updatePasswordAndRevokeErr
+	}
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+	f.updatePasswordCalled = true
+	f.updatedPasswordHash = passwordHash
+	f.updatedPasswordSalt = passwordSalt
+	f.revokeAllCalled = true
+	f.deleteAllAccessCalled = true
 	return nil
 }
 
@@ -251,6 +284,9 @@ func TestChangeOwnPasswordUpdatesPasswordAndRevokesSessions(t *testing.T) {
 	}
 	if !repo.updatePasswordCalled {
 		t.Fatal("expected password update to be called")
+	}
+	if !repo.updatePasswordAndRevokeCalled {
+		t.Fatal("expected transactional password update to be called")
 	}
 	if repo.updatedPasswordHash == "" || repo.updatedPasswordSalt == "" {
 		t.Fatal("expected updated password hash and salt to be persisted")
@@ -479,8 +515,8 @@ func TestSetUserActiveStateUsesExistingRoles(t *testing.T) {
 	if err := service.SetUserActiveState(context.Background(), 5, false, nil); err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-	if !repo.updateUserCalled {
-		t.Fatal("expected UpdateUser to be called")
+	if !repo.updateUserAndRevokeCalled {
+		t.Fatal("expected transactional UpdateUser to be called")
 	}
 	if repo.updateUserIsActive {
 		t.Fatal("expected UpdateUser to disable the user")
@@ -590,7 +626,7 @@ func TestUpdateRoleRejectsRemovingLastSystemOwnerPermission(t *testing.T) {
 
 func TestResetPasswordReturnsLogoutError(t *testing.T) {
 	repo := &fakeRepository{
-		revokeAllErr: errors.New("revoke failed"),
+		updatePasswordAndRevokeErr: errors.New("revoke failed"),
 	}
 	service := NewService(repo, stubLogger{})
 
@@ -601,8 +637,11 @@ func TestResetPasswordReturnsLogoutError(t *testing.T) {
 	if password != "" {
 		t.Fatalf("expected empty password on logout failure, got %q", password)
 	}
-	if !repo.updatePasswordCalled {
-		t.Fatal("expected password to be updated before logout attempt")
+	if !repo.updatePasswordAndRevokeCalled {
+		t.Fatal("expected transactional password update to be attempted")
+	}
+	if repo.updatePasswordCalled {
+		t.Fatal("expected password not to be persisted when transactional update fails")
 	}
 }
 
@@ -616,13 +655,19 @@ func TestChangeOwnPasswordReturnsLogoutError(t *testing.T) {
 			PasswordHash: hashPassword("old-password", salt),
 			IsActive:     true,
 		},
-		revokeAllErr: errors.New("revoke failed"),
+		updatePasswordAndRevokeErr: errors.New("revoke failed"),
 	}
 	service := NewService(repo, stubLogger{})
 
 	err := service.ChangeOwnPassword(context.Background(), 1, "old-password", "new-password")
 	if err == nil || err.Error() != "revoke failed" {
 		t.Fatalf("expected revoke failed error, got %v", err)
+	}
+	if !repo.updatePasswordAndRevokeCalled {
+		t.Fatal("expected transactional password update to be attempted")
+	}
+	if repo.updatePasswordCalled {
+		t.Fatal("expected password not to be persisted when transactional update fails")
 	}
 }
 

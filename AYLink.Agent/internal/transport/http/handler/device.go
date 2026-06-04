@@ -709,6 +709,9 @@ func (h *DeviceHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
 		return
 	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
 
 	var payload struct {
 		Path string `json:"path"`

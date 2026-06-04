@@ -125,7 +125,7 @@ func New(deps Dependencies) http.Handler {
 		i18n:        i18nHandler,
 	}
 
-	registerStatusRoutes(mux, handlers)
+	registerStatusRoutes(mux, handlers, guards)
 	registerAuthRoutes(mux, handlers, guards)
 	registerDeviceRoutes(mux, handlers, guards)
 	registerDeviceGroupRoutes(mux, handlers, guards)

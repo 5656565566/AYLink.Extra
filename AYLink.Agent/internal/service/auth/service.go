@@ -273,18 +273,11 @@ func (s *Service) UpdateUser(ctx context.Context, userID int, username string, i
 		return nil, err
 	}
 
-	user, err := s.repo.UpdateUser(ctx, userID, trimmedUsername, isActive, normalizedRoleIDs, normalizedDeviceGroupIDs)
-	if err != nil {
-		return nil, err
-	}
-
 	if !isActive {
-		if err := s.LogoutAll(ctx, userID); err != nil {
-			return nil, err
-		}
+		return s.repo.UpdateUserAndRevokeSessions(ctx, userID, trimmedUsername, isActive, normalizedRoleIDs, normalizedDeviceGroupIDs)
 	}
 
-	return user, nil
+	return s.repo.UpdateUser(ctx, userID, trimmedUsername, isActive, normalizedRoleIDs, normalizedDeviceGroupIDs)
 }
 
 func (s *Service) DeleteUser(ctx context.Context, userID int, actingUserID *int) error {
@@ -321,11 +314,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID int, newPassword str
 	}
 	hash := hashPassword(password, salt)
 
-	if err := s.repo.UpdateUserPassword(ctx, userID, hash, salt); err != nil {
-		return "", err
-	}
-
-	if err := s.LogoutAll(ctx, userID); err != nil {
+	if err := s.repo.UpdateUserPasswordAndRevokeSessions(ctx, userID, hash, salt); err != nil {
 		return "", err
 	}
 	return password, nil
@@ -355,11 +344,7 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID int, currentPass
 	}
 	hash := hashPassword(trimmedNewPassword, salt)
 
-	if err := s.repo.UpdateUserPassword(ctx, userID, hash, salt); err != nil {
-		return err
-	}
-
-	return s.LogoutAll(ctx, userID)
+	return s.repo.UpdateUserPasswordAndRevokeSessions(ctx, userID, hash, salt)
 }
 
 func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive bool, actingUserID *int) error {
@@ -404,11 +389,12 @@ func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive b
 		return err
 	}
 
-	_, err = s.repo.UpdateUser(ctx, userID, user.Username, isActive, roleIds, directGroupIDs)
-	if err == nil && !isActive {
-		err = s.LogoutAll(ctx, userID)
+	if !isActive {
+		_, err = s.repo.UpdateUserAndRevokeSessions(ctx, userID, user.Username, isActive, roleIds, directGroupIDs)
+		return err
 	}
 
+	_, err = s.repo.UpdateUser(ctx, userID, user.Username, isActive, roleIds, directGroupIDs)
 	return err
 }
 

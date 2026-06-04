@@ -9,12 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	domainauth "aylink-agent/internal/domain/auth"
 	domaindevice "aylink-agent/internal/domain/device"
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
 	appservice "aylink-agent/internal/service/app"
 	deviceservice "aylink-agent/internal/service/device"
 	fileservice "aylink-agent/internal/service/file"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
+	"aylink-agent/internal/transport/http/middleware"
 )
 
 type fakeDeviceService struct {
@@ -75,6 +77,10 @@ type fakeScrcpyService struct{}
 type fakeDevicePreviewService struct {
 	lastWidth int
 }
+type fakeDeviceAccessService struct {
+	allowed bool
+	err     error
+}
 
 func (fakeFileService) List(context.Context, int, string) (*fileservice.ListResult, error) {
 	panic("unexpected call")
@@ -84,6 +90,14 @@ func (fakeFileService) Download(context.Context, int, string) (*fileservice.Down
 }
 func (fakeFileService) Rename(context.Context, int, string, string) error { return nil }
 func (fakeFileService) Delete(context.Context, int, string) error         { return nil }
+
+func (f fakeDeviceAccessService) CanAccessDevice(context.Context, *domainauth.Identity, int) (bool, error) {
+	return f.allowed, f.err
+}
+
+func (f fakeDeviceAccessService) FilterDevices(_ context.Context, _ *domainauth.Identity, devices []domaindevice.Device) ([]domaindevice.Device, error) {
+	return devices, f.err
+}
 
 func (fakeScrcpyService) ListEncoders(context.Context, int) ([]string, error) { return nil, nil }
 func (fakeScrcpyService) ListApps(context.Context, int) ([]domainscrcpy.AppInfo, error) {
@@ -203,5 +217,31 @@ func TestDeviceHandlerPreviewRejectsInvalidWidth(t *testing.T) {
 	}
 	if previewService.lastWidth != 0 {
 		t.Fatalf("expected preview service not to be called, got width %d", previewService.lastWidth)
+	}
+}
+
+func TestDeviceHandlerDeleteFileRejectsInaccessibleDevice(t *testing.T) {
+	handler := NewDeviceHandler(
+		&fakeDeviceService{},
+		fakeDeviceAccessService{allowed: false},
+		nil,
+		&fakeDevicePreviewService{},
+		fakeAppService{},
+		fakeFileService{},
+		fakeDeviceSettingsService{},
+		fakeScrcpyService{},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/7/files/delete", strings.NewReader(`{"path":"/sdcard/test.txt"}`))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.DeleteFile(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `DEVICE_NOT_FOUND`) {
+		t.Fatalf("expected device not found payload, got %s", recorder.Body.String())
 	}
 }

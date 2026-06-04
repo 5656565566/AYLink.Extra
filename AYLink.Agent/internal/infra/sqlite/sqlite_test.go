@@ -816,6 +816,96 @@ func TestAuthRepositoryRevokeAndDeleteAllTokensForUser(t *testing.T) {
 	}
 }
 
+func TestAuthRepositoryUpdateUserPasswordAndRevokeSessions(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewAuthRepository(db)
+	ctx := context.Background()
+
+	adminRole, err := repo.GetRoleByName(ctx, "Administrator")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error = %v", err)
+	}
+	user, err := repo.CreateUser(ctx, "password-rotate-user", "old-hash", "old-salt", []int{adminRole.ID}, nil)
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	record, err := repo.GetUserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID() error = %v", err)
+	}
+
+	pair := domainauth.TokenPair{
+		AccessToken:           "password-rotate-access",
+		AccessTokenExpiresAt:  time.Now().UTC().Add(time.Hour),
+		RefreshToken:          "password-rotate-refresh",
+		RefreshTokenExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	if err := repo.CreateSession(ctx, *record, pair); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	if err := repo.UpdateUserPasswordAndRevokeSessions(ctx, user.ID, "new-hash", "new-salt"); err != nil {
+		t.Fatalf("UpdateUserPasswordAndRevokeSessions() error = %v", err)
+	}
+
+	updatedRecord, err := repo.GetUserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID() after password update error = %v", err)
+	}
+	if updatedRecord == nil || updatedRecord.PasswordHash != "new-hash" || updatedRecord.PasswordSalt != "new-salt" {
+		t.Fatalf("expected password update to persist, got %+v", updatedRecord)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM AccessTokens WHERE UserId = ?`, user.ID); got != 0 {
+		t.Fatalf("expected 0 access tokens after password rotation, got %d", got)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM RefreshTokens WHERE UserId = ? AND RevokedAt IS NULL`, user.ID); got != 0 {
+		t.Fatalf("expected 0 active refresh tokens after password rotation, got %d", got)
+	}
+}
+
+func TestAuthRepositoryUpdateUserAndRevokeSessions(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewAuthRepository(db)
+	ctx := context.Background()
+
+	adminRole, err := repo.GetRoleByName(ctx, "Administrator")
+	if err != nil {
+		t.Fatalf("GetRoleByName() error = %v", err)
+	}
+	user, err := repo.CreateUser(ctx, "disable-user", "hash", "salt", []int{adminRole.ID}, nil)
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	record, err := repo.GetUserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID() error = %v", err)
+	}
+
+	pair := domainauth.TokenPair{
+		AccessToken:           "disable-access",
+		AccessTokenExpiresAt:  time.Now().UTC().Add(time.Hour),
+		RefreshToken:          "disable-refresh",
+		RefreshTokenExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	if err := repo.CreateSession(ctx, *record, pair); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	updatedUser, err := repo.UpdateUserAndRevokeSessions(ctx, user.ID, "disable-user", false, []int{adminRole.ID}, nil)
+	if err != nil {
+		t.Fatalf("UpdateUserAndRevokeSessions() error = %v", err)
+	}
+	if updatedUser == nil || updatedUser.IsActive {
+		t.Fatalf("expected disabled user, got %+v", updatedUser)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM AccessTokens WHERE UserId = ?`, user.ID); got != 0 {
+		t.Fatalf("expected 0 access tokens after disabling user, got %d", got)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM RefreshTokens WHERE UserId = ? AND RevokedAt IS NULL`, user.ID); got != 0 {
+		t.Fatalf("expected 0 active refresh tokens after disabling user, got %d", got)
+	}
+}
+
 func TestDeviceRepositoryInsertFindAndDelete(t *testing.T) {
 	db := newTestDB(t)
 	repo := NewDeviceRepository(db)

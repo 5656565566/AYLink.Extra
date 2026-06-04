@@ -92,8 +92,10 @@ type Repository interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	CreateUser(ctx context.Context, username, passwordHash, passwordSalt string, roleIds []int, deviceGroupIDs []int) (*User, error)
 	UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) (*User, error)
+	UpdateUserAndRevokeSessions(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) (*User, error)
 	DeleteUser(ctx context.Context, userID int) error
 	UpdateUserPassword(ctx context.Context, userID int, passwordHash, passwordSalt string) error
+	UpdateUserPasswordAndRevokeSessions(ctx context.Context, userID int, passwordHash, passwordSalt string) error
 
 	ListRoles(ctx context.Context) ([]Role, error)
 	GetRoleByName(ctx context.Context, name string) (*Role, error)

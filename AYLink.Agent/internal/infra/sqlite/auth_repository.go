@@ -162,29 +162,29 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID int, username st
 	}
 	defer tx.Rollback()
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE Users
-		SET Username = ?, IsActive = ?, UpdatedAt = ?
-		WHERE Id = ?`, username, isActive, now, userID); err != nil {
+	if err := updateUserTx(ctx, tx, userID, username, isActive, roleIds, deviceGroupIDs); err != nil {
 		return nil, err
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM UserRoles WHERE UserId = ?`, userID); err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	for _, roleId := range roleIds {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO UserRoles (UserId, RoleId) VALUES (?, ?)`, userID, roleId); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM UserDeviceGroups WHERE UserId = ?`, userID); err != nil {
+
+	return r.loadUserByID(ctx, userID)
+}
+
+func (r *AuthRepository) UpdateUserAndRevokeSessions(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) (*domainauth.User, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
 		return nil, err
 	}
-	for _, groupID := range normalizeIntIDs(deviceGroupIDs) {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO UserDeviceGroups (UserId, GroupId) VALUES (?, ?)`, userID, groupID); err != nil {
-			return nil, err
-		}
+	defer tx.Rollback()
+
+	if err := updateUserTx(ctx, tx, userID, username, isActive, roleIds, deviceGroupIDs); err != nil {
+		return nil, err
+	}
+	if err := revokeSessionsForUserTx(ctx, tx, userID); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -225,6 +225,23 @@ func (r *AuthRepository) UpdateUserPassword(ctx context.Context, userID int, pas
 		SET PasswordHash = ?, PasswordSalt = ?, UpdatedAt = ?
 		WHERE Id = ?`, passwordHash, passwordSalt, now, userID)
 	return err
+}
+
+func (r *AuthRepository) UpdateUserPasswordAndRevokeSessions(ctx context.Context, userID int, passwordHash, passwordSalt string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := updateUserPasswordTx(ctx, tx, userID, passwordHash, passwordSalt); err != nil {
+		return err
+	}
+	if err := revokeSessionsForUserTx(ctx, tx, userID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *AuthRepository) ListRoles(ctx context.Context) ([]domainauth.Role, error) {
@@ -745,6 +762,56 @@ func (r *AuthRepository) CleanupExpiredTokens(ctx context.Context, now time.Time
 	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM RefreshTokens WHERE ExpiresAt <= ? OR RevokedAt IS NOT NULL`, nowValue)
 	return err
+}
+
+func updateUserTx(ctx context.Context, tx *sql.Tx, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE Users
+		SET Username = ?, IsActive = ?, UpdatedAt = ?
+		WHERE Id = ?`, username, isActive, now, userID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM UserRoles WHERE UserId = ?`, userID); err != nil {
+		return err
+	}
+	for _, roleId := range roleIds {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO UserRoles (UserId, RoleId) VALUES (?, ?)`, userID, roleId); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM UserDeviceGroups WHERE UserId = ?`, userID); err != nil {
+		return err
+	}
+	for _, groupID := range normalizeIntIDs(deviceGroupIDs) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO UserDeviceGroups (UserId, GroupId) VALUES (?, ?)`, userID, groupID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func updateUserPasswordTx(ctx context.Context, tx *sql.Tx, userID int, passwordHash, passwordSalt string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := tx.ExecContext(ctx, `
+		UPDATE Users
+		SET PasswordHash = ?, PasswordSalt = ?, UpdatedAt = ?
+		WHERE Id = ?`, passwordHash, passwordSalt, now, userID)
+	return err
+}
+
+func revokeSessionsForUserTx(ctx context.Context, tx *sql.Tx, userID int) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `UPDATE RefreshTokens SET RevokedAt = ? WHERE UserId = ? AND RevokedAt IS NULL`, now, userID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM AccessTokens WHERE UserId = ?`, userID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func scanUser(row *sql.Row) (*domainauth.UserRecord, error) {

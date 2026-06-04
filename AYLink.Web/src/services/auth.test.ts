@@ -137,6 +137,58 @@ describe('auth service', () => {
     expect(window.localStorage.getItem(storageKeys.auth.refreshTokenExpiresAt)).toBeNull();
   });
 
+  it('clears local session state after signing out all sessions', async () => {
+    sendApiRequestMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    const authModule = await import('./auth');
+    authModule.applyAuthResponse({
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      user: {
+        Id: 1,
+        Username: 'demo',
+        IsActive: true,
+        Roles: [],
+        Permissions: []
+      },
+      permissions: []
+    });
+
+    await authModule.logoutAll();
+
+    expect(sendApiRequestMock).toHaveBeenCalledWith('/api/logout-all', expect.objectContaining({
+      method: 'POST'
+    }));
+    expect(authModule.getAccessToken()).toBe('');
+    expect(authModule.getRefreshToken()).toBe('');
+    expect(window.localStorage.getItem(storageKeys.auth.accessToken)).toBeNull();
+    expect(window.localStorage.getItem(storageKeys.auth.refreshToken)).toBeNull();
+  });
+
+  it('preserves local session state when sign out all sessions fails', async () => {
+    sendApiRequestMock.mockRejectedValue(new Error('network'));
+
+    const authModule = await import('./auth');
+    authModule.applyAuthResponse({
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      user: {
+        Id: 1,
+        Username: 'demo',
+        IsActive: true,
+        Roles: [],
+        Permissions: []
+      },
+      permissions: []
+    });
+
+    await expect(authModule.logoutAll()).rejects.toThrow('network');
+    expect(authModule.getAccessToken()).toBe('access');
+    expect(authModule.getRefreshToken()).toBe('refresh');
+    expect(window.localStorage.getItem(storageKeys.auth.accessToken)).toBe('access');
+    expect(window.localStorage.getItem(storageKeys.auth.refreshToken)).toBe('refresh');
+  });
+
   it('clears stale stored identity when no tokens are available during initialization', async () => {
     window.localStorage.setItem(storageKeys.auth.user, JSON.stringify({
       Id: 9,

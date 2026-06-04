@@ -476,6 +476,14 @@
           <button class="fluent-btn" @click="openAccountManagement">{{ t('Common.Open', '打开') }}</button>
         </SettingItem>
         <SettingItem
+          :title="t('Settings.LogoutAll', '退出所有会话')"
+          :description="t('Settings.LogoutAllDescription', '结束当前账户的所有会话，包括当前浏览器以及其他已登录设备')"
+        >
+          <button class="fluent-btn" :disabled="loggingOutAll" @click="handleLogoutAll">
+            {{ loggingOutAll ? t('Settings.Saving', '保存中...') : t('Settings.LogoutAll', '退出所有会话') }}
+          </button>
+        </SettingItem>
+        <SettingItem
           :title="t('Common.Logout', '退出登录')"
           :description="t('Settings.LogoutDescription', '结束当前浏览器会话并返回登录页')"
         >

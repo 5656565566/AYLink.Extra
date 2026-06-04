@@ -50,6 +50,7 @@ export function useAuth() {
     sessionStatus: computed(() => sessionStatus.value),
     hasPermission,
     logout,
+    logoutAll,
   };
 }
 
@@ -219,6 +220,28 @@ export async function logout() {
   } finally {
     clearSession();
   }
+}
+
+export async function logoutAll() {
+  const activeAccessToken = accessToken.value;
+  const activeRefreshToken = refreshToken.value;
+
+  if (!activeAccessToken && !activeRefreshToken) {
+    clearSession();
+    return;
+  }
+
+  await sendApiRequest('/api/logout-all', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    retryOnUnauthorized: false,
+    handleUnauthorized: false,
+    handleForbidden: false
+  });
+
+  clearSession();
 }
 
 export function clearSession() {

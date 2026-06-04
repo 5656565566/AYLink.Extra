@@ -8,7 +8,7 @@ import { backgroundEnabled, backgroundImages, addBackgroundImages, removeBackgro
 import { useAppSettings } from '../services/appSettings';
 import { useDialog } from '../services/dialog';
 import { useTheme, type ThemeMode } from '../services/theme';
-import { hasPermission, logout, useAuth } from '../services/auth';
+import { hasPermission, logout, logoutAll, useAuth } from '../services/auth';
 import { useNotification } from '../services/notification';
 import {
   clearLocalWebRtcOverrideConfig,
@@ -180,6 +180,7 @@ export default defineComponent({
     const showGroupDialog = ref(false);
 
     const changingPassword = ref(false);
+    const loggingOutAll = ref(false);
     const groupManagementLoading = ref(false);
     const groupManagementSaving = ref(false);
     const groupManagementError = ref('');
@@ -1024,6 +1025,36 @@ export default defineComponent({
       router.push({ name: 'login' });
     }
 
+    async function handleLogoutAll() {
+      if (loggingOutAll.value) {
+        return;
+      }
+
+      const confirmed = await dialogService.confirm(
+        t('Settings.LogoutAllTitle', '退出所有会话'),
+        t('Settings.LogoutAllConfirm', '确定要结束当前账户的所有会话吗？这会让当前浏览器以及其他已登录设备全部退出。'),
+        t('Settings.LogoutAll', '退出所有会话'),
+        t('Common.Cancel', '取消')
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      loggingOutAll.value = true;
+      try {
+        await logoutAll();
+        router.push({ name: 'login' });
+      } catch (error) {
+        notifications.show({
+          type: 'error',
+          title: t('Settings.LogoutAllFailedTitle', '退出全部会话失败'),
+          message: error instanceof Error ? error.message : t('Errors.LogoutAllFailed', '退出全部会话失败')
+        });
+      } finally {
+        loggingOutAll.value = false;
+      }
+    }
+
     async function loadAppVersion() {
       const response = await apiFetch('/api/app/version', {
         requiresAuth: false,
@@ -1288,6 +1319,7 @@ export default defineComponent({
       showBackgroundDialog,
       showGroupDialog,
       changingPassword,
+      loggingOutAll,
       groupManagementLoading,
       groupManagementSaving,
       groupManagementError,
@@ -1364,6 +1396,7 @@ export default defineComponent({
       deleteDeviceGroup,
       closeChangePasswordDialog,
       handleLogout,
+      handleLogoutAll,
       loadAppVersion,
       checkForUpdates,
       loadWebRtcSettings,

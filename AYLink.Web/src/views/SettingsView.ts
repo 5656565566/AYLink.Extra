@@ -79,7 +79,7 @@ export default defineComponent({
 
     const { themeMode, accentColor, setThemeMode, setAccentColor, resetTheme } = useTheme();
 
-    const { t, currentLocale, languages, setLocale, loadServerLocale } = useI18n();
+    const { t, currentLocale, languages, setLocale } = useI18n();
 
     const { backgroundMute, newDisplayDpiMode, newDisplayDpiValue, previewRefreshInterval, setBackgroundMute, setNewDisplayDpiMode, setNewDisplayDpiValue, setPreviewRefreshInterval } = useAppSettings();
 
@@ -141,6 +141,8 @@ export default defineComponent({
     }
 
     const webrtcTransportPolicy = ref<'all' | 'relay'>('all');
+
+    const webrtcFallbackLocale = ref('zh-CN');
 
     const webrtcServers = ref<WebRtcServerForm[]>([createDefaultWebRtcServerForm('stun')]);
 
@@ -276,7 +278,7 @@ export default defineComponent({
     let localSaveTimeout: number | null = null;
 
     watch(
-      [webrtcTransportPolicy, webrtcServers, webrtcHostCandidateOverrideEnabled, webrtcHostCandidateOverrideIPsText, webrtcHostCandidatePortMin, webrtcHostCandidatePortMax, webrtcSinglePortMuxEnabled, webrtcSinglePortMuxBindPort, webrtcSinglePortMuxPublishPort],
+      [webrtcTransportPolicy, webrtcFallbackLocale, webrtcServers, webrtcHostCandidateOverrideEnabled, webrtcHostCandidateOverrideIPsText, webrtcHostCandidatePortMin, webrtcHostCandidatePortMax, webrtcSinglePortMuxEnabled, webrtcSinglePortMuxBindPort, webrtcSinglePortMuxPublishPort],
       () => {
         if (isSettingInternally || !canManageRemoteSettings.value) return;
 
@@ -326,7 +328,7 @@ export default defineComponent({
     }
 
     function onLocaleChange(event: Event) {
-      void setLocale((event.target as HTMLSelectElement).value, canManageRemoteSettings.value);
+      void setLocale((event.target as HTMLSelectElement).value);
     }
 
     function onBackgroundMuteChange(event: Event) {
@@ -442,6 +444,7 @@ export default defineComponent({
 
     function normalizeWebRtcPayload(payload?: WebRtcNetworkSettingsPayload | null): WebRtcNetworkSettingsPayload {
       const normalizedPolicy = payload?.IceTransportPolicy === 'relay' ? 'relay' : 'all';
+      const normalizedFallbackLocale = normalizeLocale(payload?.FallbackLocale);
       const seenServers = new Set<string>();
       const normalizedServers = (payload?.IceServers ?? [])
         .map((server) => {
@@ -484,6 +487,7 @@ export default defineComponent({
 
       return {
         IceTransportPolicy: normalizedPolicy,
+        FallbackLocale: normalizedFallbackLocale,
         IceServers: normalizedServers,
         HostCandidateOverrideEnabled: payload?.HostCandidateOverrideEnabled === true,
         HostCandidateOverrideIPs: normalizedHostCandidateIPs,
@@ -495,10 +499,16 @@ export default defineComponent({
       };
     }
 
+    function normalizeLocale(locale?: string | null) {
+      const normalized = locale?.trim() ?? '';
+      return /^[a-z]{2}-[A-Z]{2}$/.test(normalized) ? normalized : 'zh-CN';
+    }
+
     function applyWebRtcSettings(payload?: WebRtcNetworkSettingsPayload | null) {
       const normalizedPayload = normalizeWebRtcPayload(payload);
       isSettingInternally = true;
       webrtcTransportPolicy.value = normalizedPayload.IceTransportPolicy === 'relay' ? 'relay' : 'all';
+      webrtcFallbackLocale.value = normalizedPayload.FallbackLocale || 'zh-CN';
       const servers = normalizedPayload.IceServers?.map((server) => createWebRtcServerForm(server)) ?? [];
       webrtcServers.value = mergeServerDrafts(servers, webrtcServers.value);
       webrtcHostCandidateOverrideEnabled.value = normalizedPayload.HostCandidateOverrideEnabled === true;
@@ -540,6 +550,7 @@ export default defineComponent({
     function buildWebRtcSettingsPayload(): WebRtcNetworkSettingsPayload {
       return normalizeWebRtcPayload({
         IceTransportPolicy: webrtcTransportPolicy.value,
+        FallbackLocale: webrtcFallbackLocale.value,
         IceServers: webrtcServers.value
           .map((server) => ({
             Urls: server.urlsText
@@ -564,7 +575,7 @@ export default defineComponent({
     }
 
     function buildLocalWebRtcSettingsPayload(): WebRtcNetworkSettingsPayload {
-      return normalizeWebRtcPayload({
+      const payload = normalizeWebRtcPayload({
         IceTransportPolicy: localWebrtcTransportPolicy.value,
         IceServers: localWebrtcServers.value
           .map((server) => ({
@@ -577,6 +588,8 @@ export default defineComponent({
           }))
           .filter((server) => (server.Urls?.length ?? 0) > 0)
       });
+      const { FallbackLocale: _fallbackLocale, ...localPayload } = payload;
+      return localPayload;
     }
 
     function addWebRtcServer(type: 'stun' | 'turn') {
@@ -600,6 +613,7 @@ export default defineComponent({
     function resetWebRtcSettings() {
       applyWebRtcSettings({
         IceTransportPolicy: 'all',
+        FallbackLocale: webrtcFallbackLocale.value || 'zh-CN',
         IceServers: [{ Urls: ['stun:stun.l.google.com:19302'] }],
         HostCandidateOverrideEnabled: false,
         HostCandidateOverrideIPs: [],
@@ -1195,7 +1209,6 @@ export default defineComponent({
       const tasks: Array<Promise<unknown>> = [];
 
       if (canViewRemoteSettings.value) {
-        tasks.push(loadServerLocale());
         tasks.push(loadWebRtcSettings().catch((error) => {
           console.error('Failed to load WebRTC settings:', error);
           webrtcStatusMessage.value = error instanceof Error ? error.message : t('Settings.LoadFailed', '加载失败');
@@ -1225,7 +1238,6 @@ export default defineComponent({
       currentLocale,
       languages,
       setLocale,
-      loadServerLocale,
       backgroundMute,
       backgroundEnabled,
       backgroundImages,
@@ -1256,6 +1268,7 @@ export default defineComponent({
       createWebRtcServerFormId,
       createDefaultWebRtcServerForm,
       webrtcTransportPolicy,
+      webrtcFallbackLocale,
       webrtcServers,
       webrtcHostCandidateOverrideEnabled,
       webrtcHostCandidateOverrideIPsText,

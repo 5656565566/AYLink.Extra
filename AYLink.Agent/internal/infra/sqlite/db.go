@@ -164,7 +164,7 @@ func seedDefaults(db *sql.DB) error {
 		{"scrcpy_video_codec", "h264", "Video codec (h264/h265)"},
 		{"webrtc_stun_server", "stun:stun.l.google.com:19302", "STUN server URL"},
 		{"webrtc_network_config", `{"IceTransportPolicy":"all","IceServers":[{"Urls":["stun:stun.l.google.com:19302"]}],"HostCandidateOverrideEnabled":false,"SinglePortMuxEnabled":false}`, "Global WebRTC ICE network settings"},
-		{"ui_language", "zh-CN", "UI language locale"},
+		{"fallback_language", "zh-CN", "Default fallback language locale"},
 	}
 
 	for _, s := range defaultSettings {

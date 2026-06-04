@@ -41,7 +41,7 @@ func TestSettingsHandlerGetWebRtcNetworkReturnsPayload(t *testing.T) {
 			IceTransportPolicy: "relay",
 		},
 	}
-	handler := NewSettingsHandler(service)
+	handler := NewSettingsHandler(service, &fakeI18NService{exists: true})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/settings/webrtc-network", nil)
 	recorder := httptest.NewRecorder()
@@ -58,7 +58,7 @@ func TestSettingsHandlerGetWebRtcNetworkReturnsPayload(t *testing.T) {
 
 func TestSettingsHandlerSaveWebRtcNetworkRejectsInvalidJSON(t *testing.T) {
 	service := &fakeSettingsService{}
-	handler := NewSettingsHandler(service)
+	handler := NewSettingsHandler(service, &fakeI18NService{exists: true})
 
 	req := httptest.NewRequest(http.MethodPut, "/api/settings/webrtc-network", strings.NewReader(`{`))
 	recorder := httptest.NewRecorder()
@@ -72,7 +72,7 @@ func TestSettingsHandlerSaveWebRtcNetworkRejectsInvalidJSON(t *testing.T) {
 
 func TestSettingsHandlerSaveWebRtcNetworkMapsServiceError(t *testing.T) {
 	service := &fakeSettingsService{saveErr: errors.New("db failed")}
-	handler := NewSettingsHandler(service)
+	handler := NewSettingsHandler(service, &fakeI18NService{exists: true})
 
 	req := httptest.NewRequest(http.MethodPut, "/api/settings/webrtc-network", strings.NewReader(`{"IceTransportPolicy":"all"}`))
 	recorder := httptest.NewRecorder()
@@ -81,5 +81,22 @@ func TestSettingsHandlerSaveWebRtcNetworkMapsServiceError(t *testing.T) {
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+}
+
+func TestSettingsHandlerSaveWebRtcNetworkRejectsUnsupportedFallbackLocale(t *testing.T) {
+	service := &fakeSettingsService{}
+	handler := NewSettingsHandler(service, &fakeI18NService{exists: false})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/webrtc-network", strings.NewReader(`{"IceTransportPolicy":"all","FallbackLocale":"fr-FR"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.SaveWebRtcNetwork(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if service.savedPayload.FallbackLocale != "" {
+		t.Fatal("expected settings service not to be called for unsupported fallback locale")
 	}
 }

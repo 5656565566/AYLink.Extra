@@ -326,6 +326,13 @@ func TestHTTPSettingsWebRtcRequiresManagePermissionForWrite(t *testing.T) {
 	if statusCode != http.StatusForbidden {
 		t.Fatalf("expected PUT 403, got %d: %s", statusCode, string(body))
 	}
+
+	statusCode, body = env.doJSON(t, http.MethodPut, "/api/settings/language", tokens.AccessToken, map[string]any{
+		"locale": "en-US",
+	})
+	if statusCode != http.StatusForbidden {
+		t.Fatalf("expected language PUT 403, got %d: %s", statusCode, string(body))
+	}
 }
 
 func TestHTTPSettingsWebRtcRoundTrip(t *testing.T) {
@@ -335,6 +342,7 @@ func TestHTTPSettingsWebRtcRoundTrip(t *testing.T) {
 	tokens := env.login(t, "webrtc-admin", "secret")
 	statusCode, body := env.doJSON(t, http.MethodPut, "/api/settings/webrtc-network", tokens.AccessToken, map[string]any{
 		"IceTransportPolicy":           "relay",
+		"FallbackLocale":               "en-US",
 		"IceServers":                   []map[string]any{{"Urls": []string{"stun:example.org"}}},
 		"HostCandidateOverrideEnabled": true,
 		"HostCandidateOverrideIPs":     []string{"1.1.1.1"},
@@ -352,6 +360,24 @@ func TestHTTPSettingsWebRtcRoundTrip(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte(`"HostCandidateOverrideIPs":["1.1.1.1"]`)) {
 		t.Fatalf("expected persisted host override IPs, got %s", string(body))
+	}
+	if !bytes.Contains(body, []byte(`"FallbackLocale":"en-US"`)) {
+		t.Fatalf("expected persisted fallback locale en-US, got %s", string(body))
+	}
+}
+
+func TestHTTPSettingsWebRtcRejectsUnsupportedFallbackLocale(t *testing.T) {
+	env := newIntegrationEnv(t)
+	env.createAdminUser(t, "webrtc-locale-admin", "secret")
+
+	tokens := env.login(t, "webrtc-locale-admin", "secret")
+	statusCode, body := env.doJSON(t, http.MethodPut, "/api/settings/webrtc-network", tokens.AccessToken, map[string]any{
+		"IceTransportPolicy": "all",
+		"FallbackLocale":     "fr-FR",
+		"IceServers":         []map[string]any{{"Urls": []string{"stun:example.org"}}},
+	})
+	if statusCode != http.StatusBadRequest {
+		t.Fatalf("expected PUT 400, got %d: %s", statusCode, string(body))
 	}
 }
 

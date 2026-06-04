@@ -2,13 +2,13 @@ import { readonly, ref } from 'vue';
 import { sendApiRequest } from '../core/http/client';
 import { readLocalString, writeLocalString } from '../core/storage/browserStorage';
 import { storageKeys } from '../core/storage/keys';
-import type { LanguageOption, LanguagePayload, LocalePayload, MessageTree } from '../types/i18n';
-import { apiFetch } from '../utils/api';
+import type { LanguageOption, LanguagePayload, MessageTree } from '../types/i18n';
 
 const LANGUAGE_STORAGE_KEY = storageKeys.app.language;
 const DEFAULT_LOCALE = 'zh-CN';
 
-const currentLocale = ref(readLocalString(LANGUAGE_STORAGE_KEY) || DEFAULT_LOCALE);
+const storedLocale = readLocalString(LANGUAGE_STORAGE_KEY);
+const currentLocale = ref(storedLocale || detectBrowserLocale());
 const messages = ref<MessageTree>({});
 const languages = ref<LanguageOption[]>([]);
 const isLoadingLanguage = ref(false);
@@ -20,9 +20,43 @@ export function useI18n() {
     isLoadingLanguage: readonly(isLoadingLanguage),
     t,
     setLocale,
-    loadServerLocale,
     loadLanguages,
   };
+}
+
+function detectBrowserLocale() {
+  if (typeof navigator === 'undefined') {
+    return DEFAULT_LOCALE;
+  }
+
+  const preferredLocales = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const locale of preferredLocales) {
+    const normalizedLocale = normalizeBrowserLocale(locale);
+    if (normalizedLocale) {
+      return normalizedLocale;
+    }
+  }
+
+  return DEFAULT_LOCALE;
+}
+
+function normalizeBrowserLocale(locale?: string) {
+  if (!locale) {
+    return '';
+  }
+
+  const normalized = locale.replace('_', '-');
+  if (/^zh(?:-|$)/i.test(normalized)) {
+    return 'zh-CN';
+  }
+  if (/^en(?:-|$)/i.test(normalized)) {
+    return 'en-US';
+  }
+  if (/^[a-z]{2}-[A-Z]{2}$/.test(normalized)) {
+    return normalized;
+  }
+
+  return '';
 }
 
 function updateDocumentTitle(locale: string) {
@@ -46,7 +80,7 @@ export function t(key: string, fallback = '', ...args: Array<string | number>): 
   return formatMessage(typeof value === 'string' ? value : fallback || key, args);
 }
 
-export async function setLocale(locale: string, persistToServer = true) {
+export async function setLocale(locale: string) {
   if (!locale || locale === currentLocale.value) {
     return;
   }
@@ -55,24 +89,6 @@ export async function setLocale(locale: string, persistToServer = true) {
   currentLocale.value = locale;
   writeLocalString(LANGUAGE_STORAGE_KEY, locale);
   updateDocumentTitle(locale);
-
-  if (persistToServer) {
-    await saveServerLocale(locale);
-  }
-}
-
-export async function loadServerLocale() {
-  const response = await apiFetch('/api/settings/language');
-
-  if (!response.ok) {
-    return;
-  }
-
-  const payload = await response.json() as LocalePayload;
-  const locale = payload.locale ?? payload.Locale;
-  if (locale && locale !== currentLocale.value) {
-    await setLocale(locale, false);
-  }
 }
 
 async function loadLanguages() {
@@ -108,23 +124,11 @@ async function loadLocaleMessages(locale: string) {
     });
     if (response.ok) {
       messages.value = await response.json() as MessageTree;
+    } else if (locale !== DEFAULT_LOCALE) {
+      await loadLocaleMessages(DEFAULT_LOCALE);
     }
   } finally {
     isLoadingLanguage.value = false;
-  }
-}
-
-async function saveServerLocale(locale: string) {
-  const response = await apiFetch('/api/settings/language', {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ locale }),
-  });
-
-  if (!response.ok) {
-    console.warn('Failed to save UI language preference');
   }
 }
 

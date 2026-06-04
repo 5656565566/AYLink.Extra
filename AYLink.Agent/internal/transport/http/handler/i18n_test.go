@@ -19,13 +19,15 @@ type fakeI18NService struct {
 	languagePack map[string]any
 	languageErr  error
 	exists       bool
+	loadedLocale string
 }
 
 func (f *fakeI18NService) GetLanguages() ([]domaini18n.LanguageOption, error) {
 	return f.languages, f.languagesErr
 }
 
-func (f *fakeI18NService) GetLanguage(string) (map[string]any, error) {
+func (f *fakeI18NService) GetLanguage(locale string) (map[string]any, error) {
+	f.loadedLocale = locale
 	return f.languagePack, f.languageErr
 }
 
@@ -87,6 +89,26 @@ func TestI18NHandlerLocaleMapsInvalidLocale(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}
+
+func TestI18NHandlerLocaleUsesConfiguredFallbackWhenLocaleMissing(t *testing.T) {
+	i18n := &fakeI18NService{
+		languagePack: map[string]any{"LanguageName": "English"},
+		exists:       false,
+	}
+	handler := NewI18NHandler(i18n, &fakeLanguageSettingsService{language: "en-US"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/i18n/fr-FR", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.Locale(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if i18n.loadedLocale != "en-US" {
+		t.Fatalf("expected fallback locale en-US to be loaded, got %s", i18n.loadedLocale)
 	}
 }
 

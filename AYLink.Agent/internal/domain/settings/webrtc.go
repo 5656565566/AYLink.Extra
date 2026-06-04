@@ -2,6 +2,7 @@ package settings
 
 type WebRtcNetworkSettings struct {
 	IceTransportPolicy           string            `json:"IceTransportPolicy"`
+	FallbackLocale               string            `json:"FallbackLocale"`
 	IceServers                   []WebRtcIceServer `json:"IceServers"`
 	HostCandidateOverrideEnabled bool              `json:"HostCandidateOverrideEnabled"`
 	HostCandidateOverrideIPs     []string          `json:"HostCandidateOverrideIPs"`

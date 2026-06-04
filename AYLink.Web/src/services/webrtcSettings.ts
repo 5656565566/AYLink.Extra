@@ -12,6 +12,7 @@ export interface WebRtcIceServerPayload {
 
 export interface WebRtcNetworkSettingsPayload {
   IceTransportPolicy?: string;
+  FallbackLocale?: string;
   IceServers?: WebRtcIceServerPayload[];
   HostCandidateOverrideEnabled?: boolean;
   HostCandidateOverrideIPs?: string[];

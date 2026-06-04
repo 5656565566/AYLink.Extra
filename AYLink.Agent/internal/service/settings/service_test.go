@@ -29,9 +29,9 @@ func TestGetLanguageReturnsDefaultWhenValueMissingOrEmpty(t *testing.T) {
 	service := NewService(db)
 	ctx := context.Background()
 
-	_, err := db.ExecContext(ctx, `DELETE FROM Settings WHERE Key = 'ui_language'`)
+	_, err := db.ExecContext(ctx, `DELETE FROM Settings WHERE Key IN ('fallback_language', 'ui_language')`)
 	if err != nil {
-		t.Fatalf("delete ui_language error = %v", err)
+		t.Fatalf("delete language settings error = %v", err)
 	}
 
 	locale, err := service.GetLanguage(ctx)
@@ -42,10 +42,10 @@ func TestGetLanguageReturnsDefaultWhenValueMissingOrEmpty(t *testing.T) {
 		t.Fatalf("expected zh-CN default, got %s", locale)
 	}
 
-	_, err = db.ExecContext(ctx, `INSERT INTO Settings (Key, Value, Description, UpdatedAt) VALUES ('ui_language', '', 'UI language locale', '2025-01-01T00:00:00Z')
+	_, err = db.ExecContext(ctx, `INSERT INTO Settings (Key, Value, Description, UpdatedAt) VALUES ('fallback_language', '', 'Default fallback language locale', '2025-01-01T00:00:00Z')
 		ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value, UpdatedAt = excluded.UpdatedAt`)
 	if err != nil {
-		t.Fatalf("insert empty ui_language error = %v", err)
+		t.Fatalf("insert empty fallback_language error = %v", err)
 	}
 
 	locale, err = service.GetLanguage(ctx)
@@ -54,6 +54,30 @@ func TestGetLanguageReturnsDefaultWhenValueMissingOrEmpty(t *testing.T) {
 	}
 	if locale != "zh-CN" {
 		t.Fatalf("expected zh-CN default for empty value, got %s", locale)
+	}
+}
+
+func TestGetLanguageFallsBackToLegacyUILanguage(t *testing.T) {
+	db := openTestDB(t)
+	service := NewService(db)
+	ctx := context.Background()
+
+	_, err := db.ExecContext(ctx, `DELETE FROM Settings WHERE Key = 'fallback_language'`)
+	if err != nil {
+		t.Fatalf("delete fallback_language error = %v", err)
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO Settings (Key, Value, Description, UpdatedAt) VALUES ('ui_language', 'en-US', 'UI language locale', '2025-01-01T00:00:00Z')
+		ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value, UpdatedAt = excluded.UpdatedAt`)
+	if err != nil {
+		t.Fatalf("insert legacy ui_language error = %v", err)
+	}
+
+	locale, err := service.GetLanguage(ctx)
+	if err != nil {
+		t.Fatalf("GetLanguage() error = %v", err)
+	}
+	if locale != "en-US" {
+		t.Fatalf("expected legacy locale en-US, got %s", locale)
 	}
 }
 
@@ -72,6 +96,11 @@ func TestSetLanguagePersistsValue(t *testing.T) {
 	}
 	if locale != "en-US" {
 		t.Fatalf("expected persisted locale en-US, got %s", locale)
+	}
+
+	var storedKey string
+	if err := db.QueryRowContext(ctx, `SELECT Key FROM Settings WHERE Key = 'fallback_language' AND Value = 'en-US'`).Scan(&storedKey); err != nil {
+		t.Fatalf("expected fallback_language to be persisted, error = %v", err)
 	}
 }
 
@@ -105,6 +134,7 @@ func TestSaveWebRtcNetworkSettingsNormalizesAndPersists(t *testing.T) {
 	invalidPublishPort := 70000
 	input := domainsettings.WebRtcNetworkSettings{
 		IceTransportPolicy: "relay",
+		FallbackLocale:     "en-US",
 		IceServers: []domainsettings.WebRtcIceServer{
 			{
 				Urls:       []string{" stun:example.org ", "stun:example.org", ""},
@@ -132,6 +162,9 @@ func TestSaveWebRtcNetworkSettingsNormalizesAndPersists(t *testing.T) {
 	}
 	if saved.IceTransportPolicy != "relay" {
 		t.Fatalf("expected relay transport policy, got %s", saved.IceTransportPolicy)
+	}
+	if saved.FallbackLocale != "en-US" {
+		t.Fatalf("expected fallback locale en-US, got %s", saved.FallbackLocale)
 	}
 	if len(saved.IceServers) != 1 || len(saved.IceServers[0].Urls) != 1 || saved.IceServers[0].Urls[0] != "stun:example.org" {
 		t.Fatalf("expected deduped ice servers, got %+v", saved.IceServers)
@@ -161,6 +194,9 @@ func TestSaveWebRtcNetworkSettingsNormalizesAndPersists(t *testing.T) {
 	}
 	if loaded.IceTransportPolicy != saved.IceTransportPolicy || len(loaded.IceServers) != len(saved.IceServers) {
 		t.Fatalf("expected persisted normalized settings, got %+v", loaded)
+	}
+	if loaded.FallbackLocale != "en-US" {
+		t.Fatalf("expected loaded fallback locale en-US, got %s", loaded.FallbackLocale)
 	}
 }
 

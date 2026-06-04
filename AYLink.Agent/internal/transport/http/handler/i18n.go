@@ -42,6 +42,19 @@ func (h *I18NHandler) Locale(w http.ResponseWriter, r *http.Request) {
 	}
 
 	locale := strings.TrimPrefix(r.URL.Path, "/api/i18n/")
+	if !i18nservice.IsValidLocale(locale) {
+		WriteError(w, http.StatusBadRequest, "INVALID_LOCALE", "Errors.InvalidLocale", "无效的语言区域代码")
+		return
+	}
+	if !h.i18n.LocaleExists(locale) {
+		fallbackLocale, err := h.settings.GetLanguage(r.Context())
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "SETTINGS_LANGUAGE_LOAD_FAILED", "Errors.SettingsLanguageLoadFailed", "加载服务端语言设置失败")
+			return
+		}
+		locale = fallbackLocale
+	}
+
 	payload, err := h.i18n.GetLanguage(locale)
 	if err != nil {
 		if errors.Is(err, i18nservice.ErrInvalidLocale) {

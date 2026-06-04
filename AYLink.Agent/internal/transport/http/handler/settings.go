@@ -8,10 +8,11 @@ import (
 
 type SettingsHandler struct {
 	service SettingsService
+	i18n    I18NService
 }
 
-func NewSettingsHandler(service SettingsService) *SettingsHandler {
-	return &SettingsHandler{service: service}
+func NewSettingsHandler(service SettingsService, i18n I18NService) *SettingsHandler {
+	return &SettingsHandler{service: service, i18n: i18n}
 }
 
 func (h *SettingsHandler) GetWebRtcNetwork(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +39,11 @@ func (h *SettingsHandler) SaveWebRtcNetwork(w http.ResponseWriter, r *http.Reque
 	var payload domainsettings.WebRtcNetworkSettings
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
+
+	if payload.FallbackLocale != "" && !h.i18n.LocaleExists(payload.FallbackLocale) {
+		WriteError(w, http.StatusBadRequest, "UNSUPPORTED_LOCALE", "Errors.UnsupportedLocale", "不支持的语言区域代码")
 		return
 	}
 

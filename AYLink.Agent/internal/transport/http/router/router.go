@@ -107,8 +107,9 @@ func New(deps Dependencies) http.Handler {
 	terminalHandler := handler.NewTerminalHandler(terminalservice.NewService(deviceRepo, deps.ADB), deviceAccessService)
 	settingsService := settingsservice.NewService(deps.DB)
 	webRtcHandler := handler.NewWebRTCHandler(webrtcservice.NewService(deps.Logger), settingsService, scrcpyService, deviceAccessService)
-	i18nHandler := handler.NewI18NHandler(i18nservice.NewService(), settingsService)
-	settingsHandler := handler.NewSettingsHandler(settingsService)
+	i18nService := i18nservice.NewService()
+	i18nHandler := handler.NewI18NHandler(i18nService, settingsService)
+	settingsHandler := handler.NewSettingsHandler(settingsService, i18nService)
 
 	authMiddleware := middleware.Auth(authService, deps.Logger)
 	guards := newRouteGuards(authMiddleware)

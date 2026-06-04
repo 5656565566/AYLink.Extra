@@ -248,6 +248,17 @@
 
       <SettingSection v-if="canViewRemoteSettings" :title="t('Settings.WebRtcNetwork', 'WebRTC 网络')">
         <SettingItem
+          :title="t('Settings.DefaultFallbackLanguage', '默认回退语言')"
+          :description="t('Settings.DefaultFallbackLanguageDescription', '当请求的语言资源不可用时，服务端返回这个默认语言')"
+        >
+          <select class="fluent-select" v-model="webrtcFallbackLocale">
+            <option v-for="language in languages" :key="language.locale" :value="language.locale">
+              {{ language.name }}
+            </option>
+          </select>
+        </SettingItem>
+
+        <SettingItem
           :title="t('Settings.IceTransportPolicy', 'ICE 传输策略')"
           :description="t('Settings.IceTransportPolicyDescription', 'all 为直连优先，relay 为强制通过 TURN 中继')"
         >

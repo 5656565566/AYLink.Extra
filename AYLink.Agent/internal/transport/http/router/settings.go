@@ -13,9 +13,9 @@ func registerSettingsRoutes(mux *http.ServeMux, handlers routeHandlers, guards r
 	mux.Handle("/api/settings/language", guards.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handlers.i18n.GetServerLanguage(w, r)
+			guards.requireSettingsView(http.HandlerFunc(handlers.i18n.GetServerLanguage)).ServeHTTP(w, r)
 		case http.MethodPut:
-			handlers.i18n.SetServerLanguage(w, r)
+			guards.requireSettingsManage(http.HandlerFunc(handlers.i18n.SetServerLanguage)).ServeHTTP(w, r)
 		default:
 			handler.WriteMethodNotAllowed(w, http.MethodGet+", "+http.MethodPut)
 		}

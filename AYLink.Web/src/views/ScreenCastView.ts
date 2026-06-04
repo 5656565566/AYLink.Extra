@@ -1593,15 +1593,15 @@ export default defineComponent({
 
       lastVideoStreamStallRecoveryAttemptAt = now;
       const signalingAttached = !!ws && ws.readyState === WebSocket.OPEN;
-      requestVideoKeyFrameReplay('inbound_rtp_stalled');
+      requestVideoKeyFrameReplay('browser_playback_starved');
       if (!signalingAttached) {
-        console.info('[WebRTC] Confirmed inbound video RTP stall while signaling websocket is detached; attempting signaling reattach before escalating recovery.', {
+        console.info('[WebRTC] Confirmed browser playback starvation while signaling websocket is detached; attempting signaling reattach before escalating recovery.', {
           ...details,
           sessionId: currentScrcpySessionId
         });
-        void tryReattachSignaling('inbound_rtp_stalled');
+        void tryReattachSignaling('browser_playback_starved');
       } else {
-        console.info('[WebRTC] Confirmed inbound video RTP stall; entering recovery observation window before escalating recovery.', details);
+        console.info('[WebRTC] Confirmed browser playback starvation; entering recovery observation window before escalating recovery.', details);
       }
 
       pendingVideoStreamStallObservationTimer = window.setTimeout(() => {
@@ -1616,12 +1616,12 @@ export default defineComponent({
         }
 
         void (async () => {
-          const renegotiated = await tryVideoRenegotiation('inbound_rtp_stalled');
+          const renegotiated = await tryVideoRenegotiation('browser_playback_starved');
           if (renegotiated) {
             return;
           }
 
-          console.warn('[WebRTC] Video recovery observation window elapsed while inbound RTP stall persisted; deferring heavier recovery until a non-destructive signaling reattach path is available.', {
+          console.warn('[WebRTC] Video recovery observation window elapsed while browser playback starvation persisted; deferring heavier recovery until a non-destructive signaling reattach path is available.', {
             ...details,
             signalingAttached: !!ws && ws.readyState === WebSocket.OPEN,
             sessionId: currentScrcpySessionId

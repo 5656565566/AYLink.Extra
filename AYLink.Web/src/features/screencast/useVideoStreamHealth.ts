@@ -312,7 +312,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
     consecutiveVideoStreamStallDetections += 1;
     if (consecutiveVideoStreamStallDetections < options.stallConfirmationCount) {
-      logger.debug('[WebRTC] Inbound video RTP stream stopped advancing, waiting for consecutive confirmation.', {
+      logger.debug('[WebRTC] Browser playback is starved while inbound video RTP is not advancing, waiting for consecutive confirmation.', {
         reason,
         deviceId: options.getDeviceId(),
         tabKey: options.getTabKey(),
@@ -335,14 +335,14 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       inboundVideoStats
     };
 
-    markUnstable(connectionId, 'inbound_rtp_stalled');
+    markUnstable(connectionId, 'browser_playback_starved');
     options.onVideoStreamStalledConfirmed?.(stallDetails);
     if (now - lastVideoStreamDiagnosticAt < options.diagnosticIntervalMs) {
       return;
     }
 
     lastVideoStreamDiagnosticAt = now;
-    logger.debug('[WebRTC] Inbound video RTP stream is idle while peer connection is still connected.', {
+    logger.debug('[WebRTC] Browser playback remains starved while peer connection is still connected.', {
       ...stallDetails
     });
   };

@@ -17,25 +17,28 @@ import (
 )
 
 const (
-	deviceMetaLengthWithDummyByte             = 65
-	sessionHeaderLength                       = 12
-	configPacketFlag                          = 1 << 62
-	keyFrameFlag                              = 1 << 61
-	ptsMask                                   = keyFrameFlag - 1
-	controlQueueWaitTimeout                   = 100 * time.Millisecond
-	videoPacketQueueSize                      = 8
-	audioPacketQueueSize                      = 32
-	controlQueueSize                          = 256
-	videoRefreshDebounce                      = 10 * time.Second
-	videoRefreshConfirmationWindow            = 12 * time.Second
-	videoRefreshConfirmations                 = 2
-	opusSampleRate                            = 48000
-	opusChannels                              = 2
-	audioGainMultiplier                       = 1.3
-	deviceMsgTypeClipboard                    = 0
-	deviceMsgTypeAckClipboard                 = 1
-	deviceMsgTypeUHIDOutput                   = 2
-	controlMsgClipboardSequenceInvalid uint64 = 0
+	deviceMetaLengthWithDummyByte                = 65
+	sessionHeaderLength                          = 12
+	configPacketFlag                             = 1 << 62
+	keyFrameFlag                                 = 1 << 61
+	ptsMask                                      = keyFrameFlag - 1
+	controlQueueWaitTimeout                      = 100 * time.Millisecond
+	videoPacketQueueSize                         = 8
+	audioPacketQueueSize                         = 32
+	controlQueueSize                             = 256
+	videoRefreshDebounce                         = 10 * time.Second
+	videoRefreshConfirmationWindow               = 12 * time.Second
+	videoRefreshConfirmations                    = 2
+	sourceHealthPacketFreshness                  = 3 * time.Second
+	sourceHealthRecoveryWindow                   = 8 * time.Second
+	sourceHealthRepeatedPTSStallThreshold        = 6
+	opusSampleRate                               = 48000
+	opusChannels                                 = 2
+	audioGainMultiplier                          = 1.3
+	deviceMsgTypeClipboard                       = 0
+	deviceMsgTypeAckClipboard                    = 1
+	deviceMsgTypeUHIDOutput                      = 2
+	controlMsgClipboardSequenceInvalid    uint64 = 0
 )
 
 var opusWasmMu sync.Mutex
@@ -86,6 +89,9 @@ type runtime struct {
 	lastRefreshTime  time.Time
 	lastRefreshAskAt time.Time
 	refreshAskCount  int
+
+	healthMu sync.Mutex
+	health   domainscrcpy.SourceHealthSnapshot
 
 	done chan struct{}
 }
@@ -341,10 +347,10 @@ func (r *runtime) setClipboard(ctx context.Context, text string, paste bool) err
 
 func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 	r.videoMu.Lock()
-	defer r.videoMu.Unlock()
 
 	select {
 	case <-r.done:
+		r.videoMu.Unlock()
 		return false
 	default:
 	}
@@ -352,9 +358,11 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 	configPacket := r.latestVideoConfig
 	keyFramePacket := r.latestVideoKeyFrame
 	if configPacket.generation == 0 || keyFramePacket.generation == 0 || keyFramePacket.generation != configPacket.generation {
+		r.videoMu.Unlock()
 		return false
 	}
 	if len(r.videoSubscribers) == 0 {
+		r.videoMu.Unlock()
 		return false
 	}
 
@@ -366,13 +374,17 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 			offerCriticalVideoPacketToSubscriber(sub, packet)
 		}
 	}
+	subscriberCount := len(r.videoSubscribers)
+	generation := keyFramePacket.generation
+	r.videoMu.Unlock()
 
 	if r.logger != nil {
 		r.logger.Info("scrcpy video key frame replayed",
-			"generation", keyFramePacket.generation,
-			"subscriberCount", len(r.videoSubscribers),
+			"generation", generation,
+			"subscriberCount", subscriberCount,
 		)
 	}
+	r.markVideoKeyFrameReplayed(time.Now())
 	return true
 }
 
@@ -412,6 +424,7 @@ func (r *runtime) RequestVideoRefresh() error {
 	}
 	r.lastRefreshTime = time.Now()
 	r.refreshRequested = true
+	r.markVideoRefreshRequested(r.lastRefreshTime)
 	r.refreshMu.Unlock()
 
 	go func() {
@@ -428,6 +441,20 @@ func (r *runtime) RequestVideoRefresh() error {
 	}()
 
 	return nil
+}
+
+func (r *runtime) GetSourceHealth() domainscrcpy.SourceHealthSnapshot {
+	r.healthMu.Lock()
+	defer r.healthMu.Unlock()
+
+	health := r.health
+	select {
+	case <-r.done:
+		health.RuntimeClosed = true
+	default:
+	}
+	health.State = classifySourceHealth(health, time.Now())
+	return health
 }
 
 func (r *runtime) SendControl(payload []byte) error {
@@ -467,6 +494,7 @@ func (r *runtime) Close() error {
 	var closeErr error
 	r.closeOnce.Do(func() {
 		close(r.done)
+		r.markSourceRuntimeClosed()
 		r.closeAllSubscribers()
 		if r.videoConn != nil {
 			if err := r.videoConn.Close(); err != nil && closeErr == nil {
@@ -937,6 +965,8 @@ func (r *runtime) emitError(err error) {
 }
 
 func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
+	r.recordVideoPacketHealth(packet)
+
 	r.videoMu.Lock()
 	defer r.videoMu.Unlock()
 
@@ -973,6 +1003,50 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 		index++
 		offerLatestVideoPacketToSubscriber(sub, sharedPacket)
 	}
+}
+
+func (r *runtime) recordVideoPacketHealth(packet domainscrcpy.VideoPacket) {
+	now := time.Now()
+
+	r.healthMu.Lock()
+	defer r.healthMu.Unlock()
+
+	r.health.LastPacketAt = now
+	r.health.RuntimeClosed = false
+	if packet.IsConfig {
+		return
+	}
+
+	pts := packet.PresentationTimestamp
+	if r.health.LastPTS == 0 || pts > r.health.LastPTS {
+		r.health.LastPTS = pts
+		r.health.LastNewPTSAt = now
+		r.health.RepeatedPTSCount = 0
+	} else if pts == r.health.LastPTS {
+		r.health.RepeatedPTSCount++
+	}
+
+	if packet.IsKeyFrame || packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data) {
+		r.health.LastKeyFrameAt = now
+	}
+}
+
+func (r *runtime) markVideoKeyFrameReplayed(now time.Time) {
+	r.healthMu.Lock()
+	r.health.LastKeyFrameReplayAt = now
+	r.healthMu.Unlock()
+}
+
+func (r *runtime) markVideoRefreshRequested(now time.Time) {
+	r.healthMu.Lock()
+	r.health.LastVideoRefreshAt = now
+	r.healthMu.Unlock()
+}
+
+func (r *runtime) markSourceRuntimeClosed() {
+	r.healthMu.Lock()
+	r.health.RuntimeClosed = true
+	r.healthMu.Unlock()
 }
 
 func (r *runtime) offerLatestAudioPacket(packet domainscrcpy.AudioPacket) {
@@ -1253,6 +1327,25 @@ func releaseMediaPacketBuffer(buffer []byte) {
 		return
 	}
 	mediaPacketBufferPool.Put(buffer[:0])
+}
+
+func classifySourceHealth(health domainscrcpy.SourceHealthSnapshot, now time.Time) domainscrcpy.SourceHealthState {
+	if health.RuntimeClosed {
+		return domainscrcpy.SourceHealthSourceStalled
+	}
+	if !health.LastVideoRefreshAt.IsZero() && now.Sub(health.LastVideoRefreshAt) < sourceHealthRecoveryWindow {
+		return domainscrcpy.SourceHealthRecovering
+	}
+	if health.LastPacketAt.IsZero() {
+		return domainscrcpy.SourceHealthSourceStalled
+	}
+	if health.RepeatedPTSCount >= sourceHealthRepeatedPTSStallThreshold {
+		return domainscrcpy.SourceHealthSourceStalled
+	}
+	if now.Sub(health.LastPacketAt) <= sourceHealthPacketFreshness {
+		return domainscrcpy.SourceHealthHealthy
+	}
+	return domainscrcpy.SourceHealthIdleStatic
 }
 
 func applyPCMInt16Gain(samples []int16, gain float64) {

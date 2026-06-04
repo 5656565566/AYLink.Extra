@@ -1,6 +1,9 @@
 package scrcpy
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type AppInfo struct {
 	Name        string `json:"Name"`
@@ -79,6 +82,27 @@ type VideoPacket struct {
 	ScreenHeight          int
 }
 
+type SourceHealthState string
+
+const (
+	SourceHealthHealthy       SourceHealthState = "healthy"
+	SourceHealthIdleStatic    SourceHealthState = "idle_static"
+	SourceHealthSourceStalled SourceHealthState = "source_stalled"
+	SourceHealthRecovering    SourceHealthState = "source_recovering"
+)
+
+type SourceHealthSnapshot struct {
+	State                SourceHealthState
+	LastPacketAt         time.Time
+	LastNewPTSAt         time.Time
+	LastKeyFrameAt       time.Time
+	LastKeyFrameReplayAt time.Time
+	LastVideoRefreshAt   time.Time
+	LastPTS              int64
+	RepeatedPTSCount     int
+	RuntimeClosed        bool
+}
+
 type AudioCodec string
 
 const (
@@ -101,6 +125,7 @@ type Runtime interface {
 	SubscribeVideoPackets() (<-chan VideoPacket, func())
 	SubscribeAudioPackets() (<-chan AudioPacket, func())
 	SubscribeErrors() (<-chan error, func())
+	GetSourceHealth() SourceHealthSnapshot
 	GetClipboardCached() (string, bool)
 	GetClipboard(ctx context.Context) (string, error)
 	SetClipboard(ctx context.Context, text string) error

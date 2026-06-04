@@ -129,16 +129,16 @@ func handleLocalMetaControlPayload(logger logging.Logger, runtime domainscrcpy.R
 	switch payload[1] {
 	case localMetaMsgVideoKeyFrame:
 		if logger != nil {
-			logger.Info("webrtc video key frame replay requested", "source", "frontend_meta_control")
+			logger.Info("webrtc video key frame replay requested", "source", "frontend_playback_health")
 		}
 		if runtime.ReplayLatestVideoKeyFrame() {
 			return
 		}
 	case localMetaMsgVideoRefresh:
 		if logger != nil {
-			logger.Info("webrtc video refresh requested", "source", "frontend_meta_control")
+			logger.Info("webrtc video refresh requested", "source", "frontend_playback_health")
 		}
-		_ = runtime.RequestVideoRefresh()
+		requestScrcpySourceRefresh(logger, runtime, "frontend_playback_health")
 	}
 }
 
@@ -578,16 +578,50 @@ func (b *scrcpyVideoBridge) requestRefreshLocked(reason string) {
 		return
 	}
 
-	if b.logger != nil {
-		b.logger.Info("webrtc video refresh requested",
-			"source", "backend_bridge",
-			"reason", reason,
-			"generation", b.generation,
-			"state", b.state.String(),
-			"peerConnected", b.peerConnected,
-		)
+	requestScrcpySourceRefresh(b.logger, b.runtime, reason,
+		"source", "backend_bridge",
+		"generation", b.generation,
+		"state", b.state.String(),
+		"peerConnected", b.peerConnected,
+	)
+}
+
+func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runtime, reason string, args ...any) {
+	if runtime == nil {
+		return
 	}
-	_ = b.runtime.RequestVideoRefresh()
+
+	health := runtime.GetSourceHealth()
+	logArgs := append([]any{
+		"reason", reason,
+		"sourceHealth", string(health.State),
+		"lastPacketAge", formatSourceHealthAge(health.LastPacketAt),
+		"lastNewPTSAge", formatSourceHealthAge(health.LastNewPTSAt),
+		"repeatedPTSCount", health.RepeatedPTSCount,
+	}, args...)
+
+	if health.State == domainscrcpy.SourceHealthIdleStatic {
+		if logger != nil {
+			logger.Info("scrcpy source refresh skipped",
+				append([]any{
+					"skipReason", "source_idle_static",
+				}, logArgs...)...,
+			)
+		}
+		return
+	}
+
+	if logger != nil {
+		logger.Info("scrcpy source refresh requested", logArgs...)
+	}
+	_ = runtime.RequestVideoRefresh()
+}
+
+func formatSourceHealthAge(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return time.Since(value).String()
 }
 
 func (b *scrcpyVideoBridge) hasAnyReadyFrame() bool {

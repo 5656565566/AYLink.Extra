@@ -99,7 +99,7 @@ func (s *Service) ListApps(ctx context.Context, serial string) ([]domainscrcpy.A
 	}
 
 	apps := make([]domainscrcpy.AppInfo, 0)
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		match := appLinePattern.FindStringSubmatch(line)
 		if len(match) < 3 {

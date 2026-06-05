@@ -141,7 +141,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.ChangeOwnPassword(r.Context(), identity.UserID, payload.CurrentPassword, payload.NewPassword); err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "CHANGE_PASSWORD_FAILED", "Errors.ChangePasswordFailed", "修改密码失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "CHANGE_PASSWORD_FAILED")
 		return
 	}
 
@@ -223,7 +223,7 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.service.CreateUser(r.Context(), payload.Username, payload.Password, payload.RoleIds, payload.DeviceGroupIds)
 	if err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_USER_FAILED", "Errors.CreateUserFailed", "创建用户失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_USER_FAILED")
 		return
 	}
 
@@ -266,7 +266,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.service.UpdateUser(r.Context(), userID, payload.Username, isActive, payload.RoleIds, payload.DeviceGroupIds, actingUserID)
 	if err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_USER_FAILED", "Errors.UpdateUserFailed", "更新用户失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_USER_FAILED")
 		return
 	}
 
@@ -291,7 +291,7 @@ func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.DeleteUser(r.Context(), userID, actingUserID); err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "DELETE_USER_FAILED", "Errors.DeleteUserFailed", "删除用户失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "DELETE_USER_FAILED")
 		return
 	}
 
@@ -326,7 +326,7 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	password, err := h.service.ResetPassword(r.Context(), userID, payload.NewPassword)
 	if err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "RESET_PASSWORD_FAILED", "Errors.ResetPasswordFailed", "重置密码失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "RESET_PASSWORD_FAILED")
 		return
 	}
 
@@ -356,7 +356,7 @@ func (h *AuthHandler) SetUserActive(w http.ResponseWriter, r *http.Request, isAc
 	}
 
 	if err := h.service.SetUserActiveState(r.Context(), userID, isActive, actingUserID); err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "SET_ACTIVE_FAILED", "Errors.SetActiveFailed", "更新账号状态失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "SET_ACTIVE_FAILED")
 		return
 	}
 
@@ -409,7 +409,7 @@ func (h *AuthHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 
 	role, err := h.service.CreateRole(r.Context(), payload.Name, payload.Description, payload.Permissions, payload.DeviceGroupIds)
 	if err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_ROLE_FAILED", "Errors.CreateRoleFailed", "创建角色失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "CREATE_ROLE_FAILED")
 		return
 	}
 
@@ -442,7 +442,7 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 
 	role, err := h.service.UpdateRole(r.Context(), roleID, payload.Name, payload.Description, payload.Permissions, payload.DeviceGroupIds)
 	if err != nil {
-		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_ROLE_FAILED", "Errors.UpdateRoleFailed", "更新角色失败")
+		writeAuthServiceError(w, err, http.StatusBadRequest, "UPDATE_ROLE_FAILED")
 		return
 	}
 
@@ -490,8 +490,6 @@ func writeAuthServiceError(
 	err error,
 	statusCode int,
 	code string,
-	defaultKey string,
-	defaultMessage string,
 ) {
 	switch {
 	case errors.Is(err, authservice.ErrInvalidPermissions):

@@ -85,14 +85,17 @@ type VideoPacket struct {
 type SourceHealthState string
 
 const (
-	SourceHealthHealthy       SourceHealthState = "healthy"
-	SourceHealthIdleStatic    SourceHealthState = "idle_static"
-	SourceHealthSourceStalled SourceHealthState = "source_stalled"
-	SourceHealthRecovering    SourceHealthState = "source_recovering"
+	SourceHealthHealthy        SourceHealthState = "healthy"
+	SourceHealthStaticButAlive SourceHealthState = "static_but_alive"
+	SourceHealthPacketStalled  SourceHealthState = "packet_stalled"
+	SourceHealthPTSStalled     SourceHealthState = "pts_stalled"
+	SourceHealthSourceStalled  SourceHealthState = "source_stalled"
+	SourceHealthRecovering     SourceHealthState = "source_recovering"
 )
 
 type SourceHealthSnapshot struct {
 	State                SourceHealthState
+	Reason               string
 	LastPacketAt         time.Time
 	LastNewPTSAt         time.Time
 	LastKeyFrameAt       time.Time
@@ -100,6 +103,7 @@ type SourceHealthSnapshot struct {
 	LastVideoRefreshAt   time.Time
 	LastPTS              int64
 	RepeatedPTSCount     int
+	HasSeenMediaPacket   bool
 	RuntimeClosed        bool
 }
 

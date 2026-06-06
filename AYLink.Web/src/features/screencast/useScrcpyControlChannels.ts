@@ -31,14 +31,14 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
   let pointerControlFlushHandle: number | null = null;
 
   const stopPointerControlFlushLoop = () => {
-    if (pointerControlFlushHandle != null) {
+    if (pointerControlFlushHandle !== null) {
       window.cancelAnimationFrame(pointerControlFlushHandle);
       pointerControlFlushHandle = null;
     }
   };
 
   const schedulePointerControlFlush = () => {
-    if (pointerControlFlushHandle != null || pendingPointerControlPayloads.length === 0) {
+    if (pointerControlFlushHandle !== null || pendingPointerControlPayloads.length === 0) {
       return;
     }
 
@@ -104,6 +104,13 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
     pointerMoveChannel?.readyState === 'open'
       ? pointerMoveChannel
       : controlChannel;
+
+  const getPointerMoveSendChannel = () => {
+    if (pointerMoveChannel) {
+      return pointerMoveChannel.readyState === 'open' ? pointerMoveChannel : null;
+    }
+    return controlChannel;
+  };
 
   const sendBinaryControlMessage = (payload: Uint8Array, channel = controlChannel) => {
     if (!channel || channel.readyState !== 'open') {
@@ -206,6 +213,7 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
     getMetaControlChannel,
     getPointerMoveChannel: () => pointerMoveChannel,
     getHighFrequencyControlChannel,
+    getPointerMoveSendChannel,
     setupControlChannel,
     setupMetaControlChannel,
     setupPointerMoveChannel,

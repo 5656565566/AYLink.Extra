@@ -23,6 +23,7 @@ const (
 	defaultAudioSampleDuration = 20 * time.Millisecond
 	videoReadyTimeout          = 5 * time.Second
 	videoStallThreshold        = 3 * time.Second
+	videoTimestampResyncGap    = 500 * time.Millisecond
 	videoStallConfirmations    = 2
 	videoRefreshConfigGrace    = 1500 * time.Millisecond
 	videoRefreshKeyFrameGrace  = 1500 * time.Millisecond
@@ -134,6 +135,7 @@ func handleLocalMetaControlPayload(logger logging.Logger, runtime domainscrcpy.R
 		if runtime.ReplayLatestVideoKeyFrame() {
 			return
 		}
+		requestScrcpySourceRefresh(logger, runtime, "frontend_playback_health")
 	case localMetaMsgVideoRefresh:
 		if logger != nil {
 			logger.Info("webrtc video refresh requested", "source", "frontend_playback_health")
@@ -428,11 +430,13 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 		return
 	}
 
+	now := time.Now()
+	b.advanceVideoTimestampAfterIdleLocked(now)
 	if err := b.track.WriteSample(media.Sample{
 		Data:     annexB,
 		Duration: b.getDuration(packet.PresentationTimestamp),
 	}); err == nil {
-		now := time.Now()
+		now = time.Now()
 		b.stallReadyCount = 0
 		b.lastFrameWriteAt = now
 		if isIDR {
@@ -544,6 +548,21 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 		return
 	}
 
+	health := b.runtime.GetSourceHealth()
+	if !isUnhealthySourceForVideoRefresh(health.State) {
+		b.stallReadyCount = 0
+		b.logDebugLocked("webrtc video refresh skipped",
+			"reason", "rtcp_stalled_ready",
+			"detail", "source_not_unhealthy",
+			"sourceHealth", string(health.State),
+			"sourceHealthReason", health.Reason,
+			"generation", b.generation,
+			"state", b.state.String(),
+			"peerConnected", b.peerConnected,
+		)
+		return
+	}
+
 	b.stallReadyCount++
 	if b.stallReadyCount < videoStallConfirmations {
 		if b.logger != nil {
@@ -552,6 +571,8 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 				"reason", "rtcp_stalled_ready",
 				"stalledCount", b.stallReadyCount,
 				"stalledThreshold", videoStallConfirmations,
+				"sourceHealth", string(health.State),
+				"sourceHealthReason", health.Reason,
 				"generation", b.generation,
 				"state", b.state.String(),
 				"peerConnected", b.peerConnected,
@@ -562,6 +583,15 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 
 	b.stallReadyCount = 0
 	b.requestRefreshLocked("rtcp_stalled_ready")
+}
+
+func isUnhealthySourceForVideoRefresh(state domainscrcpy.SourceHealthState) bool {
+	switch state {
+	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (b *scrcpyVideoBridge) requestRefreshLocked(reason string) {
@@ -575,18 +605,7 @@ func (b *scrcpyVideoBridge) requestRefreshLocked(reason string) {
 				"peerConnected", b.peerConnected,
 			)
 		}
-		if reason != "rtcp_stalled_ready" {
-			return
-		}
-		if b.logger != nil {
-			b.logger.Info("webrtc video refresh escalating to source refresh after cached key frame replay",
-				"source", "backend_bridge",
-				"reason", reason,
-				"generation", b.generation,
-				"state", b.state.String(),
-				"peerConnected", b.peerConnected,
-			)
-		}
+		return
 	}
 
 	requestScrcpySourceRefresh(b.logger, b.runtime, reason,
@@ -606,16 +625,17 @@ func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runt
 	logArgs := append([]any{
 		"reason", reason,
 		"sourceHealth", string(health.State),
+		"sourceHealthReason", health.Reason,
 		"lastPacketAge", formatSourceHealthAge(health.LastPacketAt),
 		"lastNewPTSAge", formatSourceHealthAge(health.LastNewPTSAt),
 		"repeatedPTSCount", health.RepeatedPTSCount,
 	}, args...)
 
-	if health.State == domainscrcpy.SourceHealthIdleStatic {
+	if health.State == domainscrcpy.SourceHealthStaticButAlive {
 		if logger != nil {
 			logger.Info("scrcpy source refresh skipped",
 				append([]any{
-					"skipReason", "source_idle_static",
+					"skipReason", "source_static_but_alive",
 				}, logArgs...)...,
 			)
 		}
@@ -715,6 +735,42 @@ func (b *scrcpyVideoBridge) getDuration(pts int64) time.Duration {
 		}
 	}
 	return defaultVideoSampleDuration
+}
+
+func (b *scrcpyVideoBridge) advanceVideoTimestampAfterIdleLocked(now time.Time) {
+	duration := b.getVideoTimestampResyncDuration(now)
+	if duration <= 0 {
+		return
+	}
+
+	if err := b.track.WriteSample(media.Sample{Duration: duration}); err != nil {
+		b.logDebugLocked("webrtc video timestamp resync failed",
+			"idleDuration", now.Sub(b.lastFrameWriteAt).String(),
+			"resyncDuration", duration.String(),
+			"error", err,
+		)
+		return
+	}
+
+	b.logDebugLocked("webrtc video timestamp resynced after source idle",
+		"idleDuration", now.Sub(b.lastFrameWriteAt).String(),
+		"resyncDuration", duration.String(),
+	)
+}
+
+func (b *scrcpyVideoBridge) getVideoTimestampResyncDuration(now time.Time) time.Duration {
+	if b.lastFrameWriteAt.IsZero() {
+		return 0
+	}
+	idleDuration := now.Sub(b.lastFrameWriteAt)
+	if idleDuration <= videoTimestampResyncGap {
+		return 0
+	}
+	resyncDuration := idleDuration - defaultVideoSampleDuration
+	if resyncDuration <= 0 {
+		return 0
+	}
+	return resyncDuration
 }
 
 func (b *scrcpyVideoBridge) normalizeH264(sample []byte, isConfig bool) []byte {

@@ -10,7 +10,7 @@ import {
   resetVideoStreamStateMachine
 } from './videoStreamStateMachine';
 
-interface InboundVideoStatsSnapshot {
+export interface InboundVideoStatsSnapshot {
   packetsReceived: number | null;
   bytesReceived: number | null;
   framesDecoded: number | null;
@@ -18,8 +18,19 @@ interface InboundVideoStatsSnapshot {
   timestamp: number | null;
 }
 
+export interface VideoPlaybackSnapshot {
+  readyState: number | null;
+  paused: boolean | null;
+  ended: boolean | null;
+  seeking: boolean | null;
+  currentTime: number | null;
+  trackMuted: boolean;
+  renderedFrameAgeMs: number | null;
+}
+
 export interface VideoStreamStallDetails {
   reason: string;
+  status: VideoStreamHealthStatus;
   connectionId: number;
   deviceId: string;
   tabKey: string;
@@ -28,7 +39,20 @@ export interface VideoStreamStallDetails {
   peerConnectionState: RTCPeerConnectionState | null;
   signalingAttached: boolean;
   inboundVideoStats: InboundVideoStatsSnapshot | null;
+  playback: VideoPlaybackSnapshot;
 }
+
+export type VideoStreamHealthStatus =
+  | 'not_monitored'
+  | 'warming_up'
+  | 'advancing'
+  | 'within_stall_threshold'
+  | 'static_playback_ok'
+  | 'source_packet_idle_observed'
+  | 'browser_playback_starved_pending'
+  | 'browser_playback_starved_confirmed'
+  | 'browser_decode_stalled_pending'
+  | 'browser_decode_stalled_confirmed';
 
 interface VideoStreamHealthOptions {
   stableDetachMs: number;
@@ -55,7 +79,7 @@ interface VideoStreamHealthOptions {
 export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   const logger = options.logger ?? console;
   const stateMachine = createVideoStreamStateMachine();
-  const staticIdleEscalationThresholdMs = options.stallThresholdMs * Math.max(3, options.stallConfirmationCount);
+  const sourceIdleGraceMs = Math.max(options.stallThresholdMs * 3, 10000);
 
   let frameCallbackHandle: number | null = null;
   let watchdogTimer: number | null = null;
@@ -68,11 +92,13 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   let lastInboundVideoBytesReceived: number | null = null;
   let lastInboundVideoFramesDecoded: number | null = null;
   let consecutiveVideoStreamStallDetections = 0;
+  let consecutiveVideoDecodeStallDetections = 0;
   let hasLoggedIdleStaticVideo = false;
+  let lastRenderedVideoFrameAt = 0;
 
   const stopVideoFrameCaptureLoop = () => {
     const videoElement = options.getVideoElement();
-    if (frameCallbackHandle == null || !videoElement || typeof videoElement.cancelVideoFrameCallback !== 'function') {
+    if (frameCallbackHandle === null || !videoElement || typeof videoElement.cancelVideoFrameCallback !== 'function') {
       frameCallbackHandle = null;
       return;
     }
@@ -86,14 +112,14 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   };
 
   const stopWatchdog = () => {
-    if (watchdogTimer != null) {
+    if (watchdogTimer !== null) {
       window.clearInterval(watchdogTimer);
       watchdogTimer = null;
     }
   };
 
   const clearPendingSignalingDetach = () => {
-    if (signalingDetachTimer != null) {
+    if (signalingDetachTimer !== null) {
       window.clearTimeout(signalingDetachTimer);
       signalingDetachTimer = null;
     }
@@ -113,12 +139,14 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     lastInboundVideoBytesReceived = null;
     lastInboundVideoFramesDecoded = null;
     consecutiveVideoStreamStallDetections = 0;
+    consecutiveVideoDecodeStallDetections = 0;
     hasLoggedIdleStaticVideo = false;
+    lastRenderedVideoFrameAt = 0;
   };
 
   const isVideoPlaybackStarved = () => {
     const haveCurrentData =
-      typeof HTMLMediaElement !== 'undefined'
+      typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.HAVE_CURRENT_DATA === 'number'
         ? HTMLMediaElement.HAVE_CURRENT_DATA
         : 2;
     const videoTrack = options.getVideoTrack();
@@ -135,6 +163,33 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     }
 
     return videoElement.readyState < haveCurrentData;
+  };
+
+  const isVideoDecodeRenderStalled = (playback: VideoPlaybackSnapshot, framesDecodedStalled: boolean) => {
+    if (!framesDecodedStalled) {
+      return false;
+    }
+    if (playback.paused || playback.ended || playback.seeking || playback.trackMuted) {
+      return false;
+    }
+    if (playback.renderedFrameAgeMs === null) {
+      return false;
+    }
+    return playback.renderedFrameAgeMs >= options.stallThresholdMs;
+  };
+
+  const getVideoPlaybackSnapshot = (): VideoPlaybackSnapshot => {
+    const videoElement = options.getVideoElement();
+    const videoTrack = options.getVideoTrack();
+    return {
+      readyState: videoElement?.readyState ?? null,
+      paused: videoElement?.paused ?? null,
+      ended: videoElement?.ended ?? null,
+      seeking: videoElement?.seeking ?? null,
+      currentTime: videoElement?.currentTime ?? null,
+      trackMuted: videoTrack?.muted === true,
+      renderedFrameAgeMs: lastRenderedVideoFrameAt <= 0 ? null : Math.max(0, performance.now() - lastRenderedVideoFrameAt)
+    };
   };
 
   const shouldMonitorVideoStream = (connectionId: number) => {
@@ -163,7 +218,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
     const stats = await videoReceiver.getStats();
     for (const report of stats.values()) {
-      if (report.type !== 'inbound-rtp' || (report.kind != null && report.kind !== 'video')) {
+      if (report.type !== 'inbound-rtp' || (report.kind !== null && report.kind !== undefined && report.kind !== 'video')) {
         continue;
       }
       return {
@@ -177,28 +232,61 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     return null;
   };
 
-  const hasInboundVideoStreamAdvanced = (snapshot: InboundVideoStatsSnapshot | null) => {
+  const observeInboundVideoStream = (snapshot: InboundVideoStatsSnapshot | null) => {
     if (!snapshot) {
-      return false;
+      return {
+        hasBaseline: false,
+        hasAdvanced: false,
+        framesDecodedStalled: false
+      };
     }
 
     const packetsReceived = typeof snapshot.packetsReceived === 'number' ? snapshot.packetsReceived : null;
     const bytesReceived = typeof snapshot.bytesReceived === 'number' ? snapshot.bytesReceived : null;
     const framesDecoded = typeof snapshot.framesDecoded === 'number' ? snapshot.framesDecoded : null;
-    const hasBaseline =
-      lastInboundVideoPacketsReceived != null ||
-      lastInboundVideoBytesReceived != null ||
-      lastInboundVideoFramesDecoded != null;
-    const canUseDecodedFrames = framesDecoded != null || lastInboundVideoFramesDecoded != null;
-    const hasAdvanced = canUseDecodedFrames
-      ? framesDecoded != null && lastInboundVideoFramesDecoded != null && framesDecoded > lastInboundVideoFramesDecoded
-      : (packetsReceived != null && lastInboundVideoPacketsReceived != null && packetsReceived > lastInboundVideoPacketsReceived) ||
-        (bytesReceived != null && lastInboundVideoBytesReceived != null && bytesReceived > lastInboundVideoBytesReceived);
+    const hasBaseline = lastInboundVideoPacketsReceived !== null || lastInboundVideoBytesReceived !== null;
+    const hasFramesDecodedBaseline = lastInboundVideoFramesDecoded !== null;
+    const hasAdvanced =
+      (packetsReceived !== null && lastInboundVideoPacketsReceived !== null && packetsReceived > lastInboundVideoPacketsReceived) ||
+      (bytesReceived !== null && lastInboundVideoBytesReceived !== null && bytesReceived > lastInboundVideoBytesReceived);
+    const framesDecodedAdvanced = framesDecoded !== null && lastInboundVideoFramesDecoded !== null && framesDecoded > lastInboundVideoFramesDecoded;
+    const framesDecodedStalled = framesDecoded !== null && hasFramesDecodedBaseline && !framesDecodedAdvanced;
 
     lastInboundVideoPacketsReceived = packetsReceived;
     lastInboundVideoBytesReceived = bytesReceived;
     lastInboundVideoFramesDecoded = framesDecoded;
-    return !hasBaseline || hasAdvanced;
+    return {
+      hasBaseline,
+      hasAdvanced: !hasBaseline || hasAdvanced,
+      framesDecodedStalled
+    };
+  };
+
+  const resetStallConfirmations = () => {
+    consecutiveVideoStreamStallDetections = 0;
+    consecutiveVideoDecodeStallDetections = 0;
+  };
+
+  const buildStallDetails = (
+    connectionId: number,
+    reason: string,
+    status: VideoStreamHealthStatus,
+    inboundVideoStats: InboundVideoStatsSnapshot | null,
+    playback: VideoPlaybackSnapshot
+  ): VideoStreamStallDetails => {
+    return {
+      reason,
+      status,
+      connectionId,
+      deviceId: options.getDeviceId(),
+      tabKey: options.getTabKey(),
+      consecutiveVideoStreamStallDetections,
+      confirmationThreshold: options.stallConfirmationCount,
+      peerConnectionState: options.getPeerConnection()?.connectionState ?? null,
+      signalingAttached: !!options.getSignalingSocket() && options.getSignalingSocket()?.readyState === WebSocket.OPEN,
+      inboundVideoStats,
+      playback
+    };
   };
 
   const markUnstable = (connectionId: number, reason: string) => {
@@ -221,7 +309,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   };
 
   const scheduleSignalingDetach = (connectionId: number) => {
-    if (signalingDetachTimer != null || detachedSignalingConnectionId === connectionId) {
+    if (signalingDetachTimer !== null || detachedSignalingConnectionId === connectionId) {
       return;
     }
     const socket = options.getSignalingSocket();
@@ -231,7 +319,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     }
 
     const detachDelayMs = getVideoStreamDetachDelay(stateMachine, connectionId, performance.now(), options.stableDetachMs);
-    if (detachDelayMs == null) {
+    if (detachDelayMs === null) {
       return;
     }
 
@@ -247,7 +335,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       }
 
       const currentDetachDelayMs = getVideoStreamDetachDelay(stateMachine, connectionId, performance.now(), options.stableDetachMs);
-      if (currentDetachDelayMs == null) {
+      if (currentDetachDelayMs === null) {
         return;
       }
       if (currentDetachDelayMs > 0) {
@@ -271,7 +359,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
   const handleWatchdog = async (connectionId: number, reason: string) => {
     if (!shouldMonitorVideoStream(connectionId)) {
-      consecutiveVideoStreamStallDetections = 0;
+      resetStallConfirmations();
       return;
     }
 
@@ -284,13 +372,50 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       return;
     }
 
-    if (hasInboundVideoStreamAdvanced(inboundVideoStats)) {
+    const inboundObservation = observeInboundVideoStream(inboundVideoStats);
+    const playback = getVideoPlaybackSnapshot();
+    const decodeRenderStalled = inboundObservation.hasBaseline && inboundObservation.hasAdvanced && isVideoDecodeRenderStalled(playback, inboundObservation.framesDecodedStalled);
+
+    if (inboundObservation.hasAdvanced && !decodeRenderStalled) {
       markVideoStreamAdvanced(stateMachine, connectionId, now);
       lastVideoStreamPacketAt = now;
       lastVideoStreamDiagnosticAt = 0;
-      consecutiveVideoStreamStallDetections = 0;
+      resetStallConfirmations();
       hasLoggedIdleStaticVideo = false;
       scheduleSignalingDetach(connectionId);
+      return;
+    }
+
+    if (decodeRenderStalled) {
+      const playbackStarved = isVideoPlaybackStarved();
+      consecutiveVideoDecodeStallDetections += 1;
+      consecutiveVideoStreamStallDetections = consecutiveVideoDecodeStallDetections;
+      if (consecutiveVideoDecodeStallDetections < options.stallConfirmationCount || !playbackStarved) {
+        const message = playbackStarved
+          ? '[WebRTC] Inbound video RTP is advancing but browser decoded/rendered frames are not advancing, waiting for consecutive confirmation.'
+          : '[WebRTC] Inbound video RTP is advancing while rendered frames are unchanged; treating as possible static content unless playback becomes starved.';
+        logger.debug(message, {
+          reason,
+          deviceId: options.getDeviceId(),
+          tabKey: options.getTabKey(),
+          consecutiveVideoStreamStallDetections,
+          confirmationThreshold: options.stallConfirmationCount,
+          inboundVideoStats,
+          playback,
+          playbackStarved
+        });
+        return;
+      }
+
+      const stallDetails = buildStallDetails(connectionId, reason, 'browser_decode_stalled_confirmed', inboundVideoStats, playback);
+      markUnstable(connectionId, 'browser_decode_stalled');
+      options.onVideoStreamStalledConfirmed?.(stallDetails);
+      if (now - lastVideoStreamDiagnosticAt >= options.diagnosticIntervalMs) {
+        lastVideoStreamDiagnosticAt = now;
+        logger.debug('[WebRTC] Browser decode/render appears stalled while inbound video RTP is still advancing.', {
+          ...stallDetails
+        });
+      }
       return;
     }
 
@@ -300,7 +425,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     }
 
     if (now - lastVideoStreamPacketAt < options.stallThresholdMs) {
-      consecutiveVideoStreamStallDetections = 0;
+      resetStallConfirmations();
       return;
     }
 
@@ -312,41 +437,50 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
           connectionId,
           deviceId: options.getDeviceId(),
           tabKey: options.getTabKey(),
-          inboundVideoStats
+          inboundVideoStats,
+          playback,
+          idleDurationMs: Math.max(0, now - lastVideoStreamPacketAt),
+          sourceIdleGraceMs
         });
       }
-      if (now - lastVideoStreamPacketAt < staticIdleEscalationThresholdMs) {
-        consecutiveVideoStreamStallDetections = 0;
+
+      if (now - lastVideoStreamPacketAt < sourceIdleGraceMs) {
+        resetStallConfirmations();
         return;
       }
+
+      consecutiveVideoStreamStallDetections = 0;
+      consecutiveVideoDecodeStallDetections = 0;
+      if (now - lastVideoStreamDiagnosticAt >= options.diagnosticIntervalMs) {
+        lastVideoStreamDiagnosticAt = now;
+        const stallDetails = buildStallDetails(connectionId, reason, 'source_packet_idle_observed', inboundVideoStats, playback);
+        logger.debug('[WebRTC] Inbound video RTP remains idle beyond static grace; keeping the held frame because frontend cannot distinguish static content from source idle.', {
+          ...stallDetails,
+          reason,
+          deviceId: options.getDeviceId(),
+          tabKey: options.getTabKey(),
+          idleDurationMs: Math.max(0, now - lastVideoStreamPacketAt),
+          sourceIdleGraceMs
+        });
+      }
+      return;
     }
 
     consecutiveVideoStreamStallDetections += 1;
+    consecutiveVideoDecodeStallDetections = 0;
     if (consecutiveVideoStreamStallDetections < options.stallConfirmationCount) {
-      logger.debug('[WebRTC] Inbound video RTP is not advancing, waiting for consecutive confirmation before recovery.', {
+      logger.debug('[WebRTC] Browser playback is starved while inbound video RTP is not advancing, waiting for consecutive confirmation.', {
         reason,
         deviceId: options.getDeviceId(),
         tabKey: options.getTabKey(),
         consecutiveVideoStreamStallDetections,
         confirmationThreshold: options.stallConfirmationCount,
-        inboundVideoStats,
-        playbackStarved: isVideoPlaybackStarved()
+        inboundVideoStats
       });
       return;
     }
 
-    const stallDetails: VideoStreamStallDetails = {
-      reason,
-      connectionId,
-      deviceId: options.getDeviceId(),
-      tabKey: options.getTabKey(),
-      consecutiveVideoStreamStallDetections,
-      confirmationThreshold: options.stallConfirmationCount,
-      peerConnectionState: options.getPeerConnection()?.connectionState ?? null,
-      signalingAttached: !!options.getSignalingSocket() && options.getSignalingSocket()?.readyState === WebSocket.OPEN,
-      inboundVideoStats
-    };
-
+    const stallDetails = buildStallDetails(connectionId, reason, 'browser_playback_starved_confirmed', inboundVideoStats, playback);
     markUnstable(connectionId, 'browser_playback_starved');
     options.onVideoStreamStalledConfirmed?.(stallDetails);
     if (now - lastVideoStreamDiagnosticAt < options.diagnosticIntervalMs) {
@@ -379,6 +513,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
         return;
       }
       frameCallbackHandle = source.requestVideoFrameCallback(() => {
+        lastRenderedVideoFrameAt = performance.now();
         options.syncVideoFrameSize();
         scheduleNextFrame();
       });

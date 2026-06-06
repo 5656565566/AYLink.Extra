@@ -2,15 +2,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useVideoStreamHealth } from './useVideoStreamHealth';
 
 function createVideoStreamHealthHarness() {
+  const haveEnoughData = typeof HTMLMediaElement.HAVE_ENOUGH_DATA === 'number' ? HTMLMediaElement.HAVE_ENOUGH_DATA : 4;
+  const haveMetadata = typeof HTMLMediaElement.HAVE_METADATA === 'number' ? HTMLMediaElement.HAVE_METADATA : 1;
   let activeConnectionId = 1;
   let packetsReceived = 0;
   let bytesReceived = 0;
-  let framesDecoded = 0;
+  let framesDecoded: number | null = null;
+  let videoFrameCallback: VideoFrameRequestCallback | null = null;
+  let readyState: number = haveEnoughData;
   const videoElement = {
     paused: false,
     ended: false,
     seeking: false,
-    readyState: HTMLMediaElement.HAVE_ENOUGH_DATA
+    currentTime: 0,
+    get readyState() {
+      return readyState;
+    },
+    requestVideoFrameCallback: vi.fn((callback: VideoFrameRequestCallback) => {
+      videoFrameCallback = callback;
+      return 1;
+    }),
+    cancelVideoFrameCallback: vi.fn()
   } as unknown as HTMLVideoElement;
   const logger = {
     debug: vi.fn(),
@@ -74,14 +86,32 @@ function createVideoStreamHealthHarness() {
     advanceVideoPackets: () => {
       packetsReceived += 1;
       bytesReceived += 100;
-      framesDecoded += 1;
     },
-    advanceNetworkOnly: () => {
-      packetsReceived += 1;
-      bytesReceived += 100;
+    advanceDecodedFrames: () => {
+      framesDecoded = (framesDecoded ?? 0) + 1;
     },
-    setVideoReadyState: (readyState: number) => {
-      (videoElement as { readyState: number }).readyState = readyState;
+    enableDecodedFrameStats: () => {
+      framesDecoded = 0;
+    },
+    emitRenderedFrame: () => {
+      videoFrameCallback?.(performance.now(), {
+        expectedDisplayTime: performance.now(),
+        height: 720,
+        mediaTime: 0,
+        presentedFrames: 1,
+        presentationTime: performance.now(),
+        processingDuration: 0,
+        captureTime: performance.now(),
+        receiveTime: performance.now(),
+        rtpTimestamp: 0,
+        width: 1280
+      });
+    },
+    setVideoReadyState: (value: number) => {
+      readyState = value;
+    },
+    setVideoPlaybackStarved: () => {
+      readyState = haveMetadata;
     },
     setVideoTrackMuted: (muted: boolean) => {
       (videoTrack as { muted: boolean }).muted = muted;
@@ -198,10 +228,10 @@ describe('useVideoStreamHealth', () => {
 
   it('does not treat intentionally static video as a confirmed stall when playback is not starved', async () => {
     vi.useFakeTimers();
-    const { health, logger, onVideoStreamStalledConfirmed, advanceNetworkOnly } = createVideoStreamHealthHarness();
+    const { health, logger, onVideoStreamStalledConfirmed, advanceVideoPackets } = createVideoStreamHealthHarness();
 
     await vi.advanceTimersByTimeAsync(1);
-    advanceNetworkOnly();
+    advanceVideoPackets();
     await health.handleWatchdog(1, 'test');
 
     await vi.advanceTimersByTimeAsync(4000);
@@ -213,29 +243,7 @@ describe('useVideoStreamHealth', () => {
     expect(logger.debug.mock.calls.filter(([message]) => message === '[WebRTC] Inbound video RTP stream is idle without playback starvation; treating the frame as intentionally static.')).toHaveLength(1);
   });
 
-  it('does not treat packets without decoded-frame progress as healthy advancement', async () => {
-    vi.useFakeTimers();
-    const { health, onVideoStreamStalledConfirmed, advanceNetworkOnly, setVideoTrackMuted } = createVideoStreamHealthHarness();
-
-    await vi.advanceTimersByTimeAsync(1);
-    advanceNetworkOnly();
-    await health.handleWatchdog(1, 'test');
-
-    setVideoTrackMuted(true);
-    await vi.advanceTimersByTimeAsync(4000);
-    advanceNetworkOnly();
-    await health.handleWatchdog(1, 'test');
-    await vi.advanceTimersByTimeAsync(1000);
-    advanceNetworkOnly();
-    await health.handleWatchdog(1, 'test');
-    await vi.advanceTimersByTimeAsync(1000);
-    advanceNetworkOnly();
-    await health.handleWatchdog(1, 'test');
-
-    expect(onVideoStreamStalledConfirmed.mock.calls.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('escalates prolonged inbound RTP idle even when playback starvation is not reported', async () => {
+  it('keeps static-looking idle video as diagnostic-only beyond the static-frame grace period', async () => {
     vi.useFakeTimers();
     const { health, onVideoStreamStalledConfirmed, advanceVideoPackets } = createVideoStreamHealthHarness();
 
@@ -243,12 +251,65 @@ describe('useVideoStreamHealth', () => {
     advanceVideoPackets();
     await health.handleWatchdog(1, 'test');
 
-    await vi.advanceTimersByTimeAsync(9000);
+    await vi.advanceTimersByTimeAsync(10001);
     await health.handleWatchdog(1, 'test');
-    expect(onVideoStreamStalledConfirmed).not.toHaveBeenCalled();
-
     await vi.advanceTimersByTimeAsync(1000);
     await health.handleWatchdog(1, 'test');
+
+    expect(onVideoStreamStalledConfirmed).not.toHaveBeenCalled();
+    expect(health.stateMachine.state).not.toBe('stalled');
+  });
+
+  it('notifies when inbound RTP advances but browser decoded frames stop advancing', async () => {
+    vi.useFakeTimers();
+    const { health, onVideoStreamStalledConfirmed, advanceVideoPackets, advanceDecodedFrames, enableDecodedFrameStats, emitRenderedFrame, setVideoPlaybackStarved } = createVideoStreamHealthHarness();
+
+    enableDecodedFrameStats();
+    health.start(1);
+    await vi.advanceTimersByTimeAsync(1);
+    emitRenderedFrame();
+    health.stopWatchdog();
+    advanceVideoPackets();
+    advanceDecodedFrames();
+    await health.handleWatchdog(1, 'test');
+
+    await vi.advanceTimersByTimeAsync(4000);
+    setVideoPlaybackStarved();
+    advanceVideoPackets();
+    await health.handleWatchdog(1, 'test');
+    await vi.advanceTimersByTimeAsync(1000);
+    advanceVideoPackets();
+    await health.handleWatchdog(1, 'test');
+
     expect(onVideoStreamStalledConfirmed).toHaveBeenCalledTimes(1);
+    expect(onVideoStreamStalledConfirmed).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'browser_decode_stalled_confirmed',
+      reason: 'test',
+      connectionId: 1
+    }));
+  });
+
+  it('does not recover unchanged rendered frames while playback is not starved', async () => {
+    vi.useFakeTimers();
+    const { health, onVideoStreamStalledConfirmed, advanceVideoPackets, advanceDecodedFrames, enableDecodedFrameStats, emitRenderedFrame } = createVideoStreamHealthHarness();
+
+    enableDecodedFrameStats();
+    health.start(1);
+    await vi.advanceTimersByTimeAsync(1);
+    emitRenderedFrame();
+    health.stopWatchdog();
+    advanceVideoPackets();
+    advanceDecodedFrames();
+    await health.handleWatchdog(1, 'test');
+
+    await vi.advanceTimersByTimeAsync(4000);
+    advanceVideoPackets();
+    await health.handleWatchdog(1, 'test');
+    await vi.advanceTimersByTimeAsync(1000);
+    advanceVideoPackets();
+    await health.handleWatchdog(1, 'test');
+
+    expect(onVideoStreamStalledConfirmed).not.toHaveBeenCalled();
+    expect(health.stateMachine.state).not.toBe('stalled');
   });
 });

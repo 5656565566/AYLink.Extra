@@ -360,7 +360,7 @@ func (h *WebRTCHandler) acquireRuntime(
 				continue
 			}
 
-			if shareable && entry.runtime != nil && entry.signature == signature {
+			if shareable && entry.runtime != nil && entry.refCount > 0 && entry.signature == signature {
 				entry.refCount++
 				if sessionID != "" {
 					if entry.sessionRefs == nil {

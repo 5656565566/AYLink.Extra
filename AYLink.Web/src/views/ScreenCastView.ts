@@ -330,6 +330,8 @@ export default defineComponent({
 
     const isDocked = ref(true);
 
+    const isMenuDragActive = ref(false);
+
     const isClipboardWindowVisible = ref(false);
 
     const clipboardText = ref('');
@@ -619,6 +621,14 @@ export default defineComponent({
       disposePersistedCastConnection(tabKey);
     };
 
+    const getSessionReleaseTarget = (tabKey = activeTabKey.value) => {
+      const persisted = getPersistedConnection(tabKey);
+      return {
+        deviceId: deviceId.value || persisted?.deviceId || '',
+        sessionId: currentScrcpySessionId || persisted?.sessionId || ''
+      };
+    };
+
     const canUseFlexDisplay = computed(() => isNewDisplayMode.value && isFlexDisplayEnabled.value);
 
     const resolvedNewDisplayDpi = computed(() => {
@@ -878,6 +888,9 @@ export default defineComponent({
     const getHighFrequencyControlChannel = () =>
       controlChannels.getHighFrequencyControlChannel();
 
+    const getPointerMoveSendChannel = () =>
+      controlChannels.getPointerMoveSendChannel();
+
     const getConfiguredPointerMoveSampleIntervalMs = () => {
       if (pointerSamplingRateHz.value === 30) {
         return POINTER_MOVE_SAMPLE_INTERVAL_30HZ_MS;
@@ -888,7 +901,7 @@ export default defineComponent({
       return POINTER_MOVE_SAMPLE_INTERVAL_MS;
     };
 
-    const getPointerMoveBufferedAmount = () => dataChannel?.bufferedAmount ?? 0;
+    const getPointerMoveBufferedAmount = () => getPointerMoveSendChannel()?.bufferedAmount ?? 0;
 
     const getCurrentPointerMoveBufferLimit = () =>
       weakNetworkMode.value && !adaptivePointerSampling.value
@@ -1068,12 +1081,15 @@ export default defineComponent({
         return false;
       }
 
-      if ((persisted.ws && persisted.ws.readyState >= WebSocket.CLOSING) || persisted.peerConnection.connectionState === 'closed') {
+      const persistedPeerConnectionState = persisted.peerConnection.connectionState;
+      if ((persisted.ws && persisted.ws.readyState >= WebSocket.CLOSING)
+        || persistedPeerConnectionState === 'closed'
+        || persistedPeerConnectionState === 'failed') {
         console.warn('[WebRTC] Discarding stale persisted connection snapshot.', {
           tabKey,
           deviceId: persisted.deviceId,
           hasSocket: !!persisted.ws,
-          peerConnectionState: persisted.peerConnection.connectionState
+          peerConnectionState: persistedPeerConnectionState
         });
         disposePersistedConnection(tabKey);
         return false;
@@ -1132,6 +1148,7 @@ export default defineComponent({
           ? t('Screencast.StatusReconnecting', '正在恢复连接...')
           : t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', restoredPeerConnection.connectionState);
       hideLastFrameOverlay();
+      startScrcpySessionHeartbeat(persisted.deviceId, currentScrcpySessionId);
       scheduleResumeMediaPlayback(0);
       startVideoFrameMonitor(connectionId);
       persistCurrentConnection(tabKey);
@@ -1252,16 +1269,22 @@ export default defineComponent({
       };
     };
 
-    const clampCollapsedMenuPosition = (x: number, y: number) => {
+    const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(min, value), max);
+
+    const getCollapsedMenuPositionRange = () => {
       const bounds = getStageBounds();
-      const hiddenWidth = MENU_BUTTON_SIZE - MENU_COLLAPSED_VISIBLE_WIDTH;
-      const minX = bounds.offsetLeft - hiddenWidth;
-      const maxX = bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH;
+      const minX = bounds.offsetLeft + MENU_MARGIN;
+      const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_BUTTON_SIZE - MENU_MARGIN);
       const minY = bounds.offsetTop + MENU_MARGIN;
       const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
+      return { minX, maxX, minY, maxY };
+    };
+
+    const clampCollapsedMenuPosition = (x: number, y: number) => {
+      const range = getCollapsedMenuPositionRange();
       return {
-        x: Math.min(Math.max(minX, x), maxX),
-        y: Math.min(Math.max(minY, y), maxY)
+        x: clampValue(x, range.minX, range.maxX),
+        y: clampValue(y, range.minY, range.maxY)
       };
     };
 
@@ -1290,7 +1313,6 @@ export default defineComponent({
 
     const syncMenuSideState = () => {
       currentMenuExpandDirection = getMenuExpandDirectionAt(menuX.value, menuY.value, isMenuExpanded.value);
-      dockedEdge.value = currentMenuExpandDirection === 'left' ? 'right' : 'left';
     };
 
     const shouldCollapseExpandedMenuWhileDragging = (_event: PointerEvent, _rawX: number, rawY: number, _clampedX: number, clampedY: number) => {
@@ -1305,15 +1327,11 @@ export default defineComponent({
     };
 
     const updateMenuRelativePosition = () => {
-      const bounds = getStageBounds();
       const clamped = clampCollapsedMenuPosition(menuX.value, menuY.value);
-      const minX = bounds.offsetLeft - (MENU_BUTTON_SIZE - MENU_COLLAPSED_VISIBLE_WIDTH);
-      const minY = bounds.offsetTop + MENU_MARGIN;
-      const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH);
-      const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
+      const range = getCollapsedMenuPositionRange();
 
-      menuRelativeX.value = maxX <= minX ? 0 : (maxX - clamped.x) / (maxX - minX);
-      menuRelativeY.value = maxY <= minY ? 0 : (clamped.y - minY) / (maxY - minY);
+      menuRelativeX.value = range.maxX <= range.minX ? 0 : (range.maxX - clamped.x) / (range.maxX - range.minX);
+      menuRelativeY.value = range.maxY <= range.minY ? 0 : (clamped.y - range.minY) / (range.maxY - range.minY);
     };
 
     const persistMenuPlacement = () => {
@@ -1347,15 +1365,11 @@ export default defineComponent({
     };
 
     const restoreMenuPositionFromRelative = () => {
-      const bounds = getStageBounds();
-      const minX = bounds.offsetLeft - (MENU_BUTTON_SIZE - MENU_COLLAPSED_VISIBLE_WIDTH);
-      const minY = bounds.offsetTop + MENU_MARGIN;
-      const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH);
-      const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
+      const range = getCollapsedMenuPositionRange();
 
       setMenuPosition(
-        maxX - (maxX - minX) * menuRelativeX.value,
-        minY + (maxY - minY) * menuRelativeY.value,
+        range.maxX - (range.maxX - range.minX) * menuRelativeX.value,
+        range.minY + (range.maxY - range.minY) * menuRelativeY.value,
         false
       );
     };
@@ -1392,25 +1406,54 @@ export default defineComponent({
       }
     };
 
-    const applyDockPosition = (edge: DockedEdge) => {
+    const setFloatingMenuState = () => {
+      isDocked.value = false;
+      dockedEdge.value = 'none';
+    };
+
+    const setDockedMenuState = (edge: Exclude<DockedEdge, 'none'>) => {
+      isDocked.value = true;
+      dockedEdge.value = edge;
+    };
+
+    const getDockedMenuPosition = (edge: Exclude<DockedEdge, 'none'>) => {
       const bounds = getStageBounds();
       const menuBounds = getMenuBoundsAt(menuY.value);
-      const centeredY = Math.max(
-        bounds.offsetTop + MENU_MARGIN,
-        Math.min(
-          menuY.value,
-          bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN
-        )
+      const collapsedRange = getCollapsedMenuPositionRange();
+      const maxY = Math.max(
+        collapsedRange.minY,
+        bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN
       );
+      const y = clampValue(menuY.value, collapsedRange.minY, maxY);
+      return {
+        x: edge === 'left' ? collapsedRange.minX : collapsedRange.maxX,
+        y
+      };
+    };
 
-      if (edge === 'left') {
-        setMenuPosition(bounds.offsetLeft + MENU_MARGIN, centeredY);
-      } else if (edge === 'right') {
-        setMenuPosition(
-          Math.max(bounds.offsetLeft + MENU_MARGIN, bounds.offsetLeft + bounds.width - MENU_BUTTON_SIZE - MENU_MARGIN),
-          centeredY
-        );
+    const applyDockPosition = (edge: DockedEdge, collapseExpanded = false) => {
+      if (edge === 'none') {
+        return;
       }
+
+      setDockedMenuState(edge);
+      if (collapseExpanded && isMenuExpanded.value) {
+        isMenuExpanded.value = false;
+        isMenuHorizontalLocked.value = false;
+      }
+      const position = getDockedMenuPosition(edge);
+      setMenuPosition(position.x, position.y);
+    };
+
+    const collapseDockedExpandedMenu = () => {
+      if (!isDocked.value || dockedEdge.value === 'none' || !isMenuExpanded.value) {
+        return false;
+      }
+
+      isMenuExpanded.value = false;
+      isMenuHorizontalLocked.value = false;
+      applyDockPosition(dockedEdge.value);
+      return true;
     };
 
     const initializeMenuPosition = () => {
@@ -1422,9 +1465,9 @@ export default defineComponent({
     };
 
     const resolveDockEdge = () => {
-      const bounds = getStageBounds();
-      const leftDockX = bounds.offsetLeft + MENU_MARGIN;
-      const rightDockX = Math.max(leftDockX, bounds.offsetLeft + bounds.width - MENU_BUTTON_SIZE - MENU_MARGIN);
+      const collapsedRange = getCollapsedMenuPositionRange();
+      const leftDockX = collapsedRange.minX;
+      const rightDockX = collapsedRange.maxX;
       const distances = [
         { edge: 'left' as DockedEdge, value: Math.abs(menuX.value - leftDockX) },
         { edge: 'right' as DockedEdge, value: Math.abs(menuX.value - rightDockX) }
@@ -1432,12 +1475,9 @@ export default defineComponent({
 
       const nearest = distances[0];
       if (nearest.value <= 64) {
-        dockedEdge.value = nearest.edge;
-        isDocked.value = true;
-        applyDockPosition(nearest.edge);
+        applyDockPosition(nearest.edge, true);
       } else {
-        dockedEdge.value = 'none';
-        isDocked.value = false;
+        setFloatingMenuState();
         setMenuPosition(menuX.value, menuY.value);
       }
       persistMenuPlacement();
@@ -1652,15 +1692,18 @@ export default defineComponent({
 
       lastVideoStreamStallRecoveryAttemptAt = now;
       const signalingAttached = !!ws && ws.readyState === WebSocket.OPEN;
-      requestVideoKeyFrameReplay('browser_playback_starved');
+      const recoveryReason = details.status === 'browser_decode_stalled_confirmed'
+          ? 'browser_decode_stalled'
+          : 'browser_playback_starved';
+      requestVideoKeyFrameReplay(recoveryReason);
       if (!signalingAttached) {
-        console.info('[WebRTC] Confirmed browser playback starvation while signaling websocket is detached; attempting signaling reattach before escalating recovery.', {
+        console.info('[WebRTC] Confirmed video stream stall while signaling websocket is detached; attempting signaling reattach before escalating recovery.', {
           ...details,
           sessionId: currentScrcpySessionId
         });
-        void tryReattachSignaling('browser_playback_starved');
+        void tryReattachSignaling(recoveryReason);
       } else {
-        console.info('[WebRTC] Confirmed browser playback starvation; entering recovery observation window before escalating recovery.', details);
+        console.info('[WebRTC] Confirmed video stream stall; entering recovery observation window before escalating recovery.', details);
       }
 
       pendingVideoStreamStallObservationTimer = window.setTimeout(() => {
@@ -1675,7 +1718,7 @@ export default defineComponent({
         }
 
         void (async () => {
-          const renegotiated = await tryVideoRenegotiation('browser_playback_starved');
+          const renegotiated = await tryVideoRenegotiation(recoveryReason);
           if (renegotiated) {
             return;
           }
@@ -1756,7 +1799,7 @@ export default defineComponent({
         return false;
       }
 
-      console.warn('[WebRTC] Attempting non-destructive video renegotiation after confirmed inbound RTP stall.', {
+      console.warn('[WebRTC] Attempting non-destructive video renegotiation after confirmed browser video stall.', {
         reason,
         deviceId: deviceId.value,
         tabKey: activeTabKey.value,
@@ -2618,15 +2661,14 @@ export default defineComponent({
         if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
           return;
         }
-        const currentConnectionState = targetPeerConnection.connectionState;
-        status.value = t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', currentConnectionState);
-        isConnected.value = currentConnectionState === 'connected';
-        console.debug('[WebRTC] Peer connection state changed:', currentConnectionState, {
+        status.value = t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', peerConnection.connectionState);
+        isConnected.value = peerConnection.connectionState === 'connected';
+        console.debug('[WebRTC] Peer connection state changed:', peerConnection.connectionState, {
           deviceId: deviceId.value,
           tabKey: activeTabKey.value
         });
 
-        if (currentConnectionState === 'connected') {
+        if (peerConnection.connectionState === 'connected') {
           isConnecting.value = false;
           clearPendingReconnect();
           clearPendingIceRestartFallback();
@@ -2641,20 +2683,20 @@ export default defineComponent({
           }
         }
 
-        if (currentConnectionState === 'failed' || currentConnectionState === 'disconnected' || currentConnectionState === 'closed') {
-          markActiveVideoStreamUnstable(connectionId, `peer_connection_${currentConnectionState}`);
+        if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'closed') {
+          markActiveVideoStreamUnstable(connectionId, `peer_connection_${peerConnection.connectionState}`);
           isConnecting.value = false;
-          if (currentConnectionState === 'closed') {
+          if (peerConnection.connectionState === 'closed') {
             stopConnection();
             scheduleReconnect('peer_connection_closed');
             return;
           }
 
           void (async () => {
-            const restarted = await tryIceRestart(`peer_connection_${currentConnectionState}`);
+            const restarted = await tryIceRestart(`peer_connection_${peerConnection.connectionState}`);
             if (!restarted) {
               stopConnection();
-              scheduleReconnect(`peer_connection_${currentConnectionState}`);
+              scheduleReconnect(`peer_connection_${peerConnection.connectionState}`);
             }
           })();
           return;
@@ -2777,10 +2819,10 @@ export default defineComponent({
         }
         const wasIntentionalDetach = videoStreamHealth.consumeExpectedSignalingClose(connectionId);
         ws = null;
-        clearPersistedConnection(persistedTabKey);
         const currentState = peerConnection?.connectionState;
         if (currentState === 'connected' || currentState === 'connecting') {
           videoStreamHealth.markSignalingClosedWhileActive(connectionId);
+          persistCurrentConnection(persistedTabKey);
           status.value = wasIntentionalDetach
             ? t('Screencast.StatusMediaDirect', '媒体已直连，信令已断开')
             : t('Screencast.StatusSignalingDetached', '信令连接已断开，媒体链路继续运行');
@@ -2793,6 +2835,7 @@ export default defineComponent({
           return;
         }
 
+        clearPersistedConnection(persistedTabKey);
         resetSignalingDetachState();
         status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
         stopConnection();
@@ -2821,11 +2864,10 @@ export default defineComponent({
         return;
       }
 
-      const previousDeviceId = deviceId.value;
-      const previousSessionId = currentScrcpySessionId;
+      const previousSession = getSessionReleaseTarget(targetTabKey);
       stopScrcpySessionHeartbeat();
-      if (previousSessionId) {
-        void postScrcpySessionAction('release', previousDeviceId, previousSessionId);
+      if (previousSession.sessionId) {
+        void postScrcpySessionAction('release', previousSession.deviceId, previousSession.sessionId);
       }
       disposeAllPersistedConnections();
       stopConnection();
@@ -2907,7 +2949,6 @@ export default defineComponent({
       activeConnectionId++;
       stopFlexDisplayHeartbeat();
       clearPendingDisplayResize();
-      stopPointerMoveFlushLoop();
       activePointers.clear();
       pointerGenerations.clear();
       scrcpyPointerIds.clear();
@@ -2922,7 +2963,6 @@ export default defineComponent({
       stopVideoStreamWatchdog();
       resetVideoStreamWatchdogState();
       resetSignalingDetachState();
-      stopPointerMoveFlushLoop();
       stopPointerControlFlushLoop();
       stopPointerReleaseFlushLoop();
       clearPendingIceRestartFallback();
@@ -2959,7 +2999,10 @@ export default defineComponent({
     };
 
     const stopConnection = (preserveForBackground = false, preserveTabKey = activeTabKey.value) => {
-      stopScrcpySessionHeartbeat();
+      const shouldPreserveLiveConnection = preserveForBackground && hasLiveConnection();
+      if (!shouldPreserveLiveConnection) {
+        stopScrcpySessionHeartbeat();
+      }
       stopFlexDisplayHeartbeat();
       stopVideoStreamWatchdog();
       clearPendingDisplayResize();
@@ -2974,7 +3017,6 @@ export default defineComponent({
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = '';
       resetSignalingDetachState();
-      stopPointerMoveFlushLoop();
       stopPointerControlFlushLoop();
       stopPointerReleaseFlushLoop();
       clearPendingIceRestartFallback();
@@ -2982,7 +3024,7 @@ export default defineComponent({
       clearPendingVideoStreamStallObservation();
       isIceRestartInFlight = false;
 
-      if (preserveForBackground && hasLiveConnection()) {
+      if (shouldPreserveLiveConnection) {
         captureCurrentVideoFrame(preserveTabKey);
         persistCurrentConnection(preserveTabKey);
         detachActiveConnectionFromView();
@@ -3236,7 +3278,7 @@ export default defineComponent({
 
     const flushPendingPointerMoves = () => {
       flushPendingPointerControlPayloads();
-      const channel = dataChannel;
+      const channel = getPointerMoveSendChannel();
       if (!channel || channel.readyState !== 'open') {
         return;
       }
@@ -3362,8 +3404,12 @@ export default defineComponent({
 
     const sendPointerMessage = (phase: 'down' | 'up' | 'move' | 'cancel', event: PointerEvent) => {
       const isMove = phase === 'move';
-      const channel = dataChannel;
-      if (!channel || channel.readyState !== 'open') return false;
+      const channel = isMove ? getPointerMoveSendChannel() : dataChannel;
+      if (!channel || channel.readyState !== 'open') {
+        if (!isMove) {
+          return false;
+        }
+      }
 
       const ratios = getPointerRatios(event);
       if (!ratios) return false;
@@ -3383,6 +3429,16 @@ export default defineComponent({
           frameHeight: ratios.frameHeight,
           pressure: event.pressure || 1,
         });
+        if (!channel || channel.readyState !== 'open') {
+          schedulePointerMoveFlush();
+          return true;
+        }
+        if (pointerMoveFlushHandle == null && pointerMoveSampleTimer == null && performance.now() - lastPointerMoveFlushAt >= getCurrentPointerMoveSampleIntervalMs()) {
+          flushPendingPointerMoves();
+          if (pendingPointerMoves.size === 0) {
+            return true;
+          }
+        }
         schedulePointerMoveFlush();
         return true;
       }
@@ -3911,6 +3967,7 @@ export default defineComponent({
     const finishMenuDrag = () => {
       if (!isDraggingMenu) return;
       isDraggingMenu = false;
+      isMenuDragActive.value = false;
       setMenuPosition(menuX.value, menuY.value);
       resolveDockEdge();
     };
@@ -3920,21 +3977,18 @@ export default defineComponent({
       if (!target) return;
       event.preventDefault();
       isDraggingMenu = true;
+      isMenuDragActive.value = true;
       didDragMenu = false;
       wasMenuExpandedAtDragStart = isMenuExpanded.value;
 
-      if (isDocked.value) {
-        const bounds = getStageBounds();
-        const menuBounds = getMenuBoundsAt(menuY.value);
-        if (dockedEdge.value === 'left') {
-          menuX.value = bounds.offsetLeft + MENU_MARGIN;
-        } else if (dockedEdge.value === 'right') {
-          menuX.value = bounds.offsetLeft + bounds.width - menuBounds.width - MENU_MARGIN;
-        }
+      if (isDocked.value && dockedEdge.value !== 'none') {
+        const position = getDockedMenuPosition(dockedEdge.value);
+        menuX.value = position.x;
+        menuY.value = position.y;
       }
 
-      isDocked.value = false;
-      dockedEdge.value = 'none';
+      setFloatingMenuState();
+      setMenuPosition(menuX.value, menuY.value);
 
       dragStartOffset = {
         x: event.clientX - menuX.value,
@@ -4004,8 +4058,14 @@ export default defineComponent({
 
     watch(
       () => [isMenuExpanded.value, isHorizontalLayout.value, dockedEdge.value, isDocked.value],
-      () => {
+      (current, previous) => {
         if (!isDocked.value || dockedEdge.value === 'none') {
+          return;
+        }
+
+        const [, , currentDockedEdge] = current;
+        const [, , previousDockedEdge] = previous ?? current;
+        if (isMenuExpanded.value && currentDockedEdge !== previousDockedEdge && collapseDockedExpandedMenu()) {
           return;
         }
         void syncDockedMenuPosition();
@@ -4026,10 +4086,12 @@ export default defineComponent({
       stopFlexDisplayHeartbeat();
       void releaseMouseLock();
       releaseAllPointers('cancel');
-      stopScrcpySessionHeartbeat();
 
       if (!preserveForBackground) {
-        void postScrcpySessionAction('release', deviceId.value, currentScrcpySessionId);
+        const releaseTarget = getSessionReleaseTarget();
+        stopScrcpySessionHeartbeat();
+        void postScrcpySessionAction('release', releaseTarget.deviceId, releaseTarget.sessionId);
+        disposeAllPersistedConnections();
       }
 
       stopConnection(preserveForBackground);
@@ -4194,6 +4256,7 @@ export default defineComponent({
       effectiveFillMode,
       isMenuExpanded,
       isDocked,
+      isMenuDragActive,
       isClipboardWindowVisible,
       clipboardText,
       clipboardStatusText,

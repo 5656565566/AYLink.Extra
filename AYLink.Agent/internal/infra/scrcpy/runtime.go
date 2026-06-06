@@ -29,6 +29,7 @@ const (
 	videoRefreshDebounce                         = 10 * time.Second
 	videoRefreshConfirmationWindow               = 12 * time.Second
 	videoRefreshConfirmations                    = 2
+	replayableKeyFrameMaxAge                     = 3 * time.Second
 	sourceHealthPacketFreshness                  = 3 * time.Second
 	sourceHealthRecoveryWindow                   = 8 * time.Second
 	sourceHealthRepeatedPTSStallThreshold        = 6
@@ -55,11 +56,12 @@ type runtime struct {
 	audioConn   net.Conn
 	controlConn net.Conn
 
-	controlMu     sync.Mutex
-	closeOnce     sync.Once
-	controlWrites chan []byte
-	controlReadMu sync.Mutex
-	controlBuffer []byte
+	controlMu        sync.Mutex
+	controlEnqueueMu sync.Mutex
+	closeOnce        sync.Once
+	controlWrites    chan []byte
+	controlReadMu    sync.Mutex
+	controlBuffer    []byte
 
 	videoMu             sync.Mutex
 	videoSubscribers    map[int]chan domainscrcpy.VideoPacket
@@ -101,8 +103,6 @@ type cachedVideoPacket struct {
 	generation uint64
 	cachedAt   time.Time
 }
-
-const replayableKeyFrameMaxAge = 2 * time.Second
 
 func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session) (domainscrcpy.Runtime, error) {
 	if session == nil {
@@ -364,8 +364,17 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 		r.videoMu.Unlock()
 		return false
 	}
-	if keyFramePacket.cachedAt.IsZero() || time.Since(keyFramePacket.cachedAt) > replayableKeyFrameMaxAge {
+	keyFrameAge := time.Since(keyFramePacket.cachedAt)
+	if keyFramePacket.cachedAt.IsZero() || keyFrameAge > replayableKeyFrameMaxAge {
 		r.videoMu.Unlock()
+		if r.logger != nil {
+			r.logger.Info("scrcpy video key frame replay skipped",
+				"reason", "cached_keyframe_too_old",
+				"generation", keyFramePacket.generation,
+				"keyFrameAge", keyFrameAge.String(),
+				"maxAge", replayableKeyFrameMaxAge.String(),
+			)
+		}
 		return false
 	}
 	if len(r.videoSubscribers) == 0 {
@@ -389,6 +398,7 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 		r.logger.Info("scrcpy video key frame replayed",
 			"generation", generation,
 			"subscriberCount", subscriberCount,
+			"keyFrameAge", keyFrameAge.String(),
 		)
 	}
 	r.markVideoKeyFrameReplayed(time.Now())
@@ -398,34 +408,55 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 func (r *runtime) RequestVideoRefresh() error {
 	r.refreshMu.Lock()
 	if r.refreshRequested {
-		r.logger.Info("scrcpy video refresh skipped", "reason", "refresh_already_inflight")
+		if r.logger != nil {
+			r.logger.Info("scrcpy video refresh skipped", "reason", "refresh_already_inflight")
+		}
 		r.refreshMu.Unlock()
 		return nil
 	}
 	now := time.Now()
+	health := r.GetSourceHealth()
+	if health.State == domainscrcpy.SourceHealthStaticButAlive {
+		r.refreshAskCount = 0
+		r.lastRefreshAskAt = time.Time{}
+		if r.logger != nil {
+			r.logger.Info("scrcpy video refresh skipped",
+				"reason", "source_static_but_alive",
+				"sourceHealth", string(health.State),
+				"sourceHealthReason", health.Reason,
+			)
+		}
+		r.refreshMu.Unlock()
+		return nil
+	}
+	bypassConfirmation := shouldBypassVideoRefreshConfirmation(health.State)
 	if !r.lastRefreshAskAt.IsZero() && now.Sub(r.lastRefreshAskAt) > videoRefreshConfirmationWindow {
 		r.refreshAskCount = 0
 	}
 	r.lastRefreshAskAt = now
 	r.refreshAskCount++
-	if r.refreshAskCount < videoRefreshConfirmations {
-		r.logger.Info("scrcpy video refresh deferred",
-			"reason", "confirmation_pending",
-			"requestCount", r.refreshAskCount,
-			"confirmationThreshold", videoRefreshConfirmations,
-			"confirmationWindow", videoRefreshConfirmationWindow.String(),
-		)
+	if !bypassConfirmation && r.refreshAskCount < videoRefreshConfirmations {
+		if r.logger != nil {
+			r.logger.Info("scrcpy video refresh deferred",
+				"reason", "confirmation_pending",
+				"requestCount", r.refreshAskCount,
+				"confirmationThreshold", videoRefreshConfirmations,
+				"confirmationWindow", videoRefreshConfirmationWindow.String(),
+			)
+		}
 		r.refreshMu.Unlock()
 		return nil
 	}
 	r.refreshAskCount = 0
 	sinceLastRefresh := time.Since(r.lastRefreshTime)
 	if sinceLastRefresh < videoRefreshDebounce {
-		r.logger.Info("scrcpy video refresh skipped",
-			"reason", "debounced",
-			"sinceLastRefresh", sinceLastRefresh.String(),
-			"debounce", videoRefreshDebounce.String(),
-		)
+		if r.logger != nil {
+			r.logger.Info("scrcpy video refresh skipped",
+				"reason", "debounced",
+				"sinceLastRefresh", sinceLastRefresh.String(),
+				"debounce", videoRefreshDebounce.String(),
+			)
+		}
 		r.refreshMu.Unlock()
 		return nil
 	}
@@ -440,14 +471,28 @@ func (r *runtime) RequestVideoRefresh() error {
 			r.refreshRequested = false
 			r.refreshMu.Unlock()
 		}()
-		r.logger.Info("scrcpy video refresh dispatching reset control",
-			"queueDepth", len(r.controlWrites),
-			"queueCapacity", cap(r.controlWrites),
-		)
+		if r.logger != nil {
+			r.logger.Info("scrcpy video refresh dispatching reset control",
+				"queueDepth", len(r.controlWrites),
+				"queueCapacity", cap(r.controlWrites),
+				"sourceHealth", string(health.State),
+				"sourceHealthReason", health.Reason,
+				"bypassConfirmation", bypassConfirmation,
+			)
+		}
 		_ = r.SendControl(domainscrcpy.BuildResetVideoControl())
 	}()
 
 	return nil
+}
+
+func shouldBypassVideoRefreshConfirmation(state domainscrcpy.SourceHealthState) bool {
+	switch state {
+	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *runtime) GetSourceHealth() domainscrcpy.SourceHealthSnapshot {
@@ -460,7 +505,7 @@ func (r *runtime) GetSourceHealth() domainscrcpy.SourceHealthSnapshot {
 		health.RuntimeClosed = true
 	default:
 	}
-	health.State = classifySourceHealth(health, time.Now())
+	health.State, health.Reason = classifySourceHealth(health, time.Now())
 	return health
 }
 
@@ -473,6 +518,13 @@ func (r *runtime) SendControl(payload []byte) error {
 	}
 
 	message := append([]byte(nil), payload...)
+	droppableKind := droppableControlPayloadKindOf(message)
+	r.controlEnqueueMu.Lock()
+	defer r.controlEnqueueMu.Unlock()
+	if droppableKind != droppableControlPayloadNone {
+		r.dropQueuedControlPayloads(droppableKind)
+	}
+
 	select {
 	case <-r.done:
 		return net.ErrClosed
@@ -494,6 +546,27 @@ func (r *runtime) SendControl(payload []byte) error {
 		return nil
 	case <-timer.C:
 		return fmt.Errorf("scrcpy control queue is congested")
+	}
+}
+
+func (r *runtime) dropQueuedControlPayloads(kind droppableControlPayloadKind) {
+	if kind == droppableControlPayloadNone || r.controlWrites == nil {
+		return
+	}
+
+	remaining := make([][]byte, 0, len(r.controlWrites))
+	for {
+		select {
+		case queued := <-r.controlWrites:
+			if droppableControlPayloadKindOf(queued) != kind {
+				remaining = append(remaining, queued)
+			}
+		default:
+			for _, queued := range remaining {
+				r.controlWrites <- queued
+			}
+			return
+		}
 	}
 }
 
@@ -1025,7 +1098,9 @@ func (r *runtime) recordVideoPacketHealth(packet domainscrcpy.VideoPacket) {
 	}
 
 	pts := packet.PresentationTimestamp
-	if r.health.LastPTS == 0 || pts > r.health.LastPTS {
+	hadSeenMediaPacket := r.health.HasSeenMediaPacket
+	r.health.HasSeenMediaPacket = true
+	if !hadSeenMediaPacket || pts > r.health.LastPTS {
 		r.health.LastPTS = pts
 		r.health.LastNewPTSAt = now
 		r.health.RepeatedPTSCount = 0
@@ -1337,23 +1412,32 @@ func releaseMediaPacketBuffer(buffer []byte) {
 	mediaPacketBufferPool.Put(buffer[:0])
 }
 
-func classifySourceHealth(health domainscrcpy.SourceHealthSnapshot, now time.Time) domainscrcpy.SourceHealthState {
+func classifySourceHealth(health domainscrcpy.SourceHealthSnapshot, now time.Time) (domainscrcpy.SourceHealthState, string) {
 	if health.RuntimeClosed {
-		return domainscrcpy.SourceHealthSourceStalled
+		return domainscrcpy.SourceHealthSourceStalled, "runtime_closed"
 	}
 	if !health.LastVideoRefreshAt.IsZero() && now.Sub(health.LastVideoRefreshAt) < sourceHealthRecoveryWindow {
-		return domainscrcpy.SourceHealthRecovering
+		return domainscrcpy.SourceHealthRecovering, "refresh_recovering"
 	}
 	if health.LastPacketAt.IsZero() {
-		return domainscrcpy.SourceHealthSourceStalled
+		return domainscrcpy.SourceHealthSourceStalled, "no_video_packet"
+	}
+	if !health.HasSeenMediaPacket {
+		if now.Sub(health.LastPacketAt) > sourceHealthPacketFreshness {
+			return domainscrcpy.SourceHealthSourceStalled, "no_media_packet"
+		}
+		return domainscrcpy.SourceHealthHealthy, "waiting_first_media_packet"
 	}
 	if health.RepeatedPTSCount >= sourceHealthRepeatedPTSStallThreshold {
-		return domainscrcpy.SourceHealthSourceStalled
+		return domainscrcpy.SourceHealthPTSStalled, "pts_repeated"
 	}
-	if now.Sub(health.LastPacketAt) <= sourceHealthPacketFreshness {
-		return domainscrcpy.SourceHealthHealthy
+	if now.Sub(health.LastPacketAt) > sourceHealthPacketFreshness {
+		return domainscrcpy.SourceHealthStaticButAlive, "holding_last_frame_packet_idle"
 	}
-	return domainscrcpy.SourceHealthIdleStatic
+	if health.LastNewPTSAt.IsZero() || now.Sub(health.LastNewPTSAt) <= sourceHealthPacketFreshness {
+		return domainscrcpy.SourceHealthHealthy, "pts_advancing"
+	}
+	return domainscrcpy.SourceHealthStaticButAlive, "static_packets_alive"
 }
 
 func applyPCMInt16Gain(samples []int16, gain float64) {
@@ -1374,28 +1458,44 @@ func applyPCMInt16Gain(samples []int16, gain float64) {
 	}
 }
 
+type droppableControlPayloadKind int
+
+const (
+	droppableControlPayloadNone droppableControlPayloadKind = iota
+	droppableControlPayloadTouchMove
+	droppableControlPayloadHidMouseMove
+	droppableControlPayloadResizeDisplay
+)
+
 func isDroppableControlPayload(payload []byte) bool {
+	return droppableControlPayloadKindOf(payload) != droppableControlPayloadNone
+}
+
+func droppableControlPayloadKindOf(payload []byte) droppableControlPayloadKind {
 	if len(payload) == 0 {
-		return false
+		return droppableControlPayloadNone
 	}
 
 	switch payload[0] {
 	case 2:
-		return len(payload) > 1 && payload[1] == 2
+		if len(payload) > 1 && payload[1] == 2 {
+			return droppableControlPayloadTouchMove
+		}
 	case 13:
 		if len(payload) < 10 {
-			return false
+			return droppableControlPayloadNone
 		}
 		deviceID := binary.BigEndian.Uint16(payload[1:3])
 		if deviceID != 1 {
-			return false
+			return droppableControlPayloadNone
 		}
-		return payload[6] != 0 || payload[7] != 0 || payload[8] != 0 || payload[9] != 0
+		if payload[6] != 0 || payload[7] != 0 || payload[8] != 0 || payload[9] != 0 {
+			return droppableControlPayloadHidMouseMove
+		}
 	case 21:
-		return true
-	default:
-		return false
+		return droppableControlPayloadResizeDisplay
 	}
+	return droppableControlPayloadNone
 }
 
 func dialLocalPort(ctx context.Context, port int) (net.Conn, error) {

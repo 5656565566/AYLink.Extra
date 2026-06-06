@@ -131,6 +131,19 @@ describe('useScrcpyControlChannels', () => {
     expect(harness.onPointerMoveChannelOpen).toHaveBeenCalledTimes(1);
   });
 
+  it('does not fall back to the reliable control channel while pointer move channel is connecting', () => {
+    const harness = createHarness();
+    const controlChannel = new TestDataChannel();
+    const pointerMoveChannel = new TestDataChannel();
+    pointerMoveChannel.readyState = 'connecting';
+
+    harness.controlChannels.setupControlChannel(controlChannel as unknown as RTCDataChannel);
+    harness.controlChannels.setupPointerMoveChannel(pointerMoveChannel as unknown as RTCDataChannel);
+
+    expect(harness.controlChannels.getHighFrequencyControlChannel()).toBe(controlChannel);
+    expect(harness.controlChannels.getPointerMoveSendChannel()).toBeNull();
+  });
+
   it('falls back to the control channel when meta or pointer channels are unavailable', () => {
     const harness = createHarness();
     const controlChannel = new TestDataChannel();

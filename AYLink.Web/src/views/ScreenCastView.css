@@ -207,12 +207,12 @@ video.fill-mode {
   flex-direction: row-reverse;
 }
 
-.floating-menu.is-docked.dock-left:not(:hover):not(.expanded) {
+.floating-menu.is-docked.dock-left:not(:hover):not(.expanded):not(.is-dragging) {
   transform: translateX(-44px);
   opacity: 0.34;
 }
 
-.floating-menu.is-docked.dock-right:not(:hover):not(.expanded) {
+.floating-menu.is-docked.dock-right:not(:hover):not(.expanded):not(.is-dragging) {
   transform: translateX(44px);
   opacity: 0.34;
 }

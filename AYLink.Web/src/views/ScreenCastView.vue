@@ -80,6 +80,7 @@
         {
           expanded: isMenuExpanded,
           'is-docked': isDocked,
+          'is-dragging': isMenuDragActive,
           'layout-horizontal': isHorizontalLayout,
           'layout-vertical': !isHorizontalLayout
         }

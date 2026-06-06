@@ -3,14 +3,17 @@
 [![License](https://img.shields.io/badge/License-Apache2.0-blue.svg)](../LICENSE)
 ![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vue.js&logoColor=white)
+![Android](https://img.shields.io/badge/Android-15-3DDC84.svg?logo=android&logoColor=white)
 
-**简体中文**
+[English](README_EN.md) | **简体中文**
 
 **安易连（AYLink）** 是一套基于 [scrcpy](https://github.com/Genymobile/scrcpy) 与 WebRTC 的安卓设备管理与投屏方案，当前仓库包含：
 
 - `AYLink.Agent`：Go 编写的服务端，负责 ADB、scrcpy、鉴权、设备管理与 WebRTC 信令
 - `AYLink.Web`：Vue 3 编写的 Web 管理界面
+- `AYLink.Mobile`：Android 原生手机客户端，提供设备列表、远程投屏、应用管理、文件管理与终端能力
 - 如果你在找本机客户端 [AYLink](https://github.com/5656565566/AYLink) 该仓库包含了一个跨平台的桌面客户端，性能更佳
+- 该客户端目前可以有限的连接 `AYLink.Agent`
 
 > [!TIP]
 > 项目仍在持续迭代中。功能已经可用，但在不同设备、网络与编码器环境下仍可能遇到兼容性问题，欢迎通过 Issue 或 PR 一起完善。

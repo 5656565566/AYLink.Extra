@@ -101,6 +101,11 @@ jobs:
 
   android-build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
     - name: Checkout code
@@ -122,19 +127,19 @@ jobs:
       uses: android-actions/setup-android@v3
 
     - name: Decode Android keystore
-      if: startsWith(github.ref, 'refs/tags/') && secrets.ANDROID_KEYSTORE_BASE64 != ''
+      if: startsWith(github.ref, 'refs/tags/') && env.ANDROID_KEYSTORE_BASE64 != ''
       working-directory: AYLink.Mobile
       run: |
-        echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${RUNNER_TEMP}/aylink-release.jks"
+        echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/aylink-release.jks"
       shell: bash
 
     - name: Build Android APK
       working-directory: AYLink.Mobile
       env:
         ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/aylink-release.jks
-        ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        ANDROID_KEYSTORE_PASSWORD: ${{ env.ANDROID_KEYSTORE_PASSWORD }}
+        ANDROID_KEY_ALIAS: ${{ env.ANDROID_KEY_ALIAS }}
+        ANDROID_KEY_PASSWORD: ${{ env.ANDROID_KEY_PASSWORD }}
         ANDROID_VERSION_NAME: ${{ env.ANDROID_VERSION_NAME }}
         ANDROID_VERSION_CODE: ${{ env.ANDROID_VERSION_CODE }}
       run: |
@@ -151,7 +156,7 @@ jobs:
           echo "ANDROID_VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
         fi
 
-        if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+        if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
           ANDROID_VERSION_NAME="${GITHUB_REF_NAME#v}" ANDROID_VERSION_CODE="${VERSION_CODE:-${ANDROID_VERSION_CODE}}" ./gradlew assembleRelease
           APK_PATH="app/build/outputs/apk/release/app-release.apk"
         else

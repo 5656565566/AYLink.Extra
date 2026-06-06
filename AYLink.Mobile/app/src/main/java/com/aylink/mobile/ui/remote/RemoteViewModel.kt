@@ -12,6 +12,7 @@ import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.PointerControlMessage
 import com.aylink.mobile.data.repo.DeviceRepository
 import com.aylink.mobile.data.repo.LocalSettingsStore
+import com.aylink.mobile.data.repo.PointerSamplingRateHz
 import com.aylink.mobile.data.repo.SessionStore
 import com.aylink.mobile.webrtc.SignalClient
 import com.aylink.mobile.webrtc.WebRtcManager
@@ -104,7 +105,13 @@ class RemoteViewModel(
     json: Json
 ) : ViewModel() {
     companion object {
-        private const val POINTER_SAMPLE_INTERVAL_MS = 8L
+        private const val POINTER_SAMPLE_INTERVAL_120HZ_MS = 8L
+        private const val POINTER_SAMPLE_INTERVAL_60HZ_MS = 16L
+        private const val POINTER_SAMPLE_INTERVAL_30HZ_MS = 33L
+        private const val POINTER_MOVE_BUFFER_LIMIT_BYTES = 64 * 1024L
+        private const val WEAK_NETWORK_POINTER_MOVE_BUFFER_LIMIT_BYTES = POINTER_MOVE_BUFFER_LIMIT_BYTES / 2
+        private const val POINTER_MOVE_BUFFER_PRESSURE_MEDIUM_RATIO = 0.35
+        private const val POINTER_MOVE_BUFFER_PRESSURE_HIGH_RATIO = 0.75
         private const val VIDEO_RECOVERY_TIMEOUT_MS = 8_000L
         private const val VIDEO_RECOVERY_POLL_INTERVAL_MS = 2_000L
         private const val MIN_NEW_DISPLAY_DIMENSION = 240
@@ -186,7 +193,12 @@ class RemoteViewModel(
                         }
                         SignalClient.Event.Closed -> {
                             stopHeartbeat()
-                            if (autoReconnectEnabled) {
+                            if (webRtcManager.isPeerConnected()) {
+                                _uiState.update { current ->
+                                    current.copy(status = if (current.videoSize != IntSize.Zero) "已连接" else current.status)
+                                }
+                                startVideoRecoveryWatchdog("signal_closed_after_connect")
+                            } else if (autoReconnectEnabled) {
                                 _uiState.update { it.copy(status = "信令断开", videoSize = IntSize.Zero) }
                                 scheduleReconnect()
                             } else {
@@ -416,10 +428,14 @@ class RemoteViewModel(
         pointerSamplingJob = viewModelScope.launch {
             while (isActive) {
                 if (sampledPointerMoves.isEmpty()) break
+                if (webRtcManager.getPointerMoveBufferedAmount() > getCurrentPointerMoveBufferLimit()) {
+                    delay(getCurrentPointerSampleIntervalMs())
+                    continue
+                }
                 val moves = sampledPointerMoves.values.toList()
                 sampledPointerMoves.clear()
                 moves.forEach(webRtcManager::sendPointerMessage)
-                delay(POINTER_SAMPLE_INTERVAL_MS)
+                delay(getCurrentPointerSampleIntervalMs())
             }
             pointerSamplingJob = null
         }
@@ -441,6 +457,46 @@ class RemoteViewModel(
                 delay(15_000)
             }
         }
+    }
+
+    private fun getConfiguredPointerSampleIntervalMs(): Long {
+        return when (localSettings.value.pointerSamplingRateHz) {
+            PointerSamplingRateHz.HZ_30 -> POINTER_SAMPLE_INTERVAL_30HZ_MS
+            PointerSamplingRateHz.HZ_60 -> POINTER_SAMPLE_INTERVAL_60HZ_MS
+            PointerSamplingRateHz.HZ_120 -> POINTER_SAMPLE_INTERVAL_120HZ_MS
+        }
+    }
+
+    private fun getCurrentPointerMoveBufferLimit(): Long {
+        return if (localSettings.value.weakNetworkMode && !localSettings.value.adaptivePointerSampling) {
+            WEAK_NETWORK_POINTER_MOVE_BUFFER_LIMIT_BYTES
+        } else {
+            POINTER_MOVE_BUFFER_LIMIT_BYTES
+        }
+    }
+
+    private fun getAdaptivePointerSampleIntervalMs(): Long {
+        val bufferedAmount = webRtcManager.getPointerMoveBufferedAmount()
+        val bufferLimit = getCurrentPointerMoveBufferLimit().toDouble()
+        return when {
+            bufferedAmount >= bufferLimit * POINTER_MOVE_BUFFER_PRESSURE_HIGH_RATIO -> POINTER_SAMPLE_INTERVAL_30HZ_MS
+            bufferedAmount >= bufferLimit * POINTER_MOVE_BUFFER_PRESSURE_MEDIUM_RATIO -> POINTER_SAMPLE_INTERVAL_60HZ_MS
+            else -> POINTER_SAMPLE_INTERVAL_120HZ_MS
+        }
+    }
+
+    private fun getCurrentPointerSampleIntervalMs(): Long {
+        val settings = localSettings.value
+        if (settings.adaptivePointerSampling) {
+            return getAdaptivePointerSampleIntervalMs()
+        }
+
+        val configuredInterval = getConfiguredPointerSampleIntervalMs()
+        if (!settings.weakNetworkMode) {
+            return configuredInterval
+        }
+
+        return maxOf(configuredInterval, getAdaptivePointerSampleIntervalMs())
     }
 
     private fun stopHeartbeat() {

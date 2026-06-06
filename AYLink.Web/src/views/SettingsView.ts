@@ -81,7 +81,22 @@ export default defineComponent({
 
     const { t, currentLocale, languages, setLocale } = useI18n();
 
-    const { backgroundMute, newDisplayDpiMode, newDisplayDpiValue, previewRefreshInterval, setBackgroundMute, setNewDisplayDpiMode, setNewDisplayDpiValue, setPreviewRefreshInterval } = useAppSettings();
+    const {
+      adaptivePointerSampling,
+      backgroundMute,
+      newDisplayDpiMode,
+      newDisplayDpiValue,
+      pointerSamplingRateHz,
+      previewRefreshInterval,
+      weakNetworkMode,
+      setAdaptivePointerSampling,
+      setBackgroundMute,
+      setNewDisplayDpiMode,
+      setNewDisplayDpiValue,
+      setPointerSamplingRateHz,
+      setPreviewRefreshInterval,
+      setWeakNetworkMode
+    } = useAppSettings();
 
     const router = useRouter();
 
@@ -336,6 +351,10 @@ export default defineComponent({
       setBackgroundMute((event.target as HTMLInputElement).checked);
     }
 
+    function onAdaptivePointerSamplingChange(event: Event) {
+      setAdaptivePointerSampling((event.target as HTMLInputElement).checked);
+    }
+
     function onBackgroundEnabledChange(event: Event) {
       setBackgroundEnabled((event.target as HTMLInputElement).checked);
     }
@@ -356,6 +375,14 @@ export default defineComponent({
 
     function onPreviewRefreshIntervalChange(event: Event) {
       setPreviewRefreshInterval(Number((event.target as HTMLInputElement).value));
+    }
+
+    function onPointerSamplingRateChange(event: Event) {
+      setPointerSamplingRateHz(Number((event.target as HTMLSelectElement).value));
+    }
+
+    function onWeakNetworkModeChange(event: Event) {
+      setWeakNetworkMode((event.target as HTMLInputElement).checked);
     }
 
     function normalizeVersion(value: string) {
@@ -1269,16 +1296,22 @@ export default defineComponent({
       currentLocale,
       languages,
       setLocale,
+      adaptivePointerSampling,
       backgroundMute,
       backgroundEnabled,
       backgroundImages,
       newDisplayDpiMode,
       newDisplayDpiValue,
+      pointerSamplingRateHz,
       previewRefreshInterval,
+      weakNetworkMode,
+      setAdaptivePointerSampling,
       setBackgroundMute,
       setNewDisplayDpiMode,
       setNewDisplayDpiValue,
+      setPointerSamplingRateHz,
       setPreviewRefreshInterval,
+      setWeakNetworkMode,
       router,
       auth,
       currentUser,
@@ -1351,12 +1384,15 @@ export default defineComponent({
       onThemeModeChange,
       onAccentColorInput,
       onLocaleChange,
+      onAdaptivePointerSamplingChange,
       onBackgroundMuteChange,
       onBackgroundEnabledChange,
       onUseLocalWebRtcOverrideChange,
       onNewDisplayDpiModeChange,
       onNewDisplayDpiValueChange,
+      onPointerSamplingRateChange,
       onPreviewRefreshIntervalChange,
+      onWeakNetworkModeChange,
       normalizeVersion,
       compareVersions,
       openExternalUrl,

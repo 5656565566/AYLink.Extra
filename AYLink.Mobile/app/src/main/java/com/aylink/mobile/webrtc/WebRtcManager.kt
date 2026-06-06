@@ -84,6 +84,8 @@ class WebRtcManager(
     private var remoteVideoTrack: VideoTrack? = null
     private var remoteAudioTrack: AudioTrack? = null
     private var renderer: SurfaceViewRenderer? = null
+    @Volatile
+    private var isDisconnecting = false
     private var lastVideoWidth = 0
     private var lastVideoHeight = 0
     @Volatile
@@ -140,6 +142,7 @@ class WebRtcManager(
     }
 
     fun createPeerConnection() {
+        isDisconnecting = false
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
@@ -323,6 +326,7 @@ class WebRtcManager(
     }
 
     fun disconnect() {
+        isDisconnecting = true
         remoteAudioTrack?.setEnabled(false)
         remoteVideoTrack?.setEnabled(false)
         dataChannel?.close()
@@ -342,6 +346,7 @@ class WebRtcManager(
         lastVideoHeight = 0
         lastFrameAtMillis = 0L
         signalClient.disconnect()
+        isDisconnecting = false
     }
 
     fun release() {
@@ -351,23 +356,41 @@ class WebRtcManager(
         eglBase.release()
     }
 
-    private fun sendControl(message: ByteArray) {
-        sendBinary(selectControlChannel(), message)
+    private fun sendControl(message: ByteArray): Boolean {
+        return sendBinary(selectControlChannel(), message, reportFailure = true)
     }
 
-    private fun sendMetaControl(message: ByteArray) {
-        sendBinary(selectMetaControlChannel(), message)
+    private fun sendMetaControl(message: ByteArray): Boolean {
+        return sendBinary(selectMetaControlChannel(), message, reportFailure = true)
     }
 
-    private fun sendPointerMove(message: ByteArray) {
-        sendBinary(selectPointerMoveChannel(), message)
+    private fun sendPointerMove(message: ByteArray): Boolean {
+        return sendBinary(selectPointerMoveChannel(), message, reportFailure = false)
     }
 
-    private fun sendBinary(channel: DataChannel?, message: ByteArray) {
-        val targetChannel = channel ?: return
-        if (targetChannel.state() != DataChannel.State.OPEN) return
+    private fun sendBinary(
+        channel: DataChannel?,
+        message: ByteArray,
+        reportFailure: Boolean
+    ): Boolean {
+        val targetChannel = channel ?: run {
+            if (reportFailure) {
+                reportControlChannelIssue("控制通道不可用")
+            }
+            return false
+        }
+        if (targetChannel.state() != DataChannel.State.OPEN) {
+            if (reportFailure) {
+                reportControlChannelIssue("控制通道不可用")
+            }
+            return false
+        }
         val buffer = ByteBuffer.wrap(message)
-        targetChannel.send(DataChannel.Buffer(buffer, true))
+        val sent = targetChannel.send(DataChannel.Buffer(buffer, true))
+        if (!sent && reportFailure) {
+            reportControlChannelIssue("控制通道发送失败")
+        }
+        return sent
     }
 
     private fun selectControlChannel(): DataChannel? {
@@ -388,6 +411,10 @@ class WebRtcManager(
             dataChannel?.state() == DataChannel.State.OPEN -> dataChannel
             else -> null
         }
+    }
+
+    fun getPointerMoveBufferedAmount(): Long {
+        return selectControlChannel()?.bufferedAmount() ?: 0L
     }
 
     private fun recvOnlyInit(): RtpTransceiver.RtpTransceiverInit {
@@ -412,20 +439,35 @@ class WebRtcManager(
             override fun onBufferedAmountChange(previousAmount: Long) = Unit
 
             override fun onStateChange() {
-                if (channel.state() == DataChannel.State.CLOSED) {
+                val state = channel.state()
+                if (state == DataChannel.State.CLOSED) {
+                    val wasPrimaryControlChannel = channel.label() == CONTROL_CHANNEL_LABEL
                     when (channel.label()) {
                         POINTER_MOVE_CHANNEL_LABEL -> if (pointerMoveChannel === channel) pointerMoveChannel = null
                         META_CONTROL_CHANNEL_LABEL -> if (metaControlChannel === channel) metaControlChannel = null
                         else -> if (dataChannel === channel) dataChannel = null
                     }
+                    if (wasPrimaryControlChannel) {
+                        reportControlChannelIssue("控制通道断开")
+                    }
                 }
-                if (channel.state() == DataChannel.State.OPEN && lastVideoWidth > 0 && lastVideoHeight > 0) {
+                if (state == DataChannel.State.OPEN && lastVideoWidth > 0 && lastVideoHeight > 0) {
                     sendVideoReset(lastVideoWidth, lastVideoHeight, "channel-open")
                 }
             }
 
             override fun onMessage(buffer: DataChannel.Buffer) = Unit
         })
+    }
+
+    private fun reportControlChannelIssue(message: String) {
+        if (isDisconnecting) {
+            return
+        }
+        if (peerConnection?.connectionState() == PeerConnection.PeerConnectionState.CLOSED) {
+            return
+        }
+        _events.tryEmit(Event.Error(message))
     }
 
     private fun mapAndroidCommandToKeycode(action: String): Int? {

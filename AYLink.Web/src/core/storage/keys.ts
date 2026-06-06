@@ -10,14 +10,17 @@ export const storageKeys = {
     permissions: 'aylink.auth.permissions',
   },
   app: {
+    adaptivePointerSampling: 'aylink.settings.adaptivePointerSampling',
     backgroundEnabled: 'aylink.settings.backgroundEnabled',
     backgroundMute: 'aylink.settings.backgroundMute',
     homeDeviceViewMode: 'aylink.settings.homeDeviceViewMode',
     language: 'aylink.ui.language',
     newDisplayDpiMode: 'aylink.settings.newDisplayDpiMode',
     newDisplayDpiValue: 'aylink.settings.newDisplayDpiValue',
+    pointerSamplingRateHz: 'aylink.settings.pointerSamplingRateHz',
     previewRefreshInterval: 'aylink.settings.previewRefreshInterval',
     themeMode: 'aylink.theme.mode',
+    weakNetworkMode: 'aylink.settings.weakNetworkMode',
     accentColor: 'aylink.theme.accentColor',
   },
   webrtc: {

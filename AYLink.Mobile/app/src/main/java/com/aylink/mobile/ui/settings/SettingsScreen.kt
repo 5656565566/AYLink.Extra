@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aylink.mobile.data.repo.LocalSettingsStore
+import com.aylink.mobile.data.repo.PointerSamplingRateHz
 import com.aylink.mobile.data.repo.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,6 +91,39 @@ fun SettingsScreen(
                 onCheckedChange = settingsStore::updateResumeLastRemote
             )
         }
+
+        SettingCard(
+            title = "操作采样",
+            description = "调整远程触控移动的发送频率与弱网策略"
+        ) {
+            SettingSwitchRow(
+                title = "自适应采样",
+                checked = settings.adaptivePointerSampling,
+                onCheckedChange = settingsStore::updateAdaptivePointerSampling
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "自定义采样",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            PointerSamplingRateHz.entries.forEach { rate ->
+                SettingRadioRow(
+                    title = "${rate.hz}Hz",
+                    selected = settings.pointerSamplingRateHz == rate,
+                    enabled = !settings.adaptivePointerSampling,
+                    onClick = { settingsStore.updatePointerSamplingRate(rate) }
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            SettingSwitchRow(
+                title = "弱网模式",
+                checked = settings.weakNetworkMode,
+                enabled = !settings.adaptivePointerSampling,
+                onCheckedChange = settingsStore::updateWeakNetworkMode
+            )
+        }
     }
 }
 
@@ -129,11 +163,12 @@ private fun SettingCard(
 private fun SettingSwitchRow(
     title: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 0.6f else 0.35f)
     ) {
         Row(
             modifier = Modifier
@@ -144,11 +179,45 @@ private fun SettingSwitchRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
             Switch(
                 checked = checked,
+                enabled = enabled,
                 onCheckedChange = onCheckedChange
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingRadioRow(
+    title: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 0.6f else 0.35f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            RadioButton(
+                selected = selected,
+                enabled = enabled,
+                onClick = onClick
             )
         }
     }

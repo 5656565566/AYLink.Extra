@@ -55,6 +55,7 @@ interface VideoStreamHealthOptions {
 export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   const logger = options.logger ?? console;
   const stateMachine = createVideoStreamStateMachine();
+  const staticIdleEscalationThresholdMs = options.stallThresholdMs * Math.max(3, options.stallConfirmationCount);
 
   let frameCallbackHandle: number | null = null;
   let watchdogTimer: number | null = null;
@@ -295,8 +296,6 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     }
 
     if (!isVideoPlaybackStarved()) {
-      consecutiveVideoStreamStallDetections = 0;
-      lastVideoStreamPacketAt = now;
       if (!hasLoggedIdleStaticVideo) {
         hasLoggedIdleStaticVideo = true;
         logger.debug('[WebRTC] Inbound video RTP stream is idle without playback starvation; treating the frame as intentionally static.', {
@@ -307,18 +306,22 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
           inboundVideoStats
         });
       }
-      return;
+      if (now - lastVideoStreamPacketAt < staticIdleEscalationThresholdMs) {
+        consecutiveVideoStreamStallDetections = 0;
+        return;
+      }
     }
 
     consecutiveVideoStreamStallDetections += 1;
     if (consecutiveVideoStreamStallDetections < options.stallConfirmationCount) {
-      logger.debug('[WebRTC] Browser playback is starved while inbound video RTP is not advancing, waiting for consecutive confirmation.', {
+      logger.debug('[WebRTC] Inbound video RTP is not advancing, waiting for consecutive confirmation before recovery.', {
         reason,
         deviceId: options.getDeviceId(),
         tabKey: options.getTabKey(),
         consecutiveVideoStreamStallDetections,
         confirmationThreshold: options.stallConfirmationCount,
-        inboundVideoStats
+        inboundVideoStats,
+        playbackStarved: isVideoPlaybackStarved()
       });
       return;
     }

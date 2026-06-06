@@ -65,6 +65,45 @@
             @change="onPreviewRefreshIntervalChange"
           />
         </SettingItem>
+        <SettingItem
+          :title="t('Settings.AdaptivePointerSampling', '自适应采样')"
+          :description="t('Settings.AdaptivePointerSamplingDescription', '根据控制通道积压情况自动在 120 / 60 / 30Hz 间调整触控移动采样频率')"
+        >
+          <label class="toggle-switch" :class="{ active: adaptivePointerSampling }">
+            <input
+              class="toggle-switch__input"
+              type="checkbox"
+              :checked="adaptivePointerSampling"
+              @change="onAdaptivePointerSamplingChange"
+            />
+            <span class="toggle-switch__slider"></span>
+          </label>
+        </SettingItem>
+        <SettingItem
+          :title="t('Settings.PointerSamplingRate', '自定义采样')"
+          :description="t('Settings.PointerSamplingRateDescription', '关闭自适应采样后，手动选择触控移动的固定采样频率')"
+        >
+          <select class="fluent-select" :value="pointerSamplingRateHz" :disabled="adaptivePointerSampling" @change="onPointerSamplingRateChange">
+            <option :value="120">120Hz</option>
+            <option :value="60">60Hz</option>
+            <option :value="30">30Hz</option>
+          </select>
+        </SettingItem>
+        <SettingItem
+          :title="t('Settings.WeakNetworkMode', '弱网模式')"
+          :description="t('Settings.WeakNetworkModeDescription', '关闭自适应采样后启用更保守的触控发送策略，优先保证操作不堆积')"
+        >
+          <label class="toggle-switch" :class="{ active: weakNetworkMode }">
+            <input
+              class="toggle-switch__input"
+              type="checkbox"
+              :checked="weakNetworkMode"
+              :disabled="adaptivePointerSampling"
+              @change="onWeakNetworkModeChange"
+            />
+            <span class="toggle-switch__slider"></span>
+          </label>
+        </SettingItem>
       </SettingSection>
 
       <SettingSection :title="t('Settings.Appearance', '外观')">

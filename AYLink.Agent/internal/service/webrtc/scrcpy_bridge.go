@@ -575,7 +575,18 @@ func (b *scrcpyVideoBridge) requestRefreshLocked(reason string) {
 				"peerConnected", b.peerConnected,
 			)
 		}
-		return
+		if reason != "rtcp_stalled_ready" {
+			return
+		}
+		if b.logger != nil {
+			b.logger.Info("webrtc video refresh escalating to source refresh after cached key frame replay",
+				"source", "backend_bridge",
+				"reason", reason,
+				"generation", b.generation,
+				"state", b.state.String(),
+				"peerConnected", b.peerConnected,
+			)
+		}
 	}
 
 	requestScrcpySourceRefresh(b.logger, b.runtime, reason,

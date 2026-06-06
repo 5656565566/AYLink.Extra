@@ -125,6 +125,16 @@ export default defineComponent({
 
     const POINTER_MOVE_SAMPLE_INTERVAL_MS = 1000 / 120;
 
+    const POINTER_MOVE_SAMPLE_INTERVAL_60HZ_MS = 1000 / 60;
+
+    const POINTER_MOVE_SAMPLE_INTERVAL_30HZ_MS = 1000 / 30;
+
+    const WEAK_NETWORK_POINTER_MOVE_BUFFER_LIMIT = Math.floor(POINTER_MOVE_BUFFER_LIMIT * 0.5);
+
+    const POINTER_MOVE_BUFFER_PRESSURE_MEDIUM_RATIO = 0.35;
+
+    const POINTER_MOVE_BUFFER_PRESSURE_HIGH_RATIO = 0.75;
+
     const SIGNALING_STABLE_DETACH_MS = 20000;
 
     const VIDEO_RECOVERY_TIMEOUT_MS = 8000;
@@ -207,7 +217,14 @@ export default defineComponent({
 
     const { t } = useI18n();
 
-    const { backgroundMute, newDisplayDpiMode, newDisplayDpiValue } = useAppSettings();
+    const {
+      adaptivePointerSampling,
+      backgroundMute,
+      newDisplayDpiMode,
+      newDisplayDpiValue,
+      pointerSamplingRateHz,
+      weakNetworkMode
+    } = useAppSettings();
 
     const auth = useAuth();
 
@@ -608,15 +625,15 @@ export default defineComponent({
       if (!isNewDisplayMode.value) {
         return null;
       }
-    
+
       if (newDisplayDpiMode.value === 'disabled') {
         return null;
       }
-    
+
       if (newDisplayDpiMode.value === 'custom') {
         return normalizeNewDisplayDpiValue(newDisplayDpiValue.value);
       }
-    
+
       return detectAutomaticNewDisplayDpi();
     });
 
@@ -690,7 +707,7 @@ export default defineComponent({
         element.setAttribute('playsinline', '');
         window.__aylinkPersistentAudioElement = element;
       }
-    
+
       return window.__aylinkPersistentAudioElement;
     };
 
@@ -705,7 +722,7 @@ export default defineComponent({
           if (urls.length === 0) {
             return null;
           }
-    
+
           return {
             urls: urls.length === 1 ? urls[0] : urls,
             username: server.Username ?? undefined,
@@ -713,7 +730,7 @@ export default defineComponent({
           };
         })
         .filter((server): server is NonNullable<typeof server> => server != null);
-    
+
       return {
         iceServers: normalizedIceServers.length > 0 ? normalizedIceServers : getDefaultRtcConfiguration().iceServers,
         iceTransportPolicy: settings?.IceTransportPolicy === 'relay' ? 'relay' : 'all'
@@ -728,7 +745,7 @@ export default defineComponent({
         rtcConfigRequest.finalize(requestId);
         return getRtcConfigurationFromSettings(localOverrideConfig);
       }
-    
+
       try {
         const response = await apiFetch('/api/control/webrtc-network', {
           signal,
@@ -740,7 +757,7 @@ export default defineComponent({
         if (!response.ok) {
           return getDefaultRtcConfiguration();
         }
-    
+
         return getRtcConfigurationFromSettings(await response.json());
       } catch (error) {
         if (!isAbortError(error)) {
@@ -759,7 +776,7 @@ export default defineComponent({
       if (audioElement.value && audioElement.value.muted !== muted) {
         audioElement.value.muted = muted;
       }
-    
+
       const persistentAudioElement = getPersistentAudioElement();
       if (persistentAudioElement.muted !== muted) {
         persistentAudioElement.muted = muted;
@@ -774,7 +791,7 @@ export default defineComponent({
       if (!tabKey) {
         return '';
       }
-    
+
       return window.__aylinkPersistedCastFrameImages?.[tabKey] ?? '';
     };
 
@@ -782,7 +799,7 @@ export default defineComponent({
       if (!tabKey || !url) {
         return;
       }
-    
+
       window.__aylinkPersistedCastFrameImages ??= {};
       window.__aylinkPersistedCastFrameImages[tabKey] = url;
     };
@@ -801,7 +818,7 @@ export default defineComponent({
       if (!tabKey || !videoElement.value) {
         return;
       }
-    
+
       const source = videoElement.value;
       const width = source.videoWidth;
       const height = source.videoHeight;
@@ -809,7 +826,7 @@ export default defineComponent({
         console.debug('[WebRTC] Skip frame capture:', { tabKey, width, height, readyState: source.readyState });
         return;
       }
-    
+
       try {
         const canvas = document.createElement('canvas');
         canvas.width = width;
@@ -818,7 +835,7 @@ export default defineComponent({
         if (!context) {
           return;
         }
-    
+
         context.drawImage(source, 0, 0, width, height);
         storeLastFrameUrl(canvas.toDataURL('image/jpeg', 0.85), tabKey);
         console.debug('[WebRTC] Captured last frame:', { tabKey, width, height });
@@ -861,6 +878,48 @@ export default defineComponent({
     const getHighFrequencyControlChannel = () =>
       controlChannels.getHighFrequencyControlChannel();
 
+    const getConfiguredPointerMoveSampleIntervalMs = () => {
+      if (pointerSamplingRateHz.value === 30) {
+        return POINTER_MOVE_SAMPLE_INTERVAL_30HZ_MS;
+      }
+      if (pointerSamplingRateHz.value === 60) {
+        return POINTER_MOVE_SAMPLE_INTERVAL_60HZ_MS;
+      }
+      return POINTER_MOVE_SAMPLE_INTERVAL_MS;
+    };
+
+    const getPointerMoveBufferedAmount = () => dataChannel?.bufferedAmount ?? 0;
+
+    const getCurrentPointerMoveBufferLimit = () =>
+      weakNetworkMode.value && !adaptivePointerSampling.value
+        ? WEAK_NETWORK_POINTER_MOVE_BUFFER_LIMIT
+        : POINTER_MOVE_BUFFER_LIMIT;
+
+    const getAdaptivePointerMoveSampleIntervalMs = () => {
+      const bufferedAmount = getPointerMoveBufferedAmount();
+      const bufferLimit = getCurrentPointerMoveBufferLimit();
+      if (bufferedAmount >= bufferLimit * POINTER_MOVE_BUFFER_PRESSURE_HIGH_RATIO) {
+        return POINTER_MOVE_SAMPLE_INTERVAL_30HZ_MS;
+      }
+      if (bufferedAmount >= bufferLimit * POINTER_MOVE_BUFFER_PRESSURE_MEDIUM_RATIO) {
+        return POINTER_MOVE_SAMPLE_INTERVAL_60HZ_MS;
+      }
+      return POINTER_MOVE_SAMPLE_INTERVAL_MS;
+    };
+
+    const getCurrentPointerMoveSampleIntervalMs = () => {
+      if (adaptivePointerSampling.value) {
+        return getAdaptivePointerMoveSampleIntervalMs();
+      }
+
+      const configuredInterval = getConfiguredPointerMoveSampleIntervalMs();
+      if (!weakNetworkMode.value) {
+        return configuredInterval;
+      }
+
+      return Math.max(configuredInterval, getAdaptivePointerMoveSampleIntervalMs());
+    };
+
     const stopPointerControlFlushLoop = () => {
       controlChannels.stopPointerControlFlushLoop();
     };
@@ -893,7 +952,7 @@ export default defineComponent({
       if (!Number.isFinite(numeric)) {
         return DEFAULT_AUTO_NEW_DISPLAY_DPI;
       }
-    
+
       return Math.max(MIN_NEW_DISPLAY_DPI, Math.min(MAX_NEW_DISPLAY_DPI, Math.round(numeric)));
     };
 
@@ -902,7 +961,7 @@ export default defineComponent({
       if (!Number.isFinite(dpr) || dpr <= 0) {
         return DEFAULT_AUTO_NEW_DISPLAY_DPI;
       }
-    
+
       return normalizeNewDisplayDpiValue(dpr * 160);
     };
 
@@ -932,7 +991,7 @@ export default defineComponent({
         : MAX_NEW_DISPLAY_LONG_EDGE;
       const baseLongEdge = Math.max(aspect.width, aspect.height, 1);
       const scale = targetLongEdge / baseLongEdge;
-    
+
       return {
         width: roundDisplayDimension(aspect.width * scale),
         height: roundDisplayDimension(aspect.height * scale)
@@ -1008,7 +1067,7 @@ export default defineComponent({
       if (!persisted) {
         return false;
       }
-    
+
       if ((persisted.ws && persisted.ws.readyState >= WebSocket.CLOSING) || persisted.peerConnection.connectionState === 'closed') {
         console.warn('[WebRTC] Discarding stale persisted connection snapshot.', {
           tabKey,
@@ -1019,7 +1078,7 @@ export default defineComponent({
         disposePersistedConnection(tabKey);
         return false;
       }
-    
+
       activeConnectionId++;
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = tabKey;
@@ -1038,7 +1097,7 @@ export default defineComponent({
       }
       remoteVideoStream = persisted.remoteVideoStream;
       remoteAudioStream = persisted.remoteAudioStream;
-    
+
       const connectionId = activeConnectionId;
       wirePeerConnectionEventHandlers(connectionId, restoredPeerConnection);
       if (ws) {
@@ -1053,7 +1112,7 @@ export default defineComponent({
       if (pointerMoveChannel) {
         setupPointerMoveChannel(pointerMoveChannel);
       }
-    
+
       if (videoElement.value) {
         videoElement.value.srcObject = remoteVideoStream;
       }
@@ -1064,7 +1123,7 @@ export default defineComponent({
       if (backgroundAudioElement.srcObject !== remoteAudioStream) {
         backgroundAudioElement.srcObject = remoteAudioStream;
       }
-    
+
       isConnected.value = restoredPeerConnection.connectionState === 'connected';
       isConnecting.value = restoredPeerConnection.connectionState === 'connecting';
       status.value = isConnected.value
@@ -1084,7 +1143,7 @@ export default defineComponent({
       const shellRect = shellElement.value?.getBoundingClientRect();
       const videoRect = videoElement.value?.getBoundingClientRect();
       const hasUsableVideoRect = !!videoRect && videoRect.width > 0 && videoRect.height > 0 && (videoElement.value?.videoWidth ?? 0) > 0;
-    
+
       if (hasUsableVideoRect) {
         return {
           width: videoRect!.width,
@@ -1093,7 +1152,7 @@ export default defineComponent({
           offsetTop: videoRect!.top - (shellRect?.top ?? 0)
         };
       }
-    
+
       return {
         width: rect?.width ?? window.innerWidth,
         height: rect?.height ?? (window.innerHeight - 46),
@@ -1112,7 +1171,7 @@ export default defineComponent({
       if (!isMenuExpanded.value) {
         return false;
       }
-    
+
       return isMenuHorizontalLocked.value || doesVerticalLayoutOverflowAt(y);
     };
 
@@ -1134,26 +1193,26 @@ export default defineComponent({
       if (!expanded) {
         return centerRatio <= 0.5 ? 'right' : 'left';
       }
-    
+
       const menuBounds = getMenuBoundsAt(y);
       if (!menuBounds.horizontal) {
         return centerRatio <= 0.5 ? 'right' : 'left';
       }
-    
+
       const extraWidth = Math.max(0, menuBounds.width - MENU_BUTTON_SIZE);
       const availableLeft = centerX - (MENU_BUTTON_SIZE / 2) - bounds.offsetLeft - MENU_MARGIN;
       const availableRight = bounds.offsetLeft + bounds.width - (centerX + (MENU_BUTTON_SIZE / 2)) - MENU_MARGIN;
       const leftEnough = availableLeft >= extraWidth;
       const rightEnough = availableRight >= extraWidth;
-    
+
       if (leftEnough && !rightEnough) {
         return 'left';
       }
-    
+
       if (rightEnough && !leftEnough) {
         return 'right';
       }
-    
+
       if (leftEnough && rightEnough) {
         if (centerRatio <= (1 - MENU_EXPAND_DIRECTION_SWITCH_RATIO)) {
           return 'right';
@@ -1165,7 +1224,7 @@ export default defineComponent({
 
         return currentMenuExpandDirection;
       }
-    
+
       return availableRight >= availableLeft ? 'right' : 'left';
     };
 
@@ -1180,7 +1239,7 @@ export default defineComponent({
           direction: getMenuExpandDirectionAt(x, y, false)
         };
       }
-    
+
       const bounds = getMenuBoundsAt(y);
       const direction = getMenuExpandDirectionAt(x, y, true);
       return {
@@ -1252,7 +1311,7 @@ export default defineComponent({
       const minY = bounds.offsetTop + MENU_MARGIN;
       const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH);
       const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
-    
+
       menuRelativeX.value = maxX <= minX ? 0 : (maxX - clamped.x) / (maxX - minX);
       menuRelativeY.value = maxY <= minY ? 0 : (clamped.y - minY) / (maxY - minY);
     };
@@ -1293,7 +1352,7 @@ export default defineComponent({
       const minY = bounds.offsetTop + MENU_MARGIN;
       const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_COLLAPSED_VISIBLE_WIDTH);
       const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
-    
+
       setMenuPosition(
         maxX - (maxX - minX) * menuRelativeX.value,
         minY + (maxY - minY) * menuRelativeY.value,
@@ -1420,7 +1479,7 @@ export default defineComponent({
       const rect = videoElement.value.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return null;
       const snapshot = pointerSnapshots.get(pointerId);
-    
+
       return new PointerEvent('pointercancel', {
         pointerId,
         pointerType: snapshot?.pointerType ?? 'touch',
@@ -1525,20 +1584,20 @@ export default defineComponent({
       if (connectionSchedulerState.suppressAutoReconnect) {
         return;
       }
-    
+
       pendingVideoRecoveryTimer = window.setTimeout(() => {
         pendingVideoRecoveryTimer = null;
         if (connectionSchedulerState.suppressAutoReconnect || connectionId !== activeConnectionId) {
           return;
         }
-    
+
         const currentPeerConnection = peerConnection;
         const videoTrack = remoteTracks.get('video');
         const hasLiveVideo = !!videoTrack && videoTrack.readyState === 'live';
         if (currentPeerConnection?.connectionState === 'connected' && hasLiveVideo) {
           return;
         }
-    
+
         console.warn('[WebRTC] Video recovery watchdog triggered reconnect.', {
           reason,
           connectionId,
@@ -1728,7 +1787,7 @@ export default defineComponent({
       if (isIceRestartInFlight) {
         return true;
       }
-    
+
       isIceRestartInFlight = true;
       isConnecting.value = true;
       isConnected.value = false;
@@ -1738,7 +1797,7 @@ export default defineComponent({
         deviceId: deviceId.value,
         tabKey: activeTabKey.value
       });
-    
+
       try {
         const offer = await peerConnection.createOffer({ iceRestart: true });
         await peerConnection.setLocalDescription(offer);
@@ -1779,7 +1838,7 @@ export default defineComponent({
       if (!canUseFlexDisplay.value) {
         return;
       }
-    
+
       flexDisplayHeartbeatTimer = window.setInterval(() => {
         sendDisplayResizeIfNeeded();
       }, 300);
@@ -1789,7 +1848,7 @@ export default defineComponent({
       if (!isNewDisplayMode.value) {
         return null;
       }
-    
+
       return buildAdaptiveDisplaySize();
     };
 
@@ -1797,22 +1856,22 @@ export default defineComponent({
       if (!canUseFlexDisplay.value || !isConnected.value) {
         return;
       }
-    
+
       if (!dataChannel || dataChannel.readyState !== 'open') {
         return;
       }
-    
+
       const size = getDisplayResizeSize();
       if (!size) {
         return;
       }
-    
+
       if (lastDisplayResizeRequest
         && lastDisplayResizeRequest.width === size.width
         && lastDisplayResizeRequest.height === size.height) {
         return;
       }
-    
+
       sendMetaControlMessage(buildResizeDisplayMessage(size.width, size.height));
       lastDisplayResizeRequest = size;
     };
@@ -1822,12 +1881,12 @@ export default defineComponent({
       if (!canUseFlexDisplay.value) {
         return;
       }
-    
+
       if (delayMs <= 0) {
         sendDisplayResizeIfNeeded();
         return;
       }
-    
+
       pendingDisplayResizeTimer = window.setTimeout(() => {
         pendingDisplayResizeTimer = null;
         sendDisplayResizeIfNeeded();
@@ -1852,13 +1911,13 @@ export default defineComponent({
 
     const syncVideoFrameSize = () => {
       if (!videoElement.value) return;
-    
+
       const width = videoElement.value.videoWidth;
       const height = videoElement.value.videoHeight;
       if (width <= 0 || height <= 0) return;
-    
+
       if (lastVideoFrameSize.width === width && lastVideoFrameSize.height === height) return;
-    
+
       lastVideoFrameSize = { width, height };
       if (isConnected.value) {
         status.value = t('Screencast.StatusResolutionUpdated', '画面尺寸已更新: {0}x{1}', width, height);
@@ -1870,7 +1929,7 @@ export default defineComponent({
         const text = input.trim();
         return text.startsWith('candidate:') ? text : `candidate:${text}`;
       }
-    
+
       function deepParseCandidateText(input: string, maxDepth = 5): string {
         let current = input;
         let depth = 0;
@@ -1889,9 +1948,9 @@ export default defineComponent({
         }
         return current;
       }
-    
+
       if (!candidate) return null;
-    
+
       if (typeof candidate === 'string') {
         try {
           const parsed = JSON.parse(candidate);
@@ -1913,12 +1972,12 @@ export default defineComponent({
           return { candidate: ensureCandidatePrefix(candidate), sdpMLineIndex: 0 };
         }
       }
-    
+
       if (typeof candidate !== 'object') {
         console.warn('Invalid ICE candidate payload:', candidate);
         return null;
       }
-    
+
       const value = candidate as Record<string, unknown>;
       let candidateText = value.candidate ?? value.Candidate;
       if (typeof candidateText === 'string') {
@@ -1927,12 +1986,12 @@ export default defineComponent({
       if (typeof candidateText !== 'string' || candidateText.length === 0) {
         return null;
       }
-    
+
       const normalized: RTCIceCandidateInit = { candidate: ensureCandidatePrefix(candidateText) };
       const sdpMid = value.sdpMid ?? value.SdpMid;
       const sdpMLineIndex = value.sdpMLineIndex ?? value.SdpMLineIndex;
       const usernameFragment = value.usernameFragment ?? value.UsernameFragment;
-    
+
       if (typeof sdpMid === 'string' && sdpMid.length > 0) normalized.sdpMid = sdpMid;
       if (typeof sdpMLineIndex === 'number') {
         normalized.sdpMLineIndex = sdpMLineIndex;
@@ -1944,7 +2003,7 @@ export default defineComponent({
         normalized.sdpMLineIndex = 0;
       }
       if (typeof usernameFragment === 'string') normalized.usernameFragment = usernameFragment;
-    
+
       return normalized;
     };
 
@@ -1952,7 +2011,7 @@ export default defineComponent({
       if (payload.length === 0) {
         return false;
       }
-    
+
       switch (payload[0]) {
         case SCRCPY_MSG_INJECT_TOUCH_EVENT:
           return payload.length > 1 && payload[1] === SCRCPY_ACTION_MOVE;
@@ -1960,12 +2019,12 @@ export default defineComponent({
           if (payload.length < 10) {
             return false;
           }
-    
+
           const deviceId = (payload[1] << 8) | payload[2];
           if (deviceId !== SCRCPY_HID_MOUSE_ID) {
             return false;
           }
-    
+
           return payload[6] !== 0 || payload[7] !== 0 || payload[8] !== 0 || payload[9] !== 0;
         }
         case SCRCPY_MSG_RESIZE_DISPLAY:
@@ -2037,7 +2096,7 @@ export default defineComponent({
       if (existing != null) {
         return existing;
       }
-    
+
       const nextId = nextScrcpyPointerId;
       nextScrcpyPointerId += 1n;
       scrcpyPointerIds.set(pointerId, nextId);
@@ -2159,18 +2218,18 @@ export default defineComponent({
         default:
           break;
       }
-    
+
       if (code.startsWith('Key') && code.length === 4) {
         return 29 + (code.charCodeAt(3) - 65);
       }
-    
+
       if (code.startsWith('Digit') && code.length === 6) {
         const digit = code.charCodeAt(5) - 48;
         if (digit >= 0 && digit <= 9) {
           return digit === 0 ? 7 : 8 + digit - 1;
         }
       }
-    
+
       return 0;
     };
 
@@ -2192,12 +2251,12 @@ export default defineComponent({
         sendBinaryControlMessage(buildScreenPowerMessage(normalized === 'screenon'));
         return;
       }
-    
+
       const keycode = mapAndroidCommandToKeycode(normalized);
       if (!keycode) {
         return;
       }
-    
+
       sendBinaryControlMessage(buildInjectKeycodeMessage(SCRCPY_ACTION_DOWN, keycode));
       sendBinaryControlMessage(buildInjectKeycodeMessage(SCRCPY_ACTION_UP, keycode));
     };
@@ -2206,12 +2265,12 @@ export default defineComponent({
       if (hidSession.sendKeyboardEvent(phase, event)) {
         return;
       }
-    
+
       const keyCode = mapBrowserCodeToAndroidKeyCode(event.code);
       if (!keyCode) {
         return;
       }
-    
+
       sendBinaryControlMessage(
         buildInjectKeycodeMessage(
           phase === 'down' ? SCRCPY_ACTION_DOWN : SCRCPY_ACTION_UP,
@@ -2233,7 +2292,7 @@ export default defineComponent({
       if (!videoElement.value || !isHidMouseEnabled.value) {
         return;
       }
-    
+
       try {
         await videoElement.value.requestPointerLock();
       } catch (error) {
@@ -2254,12 +2313,12 @@ export default defineComponent({
       if (!isHidMouseEnabled.value) {
         return;
       }
-    
+
       if (isMouseLocked.value) {
         await releaseMouseLock();
         return;
       }
-    
+
       await requestMouseLock();
     };
 
@@ -2277,18 +2336,18 @@ export default defineComponent({
         (element): element is HTMLMediaElement => element != null
       );
       if (playTargets.length === 0) return;
-    
+
       try {
         syncBackgroundMuteState();
-    
+
         for (const element of playTargets) {
           if (!element.srcObject || !element.paused) {
             continue;
           }
-    
+
           await element.play();
         }
-    
+
         status.value = t('Screencast.StatusConnected', '已连接')
       } catch (error: any) {
         if (error.name === 'AbortError') {
@@ -2320,10 +2379,10 @@ export default defineComponent({
         clipboardRequest.finalize(requestId);
         return;
       }
-    
+
       isClipboardLoading.value = true;
       clipboardStatusText.value = t('Screencast.ClipboardReading', '正在读取...');
-    
+
       try {
         const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
           signal,
@@ -2336,7 +2395,7 @@ export default defineComponent({
           clipboardStatusText.value = await readApiErrorMessage(response, t('Screencast.ClipboardReadFailed', '读取失败'));
           return;
         }
-    
+
         const payload = await response.json() as { text?: string };
         applyRemoteClipboardText(String(payload.text ?? ''));
         clipboardStatusText.value = t('Screencast.ClipboardReadSuccess', '读取成功');
@@ -2364,10 +2423,10 @@ export default defineComponent({
         clipboardRequest.finalize(requestId);
         return;
       }
-    
+
       isClipboardSaving.value = true;
       clipboardStatusText.value = t('Screencast.ClipboardSyncing', '正在同步...');
-    
+
       try {
         const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
           method: 'PUT',
@@ -2412,10 +2471,10 @@ export default defineComponent({
         clipboardRequest.finalize(requestId);
         return;
       }
-    
+
       isClipboardSaving.value = true;
       clipboardStatusText.value = t('Screencast.ClipboardPasting', '正在粘贴...');
-    
+
       try {
         const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
           method: 'POST',
@@ -2472,7 +2531,7 @@ export default defineComponent({
         closeClipboardWindow();
         return;
       }
-    
+
       openClipboardWindow();
     };
 
@@ -2481,7 +2540,7 @@ export default defineComponent({
       if (!target) {
         return;
       }
-    
+
       event.preventDefault();
       isDraggingClipboard = true;
       clipboardDragStartOffset = {
@@ -2513,7 +2572,7 @@ export default defineComponent({
       if (isFlexDisplayEnabled.value) {
         return;
       }
-    
+
       shouldFillVideoFrame.value = !shouldFillVideoFrame.value;
     };
 
@@ -2537,7 +2596,7 @@ export default defineComponent({
 
     const wirePeerConnectionEventHandlers = (connectionId: number, targetPeerConnection: RTCPeerConnection) => {
       if (!targetPeerConnection) return;
-    
+
       targetPeerConnection.ontrack = (event) => {
         if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
           return;
@@ -2545,7 +2604,7 @@ export default defineComponent({
         console.log('[WebRTC] ontrack fired:', event.track.kind);
         void attachRemoteTrack(event);
       };
-    
+
       targetPeerConnection.onicecandidate = (event) => {
         if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
           return;
@@ -2554,19 +2613,20 @@ export default defineComponent({
           ws.send(JSON.stringify(event.candidate));
         }
       };
-    
+
       targetPeerConnection.onconnectionstatechange = () => {
         if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
           return;
         }
-        status.value = t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', peerConnection.connectionState);
-        isConnected.value = peerConnection.connectionState === 'connected';
-        console.debug('[WebRTC] Peer connection state changed:', peerConnection.connectionState, {
+        const currentConnectionState = targetPeerConnection.connectionState;
+        status.value = t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', currentConnectionState);
+        isConnected.value = currentConnectionState === 'connected';
+        console.debug('[WebRTC] Peer connection state changed:', currentConnectionState, {
           deviceId: deviceId.value,
           tabKey: activeTabKey.value
         });
-    
-        if (peerConnection.connectionState === 'connected') {
+
+        if (currentConnectionState === 'connected') {
           isConnecting.value = false;
           clearPendingReconnect();
           clearPendingIceRestartFallback();
@@ -2580,40 +2640,40 @@ export default defineComponent({
             scheduleVideoRecovery(connectionId, 'peer_connected_without_video');
           }
         }
-    
-        if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'closed') {
-          markActiveVideoStreamUnstable(connectionId, `peer_connection_${peerConnection.connectionState}`);
+
+        if (currentConnectionState === 'failed' || currentConnectionState === 'disconnected' || currentConnectionState === 'closed') {
+          markActiveVideoStreamUnstable(connectionId, `peer_connection_${currentConnectionState}`);
           isConnecting.value = false;
-          if (peerConnection.connectionState === 'closed') {
+          if (currentConnectionState === 'closed') {
             stopConnection();
             scheduleReconnect('peer_connection_closed');
             return;
           }
-    
+
           void (async () => {
-            const restarted = await tryIceRestart(`peer_connection_${peerConnection.connectionState}`);
+            const restarted = await tryIceRestart(`peer_connection_${currentConnectionState}`);
             if (!restarted) {
               stopConnection();
-              scheduleReconnect(`peer_connection_${peerConnection.connectionState}`);
+              scheduleReconnect(`peer_connection_${currentConnectionState}`);
             }
           })();
           return;
         }
-    
+
         persistCurrentConnection();
       };
-    
+
       targetPeerConnection.oniceconnectionstatechange = () => {
         if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
           return;
         }
-    
+
         const currentIceState = targetPeerConnection.iceConnectionState;
         console.debug('[WebRTC] ICE connection state changed:', currentIceState, {
           deviceId: deviceId.value,
           tabKey: activeTabKey.value
         });
-    
+
         if (currentIceState === 'connected' || currentIceState === 'completed') {
           scheduleSignalingDetach(connectionId);
           if (!remoteTracks.has('video')) {
@@ -2621,14 +2681,14 @@ export default defineComponent({
           }
           return;
         }
-    
+
         markActiveVideoStreamUnstable(connectionId, `ice_connection_${currentIceState}`);
         if (currentIceState === 'closed') {
           stopConnection();
           scheduleReconnect('ice_connection_closed');
         }
       };
-    
+
       targetPeerConnection.ondatachannel = (event) => {
         if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
           return;
@@ -2644,7 +2704,7 @@ export default defineComponent({
     const wireWebSocketEventHandlers = (connectionId: number, targetSocket: WebSocket) => {
       if (!targetSocket) return;
       const persistedTabKey = activeTabKey.value;
-    
+
       targetSocket.onmessage = async (event) => {
         if (connectionId !== activeConnectionId || ws !== targetSocket) {
           return;
@@ -2702,7 +2762,7 @@ export default defineComponent({
           persistCurrentConnection();
         }
       };
-    
+
       targetSocket.onerror = () => {
         if (connectionId !== activeConnectionId || ws !== targetSocket) {
           return;
@@ -2710,7 +2770,7 @@ export default defineComponent({
         status.value = t('Screencast.StatusWebSocketError', 'WebSocket 连接出错');
         isConnecting.value = false;
       };
-    
+
       targetSocket.onclose = () => {
         if (connectionId !== activeConnectionId || ws !== targetSocket) {
           return;
@@ -2732,7 +2792,7 @@ export default defineComponent({
           });
           return;
         }
-    
+
         resetSignalingDetachState();
         status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
         stopConnection();
@@ -2744,7 +2804,7 @@ export default defineComponent({
       if (!deviceId.value) {
         return;
       }
-    
+
       const targetTabKey = activeTabKey.value;
       if (!targetTabKey) {
         return;
@@ -2754,13 +2814,13 @@ export default defineComponent({
         && (connectionSchedulerState.isStartConnectionInFlight || hasLiveConnection())) {
         return;
       }
-    
+
       const token = getAccessToken();
       if (!token) {
         router.push('/login');
         return;
       }
-    
+
       const previousDeviceId = deviceId.value;
       const previousSessionId = currentScrcpySessionId;
       stopScrcpySessionHeartbeat();
@@ -2778,11 +2838,11 @@ export default defineComponent({
       status.value = t('Screencast.StatusConnectingDevice', '正在连接设备...');
       pendingCandidates = [];
       const connectionId = ++activeConnectionId;
-    
+
       try {
         let wsUrl = buildSignalWebSocketBaseUrl();
         const { ticketResponse } = await requestSignalTicket();
-    
+
         if (!ticketResponse.ok) {
           status.value = t('Screencast.StatusCreateCredentialFailed', '创建连接凭据失败');
           isConnecting.value = false;
@@ -2793,10 +2853,10 @@ export default defineComponent({
         const ticketPayload = await ticketResponse.json();
         currentScrcpySessionId = String(ticketPayload.sessionId ?? '');
         wsUrl += `?ticket=${encodeURIComponent(ticketPayload.ticket)}`;
-    
+
         ws = new WebSocket(wsUrl);
         const socket = ws;
-    
+
         ws.onopen = async () => {
           if (connectionId !== activeConnectionId || ws !== socket) {
             return;
@@ -2804,19 +2864,19 @@ export default defineComponent({
           clearStartConnectionState();
           status.value = t('Screencast.StatusCreatingSession', '正在创建 WebRTC 会话...');
           startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
-    
+
           try {
             const rtcConfiguration = await loadRtcConfiguration();
             peerConnection = new RTCPeerConnection(rtcConfiguration);
             const currentPeerConnection = peerConnection;
-    
+
             peerConnection.addTransceiver('video', { direction: 'recvonly' });
             peerConnection.addTransceiver('audio', { direction: 'recvonly' });
             setupControlChannel(peerConnection.createDataChannel('control'));
             setupMetaControlChannel(peerConnection.createDataChannel('control-meta'));
             setupPointerMoveChannel(peerConnection.createDataChannel('pointer-move', { ordered: false, maxRetransmits: 0 }));
             wirePeerConnectionEventHandlers(connectionId, currentPeerConnection);
-    
+
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
             ws?.send(JSON.stringify(peerConnection.localDescription));
@@ -2829,9 +2889,9 @@ export default defineComponent({
             scheduleReconnect('offer_create_failed');
           }
         };
-    
+
         wireWebSocketEventHandlers(connectionId, socket);
-    
+
         persistCurrentConnection();
       } catch (error) {
         console.error('Failed to start WebRTC connection:', error);
@@ -2847,6 +2907,7 @@ export default defineComponent({
       activeConnectionId++;
       stopFlexDisplayHeartbeat();
       clearPendingDisplayResize();
+      stopPointerMoveFlushLoop();
       activePointers.clear();
       pointerGenerations.clear();
       scrcpyPointerIds.clear();
@@ -2861,6 +2922,7 @@ export default defineComponent({
       stopVideoStreamWatchdog();
       resetVideoStreamWatchdogState();
       resetSignalingDetachState();
+      stopPointerMoveFlushLoop();
       stopPointerControlFlushLoop();
       stopPointerReleaseFlushLoop();
       clearPendingIceRestartFallback();
@@ -2884,12 +2946,12 @@ export default defineComponent({
       isConnecting.value = false;
       status.value = t('Screencast.StatusDisconnected', '未连接');
       showLastFrameOverlayForTab();
-    
+
       if (videoElement.value) {
         videoElement.value.pause();
         videoElement.value.srcObject = null;
       }
-    
+
       if (audioElement.value) {
         audioElement.value.pause();
         audioElement.value.srcObject = null;
@@ -2912,24 +2974,25 @@ export default defineComponent({
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = '';
       resetSignalingDetachState();
+      stopPointerMoveFlushLoop();
       stopPointerControlFlushLoop();
       stopPointerReleaseFlushLoop();
       clearPendingIceRestartFallback();
       clearPendingVideoRecovery();
       clearPendingVideoStreamStallObservation();
       isIceRestartInFlight = false;
-    
+
       if (preserveForBackground && hasLiveConnection()) {
         captureCurrentVideoFrame(preserveTabKey);
         persistCurrentConnection(preserveTabKey);
         detachActiveConnectionFromView();
         return;
       }
-    
+
       currentScrcpySessionId = '';
       activeConnectionId++;
       releaseHidDevices();
-    
+
       if (dataChannel) {
         dataChannel.close();
         dataChannel = null;
@@ -2938,7 +3001,7 @@ export default defineComponent({
         pointerMoveChannel.close();
         pointerMoveChannel = null;
       }
-    
+
       if (metaControlChannel) {
         metaControlChannel.close();
         metaControlChannel = null;
@@ -2953,7 +3016,7 @@ export default defineComponent({
         socket.onclose = null;
         socket.close();
       }
-    
+
       cleanupMediaStream();
       clearPersistedConnection();
       pendingCandidates = [];
@@ -2969,19 +3032,19 @@ export default defineComponent({
       if (tabKey === activeTabKey.value && peerConnection) {
         return;
       }
-    
+
       const tab = castTabs.value.find((item) => item.key === tabKey);
       if (!tab) {
         return;
       }
-    
+
       const previousTabKey = activeTabKey.value;
       if (previousTabKey && previousTabKey !== tab.key) {
         captureCurrentVideoFrame(previousTabKey);
         disableAutoReconnect();
         stopConnection();
       }
-    
+
       activeTabKey.value = tab.key;
       enableAutoReconnect();
       syncRefsFromActiveTab();
@@ -3000,27 +3063,27 @@ export default defineComponent({
       if (closingIndex < 0) {
         return;
       }
-    
+
       const closingTab = castTabs.value[closingIndex];
       const closingPersistedConnection = getPersistedConnection(tabKey);
       const closingSessionId = closingActive
         ? currentScrcpySessionId
         : (closingPersistedConnection?.sessionId ?? '');
       castTabs.value.splice(closingIndex, 1);
-    
+
       if (!closingActive) {
         disposePersistedConnection(tabKey);
         void postScrcpySessionAction('release', closingTab?.deviceId ?? '', closingSessionId);
         persistTabs();
         return;
       }
-    
+
       disableAutoReconnect();
       const activeSessionId = currentScrcpySessionId;
       stopConnection();
       clearPersistedConnection(tabKey);
       void postScrcpySessionAction('release', deviceId.value, activeSessionId);
-    
+
       const nextTab = castTabs.value[closingIndex] ?? castTabs.value[closingIndex - 1] ?? null;
       activeTabKey.value = nextTab?.key ?? '';
       enableAutoReconnect();
@@ -3037,11 +3100,11 @@ export default defineComponent({
       if (!videoElement.value) return null;
       const rect = videoElement.value.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return null;
-    
+
       const videoWidth = videoElement.value.videoWidth || rect.width;
       const videoHeight = videoElement.value.videoHeight || rect.height;
       if (videoWidth <= 0 || videoHeight <= 0) return null;
-    
+
       if (effectiveFillMode.value) {
         return {
           offsetX: rect.left,
@@ -3052,13 +3115,13 @@ export default defineComponent({
           frameHeight: Math.round(videoHeight)
         };
       }
-    
+
       const scale = Math.min(rect.width / videoWidth, rect.height / videoHeight);
       const displayWidth = videoWidth * scale;
       const displayHeight = videoHeight * scale;
       const offsetX = rect.left + (rect.width - displayWidth) / 2;
       const offsetY = rect.top + (rect.height - displayHeight) / 2;
-    
+
       return {
         offsetX,
         offsetY,
@@ -3072,7 +3135,7 @@ export default defineComponent({
     const getPointerRatios = (event: PointerEvent) => {
       const viewport = getVideoViewport();
       if (!viewport) return null;
-    
+
       const xRatio = (event.clientX - viewport.offsetX) / viewport.displayWidth;
       const yRatio = (event.clientY - viewport.offsetY) / viewport.displayHeight;
       return {
@@ -3110,11 +3173,11 @@ export default defineComponent({
       pendingPointerReleases.delete(pointerId);
       queuedPointerReleases.delete(pointerId);
       pendingPointerMoves.delete(pointerId);
-    
+
       if (getPointerGeneration(pointerId) !== releaseGeneration || activePointers.has(pointerId)) {
         return;
       }
-    
+
       clearLocalPointerState(pointerId);
     };
 
@@ -3126,12 +3189,12 @@ export default defineComponent({
         }
         releasePointer(pointerId, phase);
       }
-    
+
       if (pendingPointerReleases.size > 0) {
         schedulePointerReleaseFlush();
         return;
       }
-    
+
       stopPointerReleaseFlushLoop();
     };
 
@@ -3139,7 +3202,7 @@ export default defineComponent({
       if (pointerReleaseFlushHandle != null || pendingPointerReleases.size === 0) {
         return;
       }
-    
+
       pointerReleaseFlushHandle = window.requestAnimationFrame(() => {
         pointerReleaseFlushHandle = null;
         flushPendingPointerReleases();
@@ -3150,11 +3213,11 @@ export default defineComponent({
       if ((pointerMoveFlushHandle != null || pointerMoveSampleTimer != null) || pendingPointerMoves.size === 0) {
         return;
       }
-    
+
       const now = performance.now();
       const elapsed = now - lastPointerMoveFlushAt;
-      const delayMs = Math.max(0, POINTER_MOVE_SAMPLE_INTERVAL_MS - elapsed);
-    
+      const delayMs = Math.max(0, getCurrentPointerMoveSampleIntervalMs() - elapsed);
+
       const requestFlushFrame = () => {
         pointerMoveSampleTimer = null;
         pointerMoveFlushHandle = window.requestAnimationFrame(() => {
@@ -3162,37 +3225,37 @@ export default defineComponent({
           flushPendingPointerMoves();
         });
       };
-    
+
       if (delayMs <= 0) {
         requestFlushFrame();
         return;
       }
-    
+
       pointerMoveSampleTimer = window.setTimeout(requestFlushFrame, delayMs);
     };
 
     const flushPendingPointerMoves = () => {
       flushPendingPointerControlPayloads();
-      const channel = getHighFrequencyControlChannel();
+      const channel = dataChannel;
       if (!channel || channel.readyState !== 'open') {
         return;
       }
-    
-      if (channel.bufferedAmount > POINTER_MOVE_BUFFER_LIMIT) {
+
+      if (channel.bufferedAmount > getCurrentPointerMoveBufferLimit()) {
         schedulePointerMoveFlush();
         return;
       }
-    
+
       const moves = [...pendingPointerMoves.values()];
       pendingPointerMoves.clear();
       let sentAnyMove = false;
-    
+
       for (const move of moves) {
         const pointerId = getScrcpyPointerId(move.pointerId);
         if (pointerId == null) {
           continue;
         }
-    
+
         const payload = buildTouchMessage(
           SCRCPY_ACTION_MOVE,
           pointerId,
@@ -3204,7 +3267,7 @@ export default defineComponent({
           0,
           SCRCPY_PRIMARY_BUTTON
         );
-    
+
         try {
           channel.send(payload);
           sentAnyMove = true;
@@ -3215,12 +3278,12 @@ export default defineComponent({
           return;
         }
       }
-    
+
       if (pendingPointerMoves.size > 0) {
         schedulePointerMoveFlush();
         return;
       }
-    
+
       if (sentAnyMove) {
         lastPointerMoveFlushAt = performance.now();
       }
@@ -3237,7 +3300,7 @@ export default defineComponent({
       if (pointerId == null) {
         return null;
       }
-    
+
       return buildTouchMessage(
         SCRCPY_ACTION_MOVE,
         pointerId,
@@ -3259,7 +3322,7 @@ export default defineComponent({
       if (!ratios) {
         return null;
       }
-    
+
       const action = phase === 'down' ? SCRCPY_ACTION_DOWN : SCRCPY_ACTION_UP;
       const pointerId = action === SCRCPY_ACTION_DOWN
         ? getOrCreateScrcpyPointerId(event.pointerId)
@@ -3267,7 +3330,7 @@ export default defineComponent({
       if (pointerId == null) {
         return null;
       }
-    
+
       const payloads: Uint8Array[] = [];
       const pendingMove = pendingPointerMoves.get(event.pointerId);
       if (phase !== 'down' && pendingMove) {
@@ -3276,7 +3339,7 @@ export default defineComponent({
           payloads.push(movePayload);
         }
       }
-    
+
       const x = Math.trunc(ratios.xRatio * ratios.frameWidth);
       const y = Math.trunc(ratios.yRatio * ratios.frameHeight);
       const isUp = action === SCRCPY_ACTION_UP;
@@ -3293,24 +3356,24 @@ export default defineComponent({
           isUp ? 0 : SCRCPY_PRIMARY_BUTTON
         )
       );
-    
+
       return payloads;
     };
 
     const sendPointerMessage = (phase: 'down' | 'up' | 'move' | 'cancel', event: PointerEvent) => {
       const isMove = phase === 'move';
-      const channel = isMove ? getHighFrequencyControlChannel() : dataChannel;
+      const channel = dataChannel;
       if (!channel || channel.readyState !== 'open') return false;
-    
+
       const ratios = getPointerRatios(event);
       if (!ratios) return false;
-    
+
       pointerSnapshots.set(event.pointerId, {
         xRatio: ratios.xRatio,
         yRatio: ratios.yRatio,
         pointerType: event.pointerType || 'touch'
       });
-    
+
       if (isMove) {
         pendingPointerMoves.set(event.pointerId, {
           pointerId: event.pointerId,
@@ -3323,42 +3386,42 @@ export default defineComponent({
         schedulePointerMoveFlush();
         return true;
       }
-    
+
       const payloads = buildPointerLifecyclePayloads(phase, event, ratios);
       if (!payloads || payloads.length === 0) {
         return false;
       }
-    
+
       return enqueuePointerPayloadBuffers(payloads);
     };
 
     const releasePointer = (pointerId: number, phase: 'up' | 'cancel', event?: PointerEvent) => {
       if (!activePointers.has(pointerId) && !pendingPointerReleases.has(pointerId)) return false;
-    
+
       if (queuedPointerReleases.has(pointerId)) {
         return true;
       }
-    
+
       const releaseGeneration = getPointerGeneration(pointerId);
       const finalizeRelease = () => {
         finalizePointerRelease(pointerId, releaseGeneration);
       };
-    
+
       const attemptRelease = (pointerEvent?: PointerEvent | null) => {
         if (!pointerEvent) {
           return false;
         }
-    
+
         const ratios = getPointerRatios(pointerEvent);
         if (!ratios) {
           return false;
         }
-    
+
         const payloads = buildPointerLifecyclePayloads(phase, pointerEvent, ratios);
         if (!payloads || payloads.length === 0) {
           return false;
         }
-    
+
         pendingPointerReleases.set(pointerId, phase);
         queuedPointerReleases.add(pointerId);
         const queued = enqueuePointerPayloadBuffers(payloads, finalizeRelease);
@@ -3367,24 +3430,24 @@ export default defineComponent({
         }
         return queued;
       };
-    
+
       const pointerEvent = event ?? createSyntheticPointerEvent(pointerId);
       if (attemptRelease(pointerEvent)) {
         return true;
       }
-    
+
       const fallbackPointerEvent = createSyntheticPointerEvent(pointerId);
       if (attemptRelease(fallbackPointerEvent)) {
         return true;
       }
-    
+
       if (!fallbackPointerEvent) {
         queuedPointerReleases.delete(pointerId);
         pendingPointerReleases.set(pointerId, phase);
         schedulePointerReleaseFlush();
         return false;
       }
-    
+
       queuedPointerReleases.delete(pointerId);
       pendingPointerReleases.set(pointerId, phase);
       schedulePointerReleaseFlush();
@@ -3394,11 +3457,11 @@ export default defineComponent({
     const releaseAllPointers = (phase: 'up' | 'cancel' = 'cancel') => {
       pendingPointerMoves.clear();
       stopPointerMoveFlushLoop();
-    
+
       for (const pointerId of [...activePointers]) {
         releasePointer(pointerId, phase);
       }
-    
+
       activeMousePointerId = null;
       pointerGenerations.clear();
       scrcpyPointerIds.clear();
@@ -3410,12 +3473,12 @@ export default defineComponent({
         ...pendingPointerReleases.keys(),
         ...queuedPointerReleases,
       ]);
-    
+
       for (const pointerId of stalePointerIds) {
         if (pointerId === nextPointerId) {
           continue;
         }
-    
+
         releasePointer(pointerId, 'cancel');
       }
     };
@@ -3424,7 +3487,7 @@ export default defineComponent({
       if (typeof event.getCoalescedEvents !== 'function') {
         return event;
       }
-    
+
       const samples = event.getCoalescedEvents();
       return samples.length > 0 ? samples[samples.length - 1] : event;
     };
@@ -3444,7 +3507,7 @@ export default defineComponent({
         pendingPointerReleases.delete(event.pointerId);
         return;
       }
-    
+
       try {
         videoElement.value?.releasePointerCapture?.(event.pointerId);
       } catch {
@@ -3485,12 +3548,12 @@ export default defineComponent({
         clipboardWindowY.value = clamped.y;
         return;
       }
-    
+
       if (isDraggingMenu) {
         finishMenuDrag();
         return;
       }
-    
+
       releasePointer(event.pointerId, 'up', event);
     };
 
@@ -3498,11 +3561,11 @@ export default defineComponent({
       if (isDraggingClipboard) {
         isDraggingClipboard = false;
       }
-    
+
       if (isDraggingMenu) {
         finishMenuDrag();
       }
-    
+
       releasePointer(event.pointerId, 'cancel', event);
     };
 
@@ -3516,12 +3579,12 @@ export default defineComponent({
         clipboardWindowY.value = position.y;
         return;
       }
-    
+
       if (!isDraggingMenu) return;
-    
+
       const rawX = event.clientX - dragStartOffset.x;
       const rawY = event.clientY - dragStartOffset.y;
-    
+
       if (isMenuExpanded.value) {
         const expandedPosition = clampExpandedMenuPosition(rawX, rawY);
         if (shouldCollapseExpandedMenuWhileDragging(event, rawX, rawY, expandedPosition.x, expandedPosition.y)) {
@@ -3534,7 +3597,7 @@ export default defineComponent({
       } else {
         setMenuPosition(rawX, rawY);
       }
-    
+
       const distanceX = Math.abs(event.clientX - dragStartPoint.x);
       const distanceY = Math.abs(event.clientY - dragStartPoint.y);
       if (distanceX > 3 || distanceY > 3) {
@@ -3544,7 +3607,7 @@ export default defineComponent({
 
     const buildMousePointerEvent = (event: MouseEvent, type: string): PointerEvent | null => {
       if (!videoElement.value) return null;
-    
+
       return new PointerEvent(type, {
         pointerId: activeMousePointerId ?? 1,
         pointerType: 'mouse',
@@ -3566,15 +3629,15 @@ export default defineComponent({
         });
         return;
       }
-    
+
       if (shouldIgnoreCompatMouse()) return;
       if (event.button !== 0) return;
       event.preventDefault();
-    
+
       activeMousePointerId = 1;
       const pointerEvent = buildMousePointerEvent(event, 'pointerdown');
       if (!pointerEvent) return;
-    
+
       if (activePointers.has(activeMousePointerId) || pendingPointerReleases.has(activeMousePointerId) || queuedPointerReleases.has(activeMousePointerId)) {
         releasePointer(activeMousePointerId, 'cancel', pointerEvent);
       }
@@ -3596,7 +3659,7 @@ export default defineComponent({
         });
         return;
       }
-    
+
       if (shouldIgnoreCompatMouse()) return;
       if (activeMousePointerId == null || !activePointers.has(activeMousePointerId)) return;
       const pointerEvent = buildMousePointerEvent(event, 'pointermove');
@@ -3612,10 +3675,10 @@ export default defineComponent({
         });
         return;
       }
-    
+
       if (shouldIgnoreCompatMouse()) return;
       if (activeMousePointerId == null) return;
-    
+
       const pointerId = activeMousePointerId;
       const pointerEvent = buildMousePointerEvent(event, 'pointerup');
       activeMousePointerId = null;
@@ -3652,7 +3715,7 @@ export default defineComponent({
       if (!target) {
         return false;
       }
-    
+
       const tagName = target.tagName;
       return target.isContentEditable
         || tagName === 'INPUT'
@@ -3664,13 +3727,13 @@ export default defineComponent({
       if (!isConnected.value || shouldIgnoreKeyboardEvent(event)) {
         return;
       }
-    
+
       if (isHidMouseEnabled.value && !event.repeat && isAltToggleKey(event)) {
         event.preventDefault();
         void toggleMouseLock();
         return;
       }
-    
+
       sendKeyboardEvent('down', event);
       event.preventDefault();
     };
@@ -3679,12 +3742,12 @@ export default defineComponent({
       if (!isConnected.value || shouldIgnoreKeyboardEvent(event)) {
         return;
       }
-    
+
       if (isHidMouseEnabled.value && isAltToggleKey(event)) {
         event.preventDefault();
         return;
       }
-    
+
       sendKeyboardEvent('up', event);
       event.preventDefault();
     };
@@ -3693,7 +3756,7 @@ export default defineComponent({
       if (!isConnected.value || !isHidMouseEnabled.value || !isMouseLocked.value) {
         return;
       }
-    
+
       sendHidMouseEvent({
         phase: 'wheel',
         wheelX: Math.round(event.deltaX),
@@ -3724,13 +3787,13 @@ export default defineComponent({
       } else {
         restoreMenuPositionFromRelative();
       }
-    
+
       if (isClipboardWindowVisible.value || clipboardWindowX.value !== 0 || clipboardWindowY.value !== 0) {
         const clamped = clampClipboardWindowPosition(clipboardWindowX.value, clipboardWindowY.value);
         clipboardWindowX.value = clamped.x;
         clipboardWindowY.value = clamped.y;
       }
-    
+
       scheduleDisplayResize();
     };
 
@@ -3738,7 +3801,7 @@ export default defineComponent({
       if (!videoElement.value) {
         return;
       }
-    
+
       if (videoElement.value.currentTime > 0.01) {
         hideLastFrameOverlay();
       }
@@ -3811,7 +3874,7 @@ export default defineComponent({
       if (!videoContainer.value || typeof ResizeObserver === 'undefined') {
         return;
       }
-    
+
       videoContainerResizeObserver?.disconnect();
       videoContainerResizeObserver = new ResizeObserver(() => {
         scheduleDisplayResize();
@@ -3872,7 +3935,7 @@ export default defineComponent({
 
       isDocked.value = false;
       dockedEdge.value = 'none';
-    
+
       dragStartOffset = {
         x: event.clientX - menuX.value,
         y: event.clientY - menuY.value
@@ -3889,7 +3952,7 @@ export default defineComponent({
         didDragMenu = false;
         return;
       }
-    
+
       isMenuExpanded.value = !isMenuExpanded.value;
       if (!isMenuExpanded.value) {
         isMenuHorizontalLocked.value = false;
@@ -3902,12 +3965,12 @@ export default defineComponent({
       () => deviceId.value,
       () => {
         clipboardStatusText.value = '';
-    
+
         if (!isClipboardWindowVisible.value) {
           clipboardText.value = '';
           return;
         }
-    
+
         openClipboardWindow();
       }
     );
@@ -3928,7 +3991,7 @@ export default defineComponent({
           startFlexDisplayHeartbeat();
           return;
         }
-    
+
         clearPendingDisplayResize();
         stopFlexDisplayHeartbeat();
       },
@@ -3983,28 +4046,29 @@ export default defineComponent({
       attachPageEventListeners();
       syncBackgroundMuteState();
       setupVideoContainerResizeObserver();
-    
+
       if (!isScreencastRouteActive.value) {
         return;
       }
-    
+
       const consumed = await consumeIncomingTab(selectedDeviceName.value, t('Screencast.DefaultTabTitle', '设备投屏'), syncRefsFromActiveTab, handleTabOpened);
       if (consumed) {
         hasUsedInitialConnectionWarmup = true;
         return;
       }
-    
+
       if (activeTabKey.value) {
         syncRefsFromActiveTab();
         await syncRouteToActiveTab();
       }
-    
+
       if (activeTab.value) {
-        await refreshDeviceContext();
         if (restorePersistedConnection()) {
+          void refreshDeviceContext();
           hasUsedInitialConnectionWarmup = true;
           return;
         }
+        await refreshDeviceContext();
         scheduleStartConnection(hasUsedInitialConnectionWarmup ? 0 : 350);
         hasUsedInitialConnectionWarmup = true;
       }
@@ -4015,7 +4079,7 @@ export default defineComponent({
         hasHandledInitialActivation = true;
         return;
       }
-    
+
       enableAutoReconnect();
       attachPageEventListeners();
       syncBackgroundMuteState();
@@ -4023,17 +4087,18 @@ export default defineComponent({
       initializeMenuPosition();
       stopScrcpySessionHeartbeat();
       setupVideoContainerResizeObserver();
-    
+
       const consumed = await consumeIncomingTab(selectedDeviceName.value, t('Screencast.DefaultTabTitle', '设备投屏'), syncRefsFromActiveTab, handleTabOpened);
       if (consumed) {
         return;
       }
-    
+
       if (activeTab.value) {
-        await refreshDeviceContext();
         if (restorePersistedConnection()) {
+          void refreshDeviceContext();
           return;
         }
+        await refreshDeviceContext();
         scheduleStartConnection();
       }
     });

@@ -206,4 +206,21 @@ describe('useVideoStreamHealth', () => {
     expect(onVideoStreamStalledConfirmed).not.toHaveBeenCalled();
     expect(logger.debug.mock.calls.filter(([message]) => message === '[WebRTC] Inbound video RTP stream is idle without playback starvation; treating the frame as intentionally static.')).toHaveLength(1);
   });
+
+  it('escalates prolonged inbound RTP idle even when playback starvation is not reported', async () => {
+    vi.useFakeTimers();
+    const { health, onVideoStreamStalledConfirmed, advanceVideoPackets } = createVideoStreamHealthHarness();
+
+    await vi.advanceTimersByTimeAsync(1);
+    advanceVideoPackets();
+    await health.handleWatchdog(1, 'test');
+
+    await vi.advanceTimersByTimeAsync(9000);
+    await health.handleWatchdog(1, 'test');
+    expect(onVideoStreamStalledConfirmed).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await health.handleWatchdog(1, 'test');
+    expect(onVideoStreamStalledConfirmed).toHaveBeenCalledTimes(1);
+  });
 });

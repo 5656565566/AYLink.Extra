@@ -45,20 +45,34 @@ class SignalClient(
     private var socket: WebSocket? = null
     @Volatile
     private var isSocketOpen = false
+    @Volatile
+    private var activeConnectionId = 0
+    private var connectionSequence = 0
 
     val isOpen: Boolean
         get() = isSocketOpen
 
     fun connect(args: ConnectArgs) {
+        connectionSequence += 1
+        val connectionId = connectionSequence
+        activeConnectionId = connectionId
+        isSocketOpen = false
         val wsUrl = buildWebSocketUrl(args.baseUrl, args.ticket)
         val request = Request.Builder().url(wsUrl).build()
         socket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (connectionId != activeConnectionId) {
+                    webSocket.close(1000, null)
+                    return
+                }
                 isSocketOpen = true
                 _events.tryEmit(Event.Open)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (connectionId != activeConnectionId) {
+                    return
+                }
                 val payload = json.parseToJsonElement(text) as? JsonObject ?: return
                 val eventType = payload["type"]?.jsonPrimitive?.contentOrNull
                 val candidate = payload["candidate"]?.jsonPrimitive?.contentOrNull
@@ -87,6 +101,9 @@ class SignalClient(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (connectionId != activeConnectionId) {
+                    return
+                }
                 isSocketOpen = false
                 val message = buildString {
                     append(t.message ?: "Signal connection failed")
@@ -100,7 +117,11 @@ class SignalClient(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (connectionId != activeConnectionId) {
+                    return
+                }
                 isSocketOpen = false
+                socket = null
                 _events.tryEmit(Event.Closed)
             }
         })
@@ -116,8 +137,10 @@ class SignalClient(
 
     fun disconnect() {
         isSocketOpen = false
-        socket?.close(1000, null)
+        activeConnectionId = 0
+        val currentSocket = socket
         socket = null
+        currentSocket?.close(1000, null)
     }
 
     private fun buildWebSocketUrl(baseUrl: String, ticket: String): String {

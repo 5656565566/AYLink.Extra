@@ -5,6 +5,7 @@ function createVideoStreamHealthHarness() {
   let activeConnectionId = 1;
   let packetsReceived = 0;
   let bytesReceived = 0;
+  let framesDecoded = 0;
   const videoElement = {
     paused: false,
     ended: false,
@@ -33,7 +34,7 @@ function createVideoStreamHealthHarness() {
             kind: 'video',
             packetsReceived,
             bytesReceived,
-            framesDecoded: null,
+            framesDecoded,
             framesDropped: null,
             timestamp: performance.now()
           }]
@@ -71,6 +72,11 @@ function createVideoStreamHealthHarness() {
     logger,
     onVideoStreamStalledConfirmed,
     advanceVideoPackets: () => {
+      packetsReceived += 1;
+      bytesReceived += 100;
+      framesDecoded += 1;
+    },
+    advanceNetworkOnly: () => {
       packetsReceived += 1;
       bytesReceived += 100;
     },
@@ -192,10 +198,10 @@ describe('useVideoStreamHealth', () => {
 
   it('does not treat intentionally static video as a confirmed stall when playback is not starved', async () => {
     vi.useFakeTimers();
-    const { health, logger, onVideoStreamStalledConfirmed, advanceVideoPackets } = createVideoStreamHealthHarness();
+    const { health, logger, onVideoStreamStalledConfirmed, advanceNetworkOnly } = createVideoStreamHealthHarness();
 
     await vi.advanceTimersByTimeAsync(1);
-    advanceVideoPackets();
+    advanceNetworkOnly();
     await health.handleWatchdog(1, 'test');
 
     await vi.advanceTimersByTimeAsync(4000);
@@ -205,6 +211,28 @@ describe('useVideoStreamHealth', () => {
 
     expect(onVideoStreamStalledConfirmed).not.toHaveBeenCalled();
     expect(logger.debug.mock.calls.filter(([message]) => message === '[WebRTC] Inbound video RTP stream is idle without playback starvation; treating the frame as intentionally static.')).toHaveLength(1);
+  });
+
+  it('does not treat packets without decoded-frame progress as healthy advancement', async () => {
+    vi.useFakeTimers();
+    const { health, onVideoStreamStalledConfirmed, advanceNetworkOnly, setVideoTrackMuted } = createVideoStreamHealthHarness();
+
+    await vi.advanceTimersByTimeAsync(1);
+    advanceNetworkOnly();
+    await health.handleWatchdog(1, 'test');
+
+    setVideoTrackMuted(true);
+    await vi.advanceTimersByTimeAsync(4000);
+    advanceNetworkOnly();
+    await health.handleWatchdog(1, 'test');
+    await vi.advanceTimersByTimeAsync(1000);
+    advanceNetworkOnly();
+    await health.handleWatchdog(1, 'test');
+    await vi.advanceTimersByTimeAsync(1000);
+    advanceNetworkOnly();
+    await health.handleWatchdog(1, 'test');
+
+    expect(onVideoStreamStalledConfirmed.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
   it('escalates prolonged inbound RTP idle even when playback starvation is not reported', async () => {

@@ -99,7 +99,10 @@ type runtime struct {
 type cachedVideoPacket struct {
 	packet     domainscrcpy.VideoPacket
 	generation uint64
+	cachedAt   time.Time
 }
+
+const replayableKeyFrameMaxAge = 2 * time.Second
 
 func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session) (domainscrcpy.Runtime, error) {
 	if session == nil {
@@ -358,6 +361,10 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 	configPacket := r.latestVideoConfig
 	keyFramePacket := r.latestVideoKeyFrame
 	if configPacket.generation == 0 || keyFramePacket.generation == 0 || keyFramePacket.generation != configPacket.generation {
+		r.videoMu.Unlock()
+		return false
+	}
+	if keyFramePacket.cachedAt.IsZero() || time.Since(keyFramePacket.cachedAt) > replayableKeyFrameMaxAge {
 		r.videoMu.Unlock()
 		return false
 	}
@@ -1247,6 +1254,7 @@ func cloneVideoPacketForCache(packet domainscrcpy.VideoPacket, generation uint64
 	return cachedVideoPacket{
 		packet:     cloned,
 		generation: generation,
+		cachedAt:   time.Now(),
 	}
 }
 

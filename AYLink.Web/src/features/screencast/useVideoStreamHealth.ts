@@ -66,6 +66,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   let lastVideoStreamDiagnosticAt = 0;
   let lastInboundVideoPacketsReceived: number | null = null;
   let lastInboundVideoBytesReceived: number | null = null;
+  let lastInboundVideoFramesDecoded: number | null = null;
   let consecutiveVideoStreamStallDetections = 0;
   let hasLoggedIdleStaticVideo = false;
 
@@ -110,6 +111,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     lastVideoStreamDiagnosticAt = 0;
     lastInboundVideoPacketsReceived = null;
     lastInboundVideoBytesReceived = null;
+    lastInboundVideoFramesDecoded = null;
     consecutiveVideoStreamStallDetections = 0;
     hasLoggedIdleStaticVideo = false;
   };
@@ -182,13 +184,20 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
     const packetsReceived = typeof snapshot.packetsReceived === 'number' ? snapshot.packetsReceived : null;
     const bytesReceived = typeof snapshot.bytesReceived === 'number' ? snapshot.bytesReceived : null;
-    const hasBaseline = lastInboundVideoPacketsReceived != null || lastInboundVideoBytesReceived != null;
-    const hasAdvanced =
-      (packetsReceived != null && lastInboundVideoPacketsReceived != null && packetsReceived > lastInboundVideoPacketsReceived) ||
-      (bytesReceived != null && lastInboundVideoBytesReceived != null && bytesReceived > lastInboundVideoBytesReceived);
+    const framesDecoded = typeof snapshot.framesDecoded === 'number' ? snapshot.framesDecoded : null;
+    const hasBaseline =
+      lastInboundVideoPacketsReceived != null ||
+      lastInboundVideoBytesReceived != null ||
+      lastInboundVideoFramesDecoded != null;
+    const canUseDecodedFrames = framesDecoded != null || lastInboundVideoFramesDecoded != null;
+    const hasAdvanced = canUseDecodedFrames
+      ? framesDecoded != null && lastInboundVideoFramesDecoded != null && framesDecoded > lastInboundVideoFramesDecoded
+      : (packetsReceived != null && lastInboundVideoPacketsReceived != null && packetsReceived > lastInboundVideoPacketsReceived) ||
+        (bytesReceived != null && lastInboundVideoBytesReceived != null && bytesReceived > lastInboundVideoBytesReceived);
 
     lastInboundVideoPacketsReceived = packetsReceived;
     lastInboundVideoBytesReceived = bytesReceived;
+    lastInboundVideoFramesDecoded = framesDecoded;
     return !hasBaseline || hasAdvanced;
   };
 

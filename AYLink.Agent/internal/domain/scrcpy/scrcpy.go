@@ -107,6 +107,10 @@ type SourceHealthSnapshot struct {
 	RuntimeClosed        bool
 }
 
+type VideoRefreshOptions struct {
+	BypassConfirmation bool
+}
+
 type AudioCodec string
 
 const (
@@ -135,7 +139,7 @@ type Runtime interface {
 	SetClipboard(ctx context.Context, text string) error
 	PasteClipboard(ctx context.Context, text string) error
 	ReplayLatestVideoKeyFrame() bool
-	RequestVideoRefresh() error
+	RequestVideoRefresh(options ...VideoRefreshOptions) error
 	SendControl([]byte) error
 	Close() error
 }

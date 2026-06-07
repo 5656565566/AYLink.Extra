@@ -295,3 +295,57 @@ func TestRuntimeVideoRefreshKeepsConfirmationForUncertainSource(t *testing.T) {
 		t.Fatalf("expected one pending confirmation, got %d", rt.refreshAskCount)
 	}
 }
+
+func TestRuntimeVideoRefreshBypassOptionSkipsConfirmationForHealthySource(t *testing.T) {
+	now := time.Now()
+	rt := &runtime{
+		done: make(chan struct{}),
+		health: domainscrcpy.SourceHealthSnapshot{
+			State:              domainscrcpy.SourceHealthHealthy,
+			LastPacketAt:       now,
+			LastNewPTSAt:       now,
+			LastPTS:            100,
+			HasSeenMediaPacket: true,
+		},
+	}
+
+	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshOptions{BypassConfirmation: true}); err != nil {
+		t.Fatalf("request refresh: %v", err)
+	}
+
+	rt.refreshMu.Lock()
+	defer rt.refreshMu.Unlock()
+	if rt.lastRefreshTime.IsZero() {
+		t.Fatalf("expected bypass refresh to dispatch without waiting for confirmation")
+	}
+	if rt.refreshAskCount != 0 {
+		t.Fatalf("expected confirmation counter to reset, got %d", rt.refreshAskCount)
+	}
+}
+
+func TestRuntimeVideoRefreshBypassOptionStillSkipsStaticButAliveSource(t *testing.T) {
+	now := time.Now()
+	rt := &runtime{
+		done: make(chan struct{}),
+		health: domainscrcpy.SourceHealthSnapshot{
+			State:              domainscrcpy.SourceHealthStaticButAlive,
+			LastPacketAt:       now.Add(-30 * time.Second),
+			LastNewPTSAt:       now.Add(-30 * time.Second),
+			LastPTS:            100,
+			HasSeenMediaPacket: true,
+		},
+	}
+
+	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshOptions{BypassConfirmation: true}); err != nil {
+		t.Fatalf("request refresh: %v", err)
+	}
+
+	rt.refreshMu.Lock()
+	defer rt.refreshMu.Unlock()
+	if !rt.lastRefreshTime.IsZero() {
+		t.Fatalf("expected bypass refresh to keep static source protection")
+	}
+	if rt.refreshAskCount != 0 {
+		t.Fatalf("expected static source to clear confirmation counter, got %d", rt.refreshAskCount)
+	}
+}

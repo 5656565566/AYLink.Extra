@@ -10,9 +10,10 @@ import (
 )
 
 type fakeScrcpyRuntime struct {
-	health         domainscrcpy.SourceHealthSnapshot
-	refreshCount   int
-	keyFrameReplay bool
+	health                  domainscrcpy.SourceHealthSnapshot
+	refreshCount            int
+	keyFrameReplay          bool
+	lastVideoRefreshOptions []domainscrcpy.VideoRefreshOptions
 }
 
 func (f *fakeScrcpyRuntime) SubscribeVideoPackets() (<-chan domainscrcpy.VideoPacket, func()) {
@@ -57,8 +58,9 @@ func (f *fakeScrcpyRuntime) ReplayLatestVideoKeyFrame() bool {
 	return f.keyFrameReplay
 }
 
-func (f *fakeScrcpyRuntime) RequestVideoRefresh() error {
+func (f *fakeScrcpyRuntime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOptions) error {
 	f.refreshCount++
+	f.lastVideoRefreshOptions = append([]domainscrcpy.VideoRefreshOptions(nil), options...)
 	return nil
 }
 
@@ -103,6 +105,36 @@ func TestRequestScrcpySourceRefreshRequestsWhenSourceStalled(t *testing.T) {
 
 	if runtime.refreshCount != 1 {
 		t.Fatalf("expected one source refresh, got %d", runtime.refreshCount)
+	}
+}
+
+func TestRequestScrcpySourceRefreshBypassesConfirmationForFrontendPlaybackHealth(t *testing.T) {
+	runtime := &fakeScrcpyRuntime{
+		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthHealthy},
+	}
+
+	requestScrcpySourceRefresh(nil, runtime, "frontend_playback_health")
+
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected frontend playback health to request source refresh, got %d", runtime.refreshCount)
+	}
+	if len(runtime.lastVideoRefreshOptions) != 1 || !runtime.lastVideoRefreshOptions[0].BypassConfirmation {
+		t.Fatalf("expected frontend playback health to bypass confirmation, got %#v", runtime.lastVideoRefreshOptions)
+	}
+}
+
+func TestRequestScrcpySourceRefreshKeepsConfirmationForBackendWatchdog(t *testing.T) {
+	runtime := &fakeScrcpyRuntime{
+		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthHealthy},
+	}
+
+	requestScrcpySourceRefresh(nil, runtime, "rtcp_stalled_ready")
+
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected backend watchdog to request source refresh, got %d", runtime.refreshCount)
+	}
+	if len(runtime.lastVideoRefreshOptions) != 0 {
+		t.Fatalf("expected backend watchdog to keep default confirmation, got %#v", runtime.lastVideoRefreshOptions)
 	}
 }
 

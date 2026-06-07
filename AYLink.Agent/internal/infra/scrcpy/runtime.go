@@ -405,7 +405,14 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 	return true
 }
 
-func (r *runtime) RequestVideoRefresh() error {
+func (r *runtime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOptions) error {
+	refreshOptions := domainscrcpy.VideoRefreshOptions{}
+	for _, option := range options {
+		if option.BypassConfirmation {
+			refreshOptions.BypassConfirmation = true
+		}
+	}
+
 	r.refreshMu.Lock()
 	if r.refreshRequested {
 		if r.logger != nil {
@@ -429,7 +436,7 @@ func (r *runtime) RequestVideoRefresh() error {
 		r.refreshMu.Unlock()
 		return nil
 	}
-	bypassConfirmation := shouldBypassVideoRefreshConfirmation(health.State)
+	bypassConfirmation := refreshOptions.BypassConfirmation || shouldBypassVideoRefreshConfirmation(health.State)
 	if !r.lastRefreshAskAt.IsZero() && now.Sub(r.lastRefreshAskAt) > videoRefreshConfirmationWindow {
 		r.refreshAskCount = 0
 	}

@@ -645,7 +645,14 @@ func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runt
 	if logger != nil {
 		logger.Info("scrcpy source refresh requested", logArgs...)
 	}
-	_ = runtime.RequestVideoRefresh()
+	_ = runtime.RequestVideoRefresh(videoRefreshOptionsForReason(reason)...)
+}
+
+func videoRefreshOptionsForReason(reason string) []domainscrcpy.VideoRefreshOptions {
+	if reason == "frontend_playback_health" {
+		return []domainscrcpy.VideoRefreshOptions{{BypassConfirmation: true}}
+	}
+	return nil
 }
 
 func formatSourceHealthAge(value time.Time) string {

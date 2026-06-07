@@ -144,8 +144,10 @@ class RemoteViewModel(
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
     private var pointerSamplingJob: Job? = null
+    private var pointerReleaseRetryJob: Job? = null
     private var videoRecoveryJob: Job? = null
     private val sampledPointerMoves = linkedMapOf<Int, PointerControlMessage>()
+    private val pendingPointerReleases = linkedMapOf<Int, PointerControlMessage>()
     private var currentAppPackage: String? = null
     private var currentAppName: String? = null
     private var currentNewDisplay = false
@@ -415,11 +417,15 @@ class RemoteViewModel(
                 ensurePointerSamplingLoop()
             }
             "up", "cancel" -> {
-                flushSampledPointerMove(payload.pointerId)
+                flushSampledPointerMove(payload.pointerId, preferPointerMoveChannel = false)
                 sampledPointerMoves.remove(payload.pointerId)
+                pendingPointerReleases[payload.pointerId] = payload
+                flushPendingPointerReleases(reportFailure = true)
+            }
+            else -> {
+                flushPendingPointerReleases(reportFailure = false)
                 webRtcManager.sendPointerMessage(payload)
             }
-            else -> webRtcManager.sendPointerMessage(payload)
         }
     }
 
@@ -441,9 +447,50 @@ class RemoteViewModel(
         }
     }
 
-    private fun flushSampledPointerMove(pointerId: Int) {
+    private fun flushSampledPointerMove(pointerId: Int, preferPointerMoveChannel: Boolean = true) {
         val sampled = sampledPointerMoves.remove(pointerId) ?: return
-        webRtcManager.sendPointerMessage(sampled)
+        webRtcManager.sendPointerMessage(sampled, preferPointerMoveChannel)
+    }
+
+    private fun flushPendingPointerReleases(reportFailure: Boolean) {
+        if (pendingPointerReleases.isEmpty()) {
+            stopPointerReleaseRetry()
+            return
+        }
+
+        val releases = pendingPointerReleases.values.toList()
+        for (release in releases) {
+            val sent = webRtcManager.sendPointerMessage(
+                payload = release,
+                preferPointerMoveChannel = false,
+                reportFailure = reportFailure
+            )
+            if (sent) {
+                pendingPointerReleases.remove(release.pointerId)
+            }
+        }
+
+        if (pendingPointerReleases.isEmpty()) {
+            stopPointerReleaseRetry()
+        } else {
+            ensurePointerReleaseRetryLoop()
+        }
+    }
+
+    private fun ensurePointerReleaseRetryLoop() {
+        if (pointerReleaseRetryJob?.isActive == true || pendingPointerReleases.isEmpty()) return
+        pointerReleaseRetryJob = viewModelScope.launch {
+            while (isActive && pendingPointerReleases.isNotEmpty()) {
+                delay(250L)
+                flushPendingPointerReleases(reportFailure = false)
+            }
+            pointerReleaseRetryJob = null
+        }
+    }
+
+    private fun stopPointerReleaseRetry() {
+        pointerReleaseRetryJob?.cancel()
+        pointerReleaseRetryJob = null
     }
 
     private fun startHeartbeat() {
@@ -598,8 +645,10 @@ class RemoteViewModel(
         stopHeartbeat()
         stopVideoRecoveryWatchdog()
         sampledPointerMoves.clear()
+        pendingPointerReleases.clear()
         pointerSamplingJob?.cancel()
         pointerSamplingJob = null
+        stopPointerReleaseRetry()
     }
 
     private fun releaseRemoteSessionAsync() {

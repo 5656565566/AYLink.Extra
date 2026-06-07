@@ -29,7 +29,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -295,6 +294,23 @@ private fun RemoteVideoSurface(
             viewportSize.height.toFloat().coerceAtLeast(1f) / videoBounds.height
         }
     }
+    val touchPointerState = remember { RemoteTouchPointerState() }
+
+    DisposableEffect(touchPointerState, viewModel, viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
+        onDispose {
+            touchPointerState.cancelActivePointers { event ->
+                sendPointer(
+                    viewModel = viewModel,
+                    event = event,
+                    viewportSize = viewportSize,
+                    videoSize = viewportState.videoSize,
+                    fillMode = effectiveFillMode,
+                    videoBounds = videoBounds
+                )
+            }
+            touchPointerState.clear()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -338,93 +354,34 @@ private fun RemoteVideoSurface(
                 .fillMaxSize()
                 .pointerInput(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
                     awaitEachGesture {
-                        val activePointers = mutableMapOf<PointerId, Offset>()
-                        var primaryPointerId: Int? = null
-                        try {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            primaryPointerId = down.id.value.toInt()
-                            activePointers[down.id] = down.position
+                        val emitPointer: (RemoteTouchPointerEvent) -> Unit = { event ->
                             sendPointer(
                                 viewModel = viewModel,
-                                phase = "down",
-                                pointerId = down.id.value.toInt(),
-                                primaryPointerId = primaryPointerId,
-                                point = down.position,
+                                event = event,
                                 viewportSize = viewportSize,
                                 videoSize = viewportState.videoSize,
                                 fillMode = effectiveFillMode,
                                 videoBounds = videoBounds
                             )
+                        }
+                        try {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            touchPointerState.beginGesture(down.id.value.toInt(), down.position, emitPointer)
 
                             do {
                                 val event = awaitPointerEvent(pass = PointerEventPass.Main)
                                 event.changes.forEach { change ->
                                     if (!change.previousPressed && change.pressed) {
-                                        activePointers[change.id] = change.position
-                                        if (primaryPointerId == null) {
-                                            primaryPointerId = change.id.value.toInt()
-                                        }
-                                        sendPointer(
-                                            viewModel = viewModel,
-                                            phase = "down",
-                                            pointerId = change.id.value.toInt(),
-                                            primaryPointerId = primaryPointerId,
-                                            point = change.position,
-                                            viewportSize = viewportSize,
-                                            videoSize = viewportState.videoSize,
-                                            fillMode = effectiveFillMode,
-                                            videoBounds = videoBounds
-                                        )
+                                        touchPointerState.pointerDown(change.id.value.toInt(), change.position, emitPointer)
                                     } else if (change.changedToUp()) {
-                                        sendPointer(
-                                            viewModel = viewModel,
-                                            phase = "up",
-                                            pointerId = change.id.value.toInt(),
-                                            primaryPointerId = primaryPointerId,
-                                            point = change.position,
-                                            viewportSize = viewportSize,
-                                            videoSize = viewportState.videoSize,
-                                            fillMode = effectiveFillMode,
-                                            videoBounds = videoBounds
-                                        )
-                                        activePointers.remove(change.id)
-                                        if (primaryPointerId == change.id.value.toInt()) {
-                                            primaryPointerId = activePointers.keys.firstOrNull()?.value?.toInt()
-                                        }
+                                        touchPointerState.pointerUp(change.id.value.toInt(), change.position, emitPointer)
                                     } else if (change.pressed) {
-                                        val previous = activePointers[change.id]
-                                        activePointers[change.id] = change.position
-                                        if (previous != change.position) {
-                                            sendPointer(
-                                                viewModel = viewModel,
-                                                phase = "move",
-                                                pointerId = change.id.value.toInt(),
-                                                primaryPointerId = primaryPointerId,
-                                                point = change.position,
-                                                viewportSize = viewportSize,
-                                                videoSize = viewportState.videoSize,
-                                                fillMode = effectiveFillMode,
-                                                videoBounds = videoBounds
-                                            )
-                                        }
+                                        touchPointerState.pointerMove(change.id.value.toInt(), change.position, emitPointer)
                                     }
                                 }
                             } while (event.changes.any { it.pressed })
                         } finally {
-                            activePointers.forEach { (pointerId, point) ->
-                                sendPointer(
-                                    viewModel = viewModel,
-                                    phase = "cancel",
-                                    pointerId = pointerId.value.toInt(),
-                                    primaryPointerId = primaryPointerId,
-                                    point = point,
-                                    viewportSize = viewportSize,
-                                    videoSize = viewportState.videoSize,
-                                    fillMode = effectiveFillMode,
-                                    videoBounds = videoBounds
-                                )
-                            }
-                            activePointers.clear()
+                            touchPointerState.cancelActivePointers(emitPointer)
                         }
                     }
                 }
@@ -766,10 +723,7 @@ private fun RemoteFloatingControl(
 
 private fun sendPointer(
     viewModel: RemoteViewModel,
-    phase: String,
-    pointerId: Int,
-    primaryPointerId: Int?,
-    point: Offset,
+    event: RemoteTouchPointerEvent,
     viewportSize: IntSize,
     videoSize: IntSize,
     fillMode: Boolean,
@@ -785,17 +739,17 @@ private fun sendPointer(
     } else {
         videoBounds
     }
-    val xRatio = ((point.x - bounds.left) / bounds.width).coerceIn(0f, 1f)
-    val yRatio = ((point.y - bounds.top) / bounds.height).coerceIn(0f, 1f)
-    val isReleasePhase = phase == "up" || phase == "cancel"
+    val xRatio = ((event.point.x - bounds.left) / bounds.width).coerceIn(0f, 1f)
+    val yRatio = ((event.point.y - bounds.top) / bounds.height).coerceIn(0f, 1f)
+    val isReleasePhase = event.phase == "up" || event.phase == "cancel"
 
     viewModel.handleIntent(
         RemoteIntent.SendPointer(
             PointerControlMessage(
-                phase = phase,
-                pointerId = pointerId,
+                phase = event.phase,
+                pointerId = event.pointerId,
                 pointerType = "touch",
-                isPrimary = pointerId == primaryPointerId,
+                isPrimary = event.isPrimary,
                 xRatio = xRatio,
                 yRatio = yRatio,
                 frameWidth = videoSize.width.coerceAtLeast(1),

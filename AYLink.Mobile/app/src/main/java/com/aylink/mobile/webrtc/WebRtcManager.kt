@@ -296,13 +296,22 @@ class WebRtcManager(
         )
     }
 
-    fun sendPointerMessage(payload: PointerControlMessage) {
+    fun sendPointerMessage(
+        payload: PointerControlMessage,
+        preferPointerMoveChannel: Boolean = true,
+        reportFailure: Boolean = true
+    ): Boolean {
         val action = when (payload.phase.lowercase()) {
             "down" -> SCRCPY_ACTION_DOWN
             "up", "cancel" -> SCRCPY_ACTION_UP
             else -> SCRCPY_ACTION_MOVE
         }
-        sendControl(buildTouchMessage(payload, action))
+        val message = buildTouchMessage(payload, action)
+        return if (action == SCRCPY_ACTION_MOVE && preferPointerMoveChannel) {
+            sendPointerMove(message)
+        } else {
+            sendControl(message, reportFailure)
+        }
     }
 
     fun sendKeyMessage(action: String) {
@@ -356,8 +365,8 @@ class WebRtcManager(
         eglBase.release()
     }
 
-    private fun sendControl(message: ByteArray): Boolean {
-        return sendBinary(selectControlChannel(), message, reportFailure = true)
+    private fun sendControl(message: ByteArray, reportFailure: Boolean = true): Boolean {
+        return sendBinary(selectControlChannel(), message, reportFailure)
     }
 
     private fun sendMetaControl(message: ByteArray): Boolean {
@@ -414,7 +423,7 @@ class WebRtcManager(
     }
 
     fun getPointerMoveBufferedAmount(): Long {
-        return selectControlChannel()?.bufferedAmount() ?: 0L
+        return selectPointerMoveChannel()?.bufferedAmount() ?: 0L
     }
 
     private fun recvOnlyInit(): RtpTransceiver.RtpTransceiverInit {

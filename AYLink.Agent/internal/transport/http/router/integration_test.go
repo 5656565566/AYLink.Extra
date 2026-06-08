@@ -738,6 +738,30 @@ func TestHTTPDevicesDeleteReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestHTTPUnknownAPIRouteReturnsJSON(t *testing.T) {
+	env := newIntegrationEnv(t)
+
+	response, err := env.client.Get(env.server.URL + "/api/not-registered")
+	if err != nil {
+		t.Fatalf("GET unknown api route error = %v", err)
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected unknown api 404, got %d: %s", response.StatusCode, string(body))
+	}
+	if contentType := response.Header.Get("Content-Type"); !strings.Contains(contentType, "application/json") {
+		t.Fatalf("expected json content type, got %q: %s", contentType, string(body))
+	}
+	if !bytes.Contains(body, []byte(`API_ROUTE_NOT_FOUND`)) {
+		t.Fatalf("expected api route not found payload, got %s", string(body))
+	}
+}
+
 func TestHTTPDeviceSettingsRoundTrip(t *testing.T) {
 	env := newIntegrationEnv(t)
 	env.createUserWithPermissionsAndGroups(t, "devices-settings-manager", "secret", []string{"devices.control", "devices.manage"}, []int{env.internalAllDevicesGroupID(t)})

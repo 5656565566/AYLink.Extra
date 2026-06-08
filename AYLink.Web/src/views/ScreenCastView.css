@@ -391,7 +391,7 @@ video.fill-mode {
   display: block;
   width: 4px;
   height: 14px;
-  background: var(--fluent-accent);
+  background: var(--fluent-accent-default);
   border-radius: 2px;
 }
 
@@ -449,24 +449,25 @@ video.fill-mode {
   font-size: 13px;
   line-height: 1.5;
   font-family: inherit;
-  transition: border-color 0.2s;
+  caret-color: var(--fluent-accent-default);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .clipboard-float__editor:focus {
   outline: none;
-  border-color: var(--fluent-accent);
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.15);
+  border-color: var(--fluent-accent-default);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fluent-accent-default) 18%, transparent);
 }
 
 .clipboard-float__editor::selection {
-  background: rgba(96, 165, 250, 0.38);
-  color: #f8fafc;
-  -webkit-text-fill-color: #f8fafc;
+  background: color-mix(in srgb, var(--fluent-accent-default) 42%, transparent);
+  color: var(--fluent-text-primary);
+  -webkit-text-fill-color: var(--fluent-text-primary);
 }
 
 .clipboard-float__editor::-moz-selection {
-  background: rgba(96, 165, 250, 0.38);
-  color: #f8fafc;
+  background: color-mix(in srgb, var(--fluent-accent-default) 42%, transparent);
+  color: var(--fluent-text-primary);
 }
 
 .clipboard-float__editor::placeholder {
@@ -496,19 +497,19 @@ video.fill-mode {
 }
 
 .clipboard-float__sync-indicator.is-active {
-  background: var(--fluent-accent);
+  background: var(--fluent-accent-default);
   animation: pulse-sync 1.5s infinite;
 }
 
 @keyframes pulse-sync {
   0% {
-    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.4);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--fluent-accent-default) 40%, transparent);
   }
   70% {
-    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--fluent-accent-default) 0%, transparent);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--fluent-accent-default) 0%, transparent);
   }
 }
 

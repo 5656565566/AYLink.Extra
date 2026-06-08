@@ -131,6 +131,8 @@ func New(deps Dependencies) http.Handler {
 	registerDeviceRoutes(mux, handlers, guards)
 	registerDeviceGroupRoutes(mux, handlers, guards)
 	registerSettingsRoutes(mux, handlers, guards)
+	mux.Handle("/api", handler.NewAPIUnknownHandler())
+	mux.Handle("/api/", handler.NewAPIUnknownHandler())
 	mux.Handle("/", handler.NewSPAHandler(deps.WWWRoot, deps.EmbeddedWWW, deps.Logger))
 
 	return middleware.Logging(deps.Logger, middleware.Recover(mux))

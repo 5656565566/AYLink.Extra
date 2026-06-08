@@ -89,6 +89,14 @@ export function useRemoteClipboard(options: RemoteClipboardOptions) {
     clipboardText.value = text;
   };
 
+  const isJsonResponse = (response: Response) => {
+    return (response.headers.get('Content-Type') || '').includes('application/json');
+  };
+
+  const isClipboardPayload = (payload: unknown): payload is { text?: unknown } => {
+    return payload !== null && typeof payload === 'object';
+  };
+
   const getTargetDeviceIdOrWarn = (requestId: number) => {
     const targetDeviceId = normalizeDeviceId(options.getDeviceId());
     if (targetDeviceId) {
@@ -118,12 +126,16 @@ export function useRemoteClipboard(options: RemoteClipboardOptions) {
       if (!request.isLatest(requestId)) {
         return;
       }
-      if (!response.ok) {
+      if (response.status !== 200 || !isJsonResponse(response)) {
         clipboardStatusText.value = await readApiErrorMessage(response, options.t('Screencast.ClipboardReadFailed', '读取失败'));
         return;
       }
 
-      const payload = await response.json() as { text?: string };
+      const payload = await response.json() as unknown;
+      if (!isClipboardPayload(payload)) {
+        clipboardStatusText.value = options.t('Screencast.ClipboardReadFailed', '读取失败');
+        return;
+      }
       applyRemoteClipboardText(String(payload.text ?? ''));
       clipboardStatusText.value = options.t('Screencast.ClipboardReadSuccess', '读取成功');
     } catch (error) {
@@ -167,7 +179,7 @@ export function useRemoteClipboard(options: RemoteClipboardOptions) {
       if (!request.isLatest(requestId)) {
         return;
       }
-      if (!response.ok) {
+      if (response.status !== 200) {
         clipboardStatusText.value = await readApiErrorMessage(response, options.t('Screencast.ClipboardSyncFailed', '同步失败'));
         return;
       }
@@ -213,7 +225,7 @@ export function useRemoteClipboard(options: RemoteClipboardOptions) {
       if (!request.isLatest(requestId)) {
         return;
       }
-      if (!response.ok) {
+      if (response.status !== 200) {
         clipboardStatusText.value = await readApiErrorMessage(response, options.t('Screencast.ClipboardPasteFailed', '粘贴失败'));
         return;
       }

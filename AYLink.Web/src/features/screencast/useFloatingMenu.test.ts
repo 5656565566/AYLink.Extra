@@ -1,7 +1,15 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { useFloatingMenu } from './useFloatingMenu';
+import type { StageBounds } from './floatingMenuLayout';
 
-const createMenu = () => useFloatingMenu({
+const defaultStageBounds: StageBounds = {
+  width: 1000,
+  height: 600,
+  offsetLeft: 0,
+  offsetTop: 0
+};
+
+const createMenu = (stageBounds = defaultStageBounds) => useFloatingMenu({
   storageKey: 'aylink.test.floating-menu',
   layout: {
     margin: 20,
@@ -11,12 +19,7 @@ const createMenu = () => useFloatingMenu({
   },
   dragThresholdPx: 4,
   dockSnapDistancePx: 64,
-  getStageBounds: () => ({
-    width: 1000,
-    height: 600,
-    offsetLeft: 0,
-    offsetTop: 0
-  })
+  getStageBounds: () => stageBounds
 });
 
 function createPointerEvent(clientX: number, clientY: number) {
@@ -137,6 +140,49 @@ describe('useFloatingMenu', () => {
     expect(menu.menuStyle.value).toEqual({
       left: '450px',
       top: '520px'
+    });
+  });
+
+  it('persists and restores the collapsed state', () => {
+    const menu = createMenu();
+    menu.initializeMenuPosition();
+
+    menu.toggleMenu();
+    expect(menu.isMenuExpanded.value).toBe(false);
+
+    const restored = createMenu();
+    restored.loadPersistedMenuPlacement();
+    restored.initializeMenuPosition();
+
+    expect(restored.isMenuExpanded.value).toBe(false);
+    expect(restored.menuStyle.value).toEqual({
+      left: '932px',
+      top: '20px'
+    });
+  });
+
+  it('collapses restored expanded placements that no longer fit inside the stage', () => {
+    localStorage.setItem('aylink.test.floating-menu', JSON.stringify({
+      isDocked: false,
+      isExpanded: true,
+      relativeRight: 0.5,
+      relativeTop: 1
+    }));
+
+    const menu = createMenu({
+      width: 420,
+      height: 260,
+      offsetLeft: 0,
+      offsetTop: 0
+    });
+
+    menu.loadPersistedMenuPlacement();
+    menu.initializeMenuPosition();
+
+    expect(menu.isMenuExpanded.value).toBe(false);
+    expect(menu.menuStyle.value).toEqual({
+      left: '186px',
+      top: '192px'
     });
   });
 });

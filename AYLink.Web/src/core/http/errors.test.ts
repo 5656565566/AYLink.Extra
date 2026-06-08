@@ -47,6 +47,26 @@ describe('http errors', () => {
     await expect(readApiErrorMessage(response, 'fallback')).resolves.toBe('Plain failure');
   });
 
+  it('does not expose html error responses as messages', async () => {
+    const response = new Response('<!DOCTYPE html><title>Bad gateway</title>', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+    });
+
+    await expect(readApiErrorMessage(response, 'fallback')).resolves.toBe('fallback');
+  });
+
+  it('uses http status fallback when no local fallback is provided', async () => {
+    const response = new Response('<!DOCTYPE html><title>Bad gateway</title>', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+    });
+
+    await expect(readApiErrorMessage(response, '')).resolves.toBe('请求失败（HTTP 502 Bad Gateway）');
+  });
+
   it('falls back when response parsing fails', async () => {
     const response = {
       headers: new Headers({ 'Content-Type': 'application/json' }),

@@ -1,4 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const apiMocks = vi.hoisted(() => ({
+  apiFetch: vi.fn(),
+  readApiErrorMessage: vi.fn(async (_response: Response, fallback: string) => fallback)
+}));
+
+vi.mock('../../utils/api', () => ({
+  apiFetch: apiMocks.apiFetch,
+  readApiErrorMessage: apiMocks.readApiErrorMessage
+}));
+
 import { useRemoteClipboard } from './useRemoteClipboard';
 
 const createClipboard = () => useRemoteClipboard({
@@ -33,6 +44,9 @@ function createPointerEvent(clientX: number, clientY: number) {
 describe('useRemoteClipboard', () => {
   beforeEach(() => {
     localStorage.clear();
+    apiMocks.apiFetch.mockReset();
+    apiMocks.readApiErrorMessage.mockClear();
+    apiMocks.readApiErrorMessage.mockImplementation(async (_response: Response, fallback: string) => fallback);
   });
 
   it('opens at the bottom right of the current stage', () => {
@@ -71,5 +85,35 @@ describe('useRemoteClipboard', () => {
 
     expect(clipboard.clipboardStatusText.value).toBe('');
     expect(clipboard.clipboardText.value).toBe('');
+  });
+
+  it('treats html clipboard read responses as local errors', async () => {
+    apiMocks.apiFetch.mockResolvedValue(new Response('<!DOCTYPE html><title>Bad gateway</title>', {
+      status: 502,
+      headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+    }));
+
+    const clipboard = createClipboard();
+    clipboard.applyRemoteClipboardText('previous text');
+
+    await clipboard.readClipboard();
+
+    expect(clipboard.clipboardText.value).toBe('previous text');
+    expect(clipboard.clipboardStatusText.value).toBe('读取失败');
+    expect(apiMocks.readApiErrorMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads clipboard text only from json 200 responses', async () => {
+    apiMocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ text: 'remote text' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }));
+
+    const clipboard = createClipboard();
+
+    await clipboard.readClipboard();
+
+    expect(clipboard.clipboardText.value).toBe('remote text');
+    expect(clipboard.clipboardStatusText.value).toBe('读取成功');
   });
 });

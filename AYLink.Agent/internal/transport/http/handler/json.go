@@ -52,6 +52,12 @@ func WriteMethodNotAllowed(w http.ResponseWriter, allowedMethod string) {
 	WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Errors.MethodNotAllowed", "请求方法不被允许")
 }
 
+func NewAPIUnknownHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		WriteError(w, http.StatusNotFound, "API_ROUTE_NOT_FOUND", "Errors.NotFound", "接口不存在")
+	})
+}
+
 func decodeJSONBody(r *http.Request, target any) error {
 	defer func() {
 		if r.Body != nil {

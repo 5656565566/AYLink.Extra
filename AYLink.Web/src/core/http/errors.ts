@@ -42,16 +42,29 @@ export function resolveApiErrorMessage(payload: unknown, fallback: string): stri
   return fallback;
 }
 
+function resolveHttpFallback(response: Response, fallback: string) {
+  if (fallback) {
+    return fallback;
+  }
+
+  const statusText = response.statusText ? ` ${response.statusText}` : '';
+  return `请求失败（HTTP ${response.status}${statusText}）`;
+}
+
 export async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const contentType = response.headers.get('Content-Type') || '';
     if (contentType.includes('application/json')) {
-      return resolveApiErrorMessage(await response.json(), fallback);
+      return resolveApiErrorMessage(await response.json(), resolveHttpFallback(response, fallback));
     }
 
-    const text = await response.text();
-    return text || fallback;
+    if (contentType.startsWith('text/plain')) {
+      const text = await response.text();
+      return text || resolveHttpFallback(response, fallback);
+    }
+
+    return resolveHttpFallback(response, fallback);
   } catch {
-    return fallback;
+    return resolveHttpFallback(response, fallback);
   }
 }

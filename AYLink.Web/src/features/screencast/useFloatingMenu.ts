@@ -14,6 +14,7 @@ export type DockedEdge = DockedMenuEdge;
 
 interface PersistedFloatingMenuPlacement {
   isDocked?: boolean;
+  isExpanded?: boolean;
   dockedEdge?: DockedEdge;
   relativeRight?: number;
   relativeTop?: number;
@@ -81,6 +82,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     try {
       const placement: PersistedFloatingMenuPlacement = {
         isDocked: isDocked.value,
+        isExpanded: isMenuExpanded.value,
         dockedEdge: dockedEdge.value,
         relativeRight: menuRelativeX.value,
         relativeTop: menuRelativeY.value
@@ -107,6 +109,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
       updateMenuRelativePosition();
     }
     persistMenuPlacement();
+    collapseMenuIfExpandedFrameOverflows();
   };
 
   const restoreMenuPositionFromRelative = () => {
@@ -146,8 +149,25 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
       if (typeof parsed.isDocked === 'boolean') {
         isDocked.value = parsed.isDocked;
       }
+
+      if (typeof parsed.isExpanded === 'boolean') {
+        isMenuExpanded.value = parsed.isExpanded;
+      }
     } catch {
       // ignore local persistence failures
+    }
+  };
+
+  const collapseMenuIfExpandedFrameOverflows = () => {
+    if (!isMenuExpanded.value) {
+      return;
+    }
+
+    const bounds = options.getStageBounds();
+    const frame = getMenuFrame(menuX.value, menuY.value, true, bounds, options.layout);
+    if (!isMenuFrameInsideStage(frame, bounds, options.layout)) {
+      isMenuExpanded.value = false;
+      persistMenuPlacement();
     }
   };
 
@@ -178,6 +198,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     } else {
       restoreMenuPositionFromRelative();
     }
+    collapseMenuIfExpandedFrameOverflows();
   };
 
   const resolveDockEdge = () => {

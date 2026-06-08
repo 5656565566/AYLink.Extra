@@ -84,6 +84,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   let frameCallbackHandle: number | null = null;
   let watchdogTimer: number | null = null;
   let signalingDetachTimer: number | null = null;
+  let watchdogCheckSeq = 0;
   let detachedSignalingConnectionId = 0;
   let expectedSignalingCloseConnectionId = 0;
   let lastVideoStreamPacketAt = 0;
@@ -113,7 +114,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
   const stopWatchdog = () => {
     if (watchdogTimer !== null) {
-      window.clearInterval(watchdogTimer);
+      window.clearTimeout(watchdogTimer);
       watchdogTimer = null;
     }
   };
@@ -132,6 +133,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   };
 
   const resetWatchdogState = () => {
+    watchdogCheckSeq += 1;
     resetVideoStreamStateMachine(stateMachine);
     lastVideoStreamPacketAt = 0;
     lastVideoStreamDiagnosticAt = 0;
@@ -308,6 +310,19 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     });
   };
 
+  const markRenderedFrameAdvanced = (connectionId: number, now: number) => {
+    if (!shouldMonitorVideoStream(connectionId)) {
+      return;
+    }
+
+    markVideoStreamAdvanced(stateMachine, connectionId, now);
+    lastVideoStreamPacketAt = now;
+    lastVideoStreamDiagnosticAt = 0;
+    resetStallConfirmations();
+    hasLoggedIdleStaticVideo = false;
+    scheduleSignalingDetach(connectionId);
+  };
+
   const scheduleSignalingDetach = (connectionId: number) => {
     if (signalingDetachTimer !== null || detachedSignalingConnectionId === connectionId) {
       return;
@@ -357,7 +372,33 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     }, detachDelayMs);
   };
 
+  const scheduleWatchdog = (connectionId: number, delayMs: number, reason: string) => {
+    stopWatchdog();
+    if (connectionId !== options.getActiveConnectionId()) {
+      return;
+    }
+
+    watchdogTimer = window.setTimeout(() => {
+      watchdogTimer = null;
+      void runScheduledWatchdog(connectionId, reason);
+    }, Math.max(0, delayMs));
+  };
+
+  const getNextWatchdogDelay = () => {
+    if (lastVideoStreamPacketAt <= 0) {
+      return options.watchdogIntervalMs;
+    }
+
+    const packetAgeMs = Math.max(0, performance.now() - lastVideoStreamPacketAt);
+    const timeUntilStallMs = options.stallThresholdMs - packetAgeMs;
+    if (timeUntilStallMs <= 0) {
+      return options.watchdogIntervalMs;
+    }
+    return Math.min(options.watchdogIntervalMs, timeUntilStallMs);
+  };
+
   const handleWatchdog = async (connectionId: number, reason: string) => {
+    const checkSeq = ++watchdogCheckSeq;
     if (!shouldMonitorVideoStream(connectionId)) {
       resetStallConfirmations();
       return;
@@ -369,6 +410,9 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       inboundVideoStats = await getInboundVideoStatsSnapshot();
     } catch (error) {
       logger.warn('[WebRTC] Failed to read inbound video stats during stream watchdog.', error);
+      return;
+    }
+    if (checkSeq !== watchdogCheckSeq || connectionId !== options.getActiveConnectionId()) {
       return;
     }
 
@@ -493,6 +537,13 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     });
   };
 
+  const runScheduledWatchdog = async (connectionId: number, reason: string) => {
+    await handleWatchdog(connectionId, reason);
+    if (shouldMonitorVideoStream(connectionId)) {
+      scheduleWatchdog(connectionId, getNextWatchdogDelay(), 'inbound_rtp_watchdog');
+    }
+  };
+
   const start = (connectionId: number) => {
     stopVideoFrameCaptureLoop();
     stopWatchdog();
@@ -513,16 +564,17 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
         return;
       }
       frameCallbackHandle = source.requestVideoFrameCallback(() => {
-        lastRenderedVideoFrameAt = performance.now();
+        const now = performance.now();
+        lastRenderedVideoFrameAt = now;
         options.syncVideoFrameSize();
+        markRenderedFrameAdvanced(connectionId, now);
+        scheduleWatchdog(connectionId, options.stallThresholdMs, 'rendered_frame_timeout');
         scheduleNextFrame();
       });
     };
 
     scheduleNextFrame();
-    watchdogTimer = window.setInterval(() => {
-      void handleWatchdog(connectionId, 'inbound_rtp_watchdog');
-    }, options.watchdogIntervalMs);
+    scheduleWatchdog(connectionId, options.watchdogIntervalMs, 'inbound_rtp_watchdog');
   };
 
   const consumeExpectedSignalingClose = (connectionId: number) => {

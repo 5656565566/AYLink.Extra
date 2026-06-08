@@ -9,6 +9,7 @@ function createVideoStreamHealthHarness() {
   let bytesReceived = 0;
   let framesDecoded: number | null = null;
   let videoFrameCallback: VideoFrameRequestCallback | null = null;
+  let statsCallCount = 0;
   let readyState: number = haveEnoughData;
   const videoElement = {
     paused: false,
@@ -40,17 +41,20 @@ function createVideoStreamHealthHarness() {
     getReceivers: () => [
       {
         track: { kind: 'video' },
-        getStats: async () => new Map([
-          ['inbound-video', {
-            type: 'inbound-rtp',
-            kind: 'video',
-            packetsReceived,
-            bytesReceived,
-            framesDecoded,
-            framesDropped: null,
-            timestamp: performance.now()
-          }]
-        ])
+        getStats: async () => {
+          statsCallCount += 1;
+          return new Map([
+            ['inbound-video', {
+              type: 'inbound-rtp',
+              kind: 'video',
+              packetsReceived,
+              bytesReceived,
+              framesDecoded,
+              framesDropped: null,
+              timestamp: performance.now()
+            }]
+          ]);
+        }
       }
     ]
   } as unknown as RTCPeerConnection;
@@ -118,7 +122,8 @@ function createVideoStreamHealthHarness() {
     },
     setActiveConnectionId: (connectionId: number) => {
       activeConnectionId = connectionId;
-    }
+    },
+    getStatsCallCount: () => statsCallCount
   };
 }
 
@@ -144,6 +149,36 @@ describe('useVideoStreamHealth', () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(close).toHaveBeenCalledWith(1000, 'signaling-detached');
+  });
+
+  it('uses rendered video frames to advance health and detach signaling without waiting for stats polling', async () => {
+    vi.useFakeTimers();
+    const { health, close, emitRenderedFrame } = createVideoStreamHealthHarness();
+
+    health.start(1);
+    await vi.advanceTimersByTimeAsync(1);
+    emitRenderedFrame();
+
+    await vi.advanceTimersByTimeAsync(19999);
+    expect(close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(close).toHaveBeenCalledWith(1000, 'signaling-detached');
+  });
+
+  it('reschedules the watchdog from rendered frames instead of running a fixed interval', async () => {
+    vi.useFakeTimers();
+    const { health, emitRenderedFrame, getStatsCallCount } = createVideoStreamHealthHarness();
+
+    health.start(1);
+    await vi.advanceTimersByTimeAsync(1);
+    emitRenderedFrame();
+
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(getStatsCallCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getStatsCallCount()).toBe(1);
   });
 
   it('cancels pending signaling detach when the stream becomes unstable', async () => {

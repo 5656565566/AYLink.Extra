@@ -185,4 +185,54 @@ describe('useFloatingMenu', () => {
       top: '192px'
     });
   });
+
+  it('pulls an expanded floating menu back inside the visible stage', () => {
+    const menu = createMenu();
+    menu.setFloatingMenuState();
+    menu.menuX.value = 450;
+    menu.menuY.value = 520;
+    menu.isMenuExpanded.value = true;
+    menu.ensureMenuInsideStage();
+
+    expect(menu.isMenuExpanded.value).toBe(true);
+    expect(menu.menuStyle.value).toEqual({
+      left: '20px',
+      top: '520px'
+    });
+  });
+
+  it('uses live layout changes when checking whether the expanded menu fits', () => {
+    const layout = {
+      margin: 20,
+      buttonSize: 48,
+      expandedLength: 600,
+      expandDirectionSwitchRatio: 0.75
+    };
+    const menu = useFloatingMenu({
+      storageKey: 'aylink.test.floating-menu',
+      layout,
+      dragThresholdPx: 4,
+      dockSnapDistancePx: 64,
+      getStageBounds: () => ({
+        width: 360,
+        height: 260,
+        offsetLeft: 0,
+        offsetTop: 0
+      })
+    });
+
+    menu.setFloatingMenuState();
+    menu.setMenuPosition(280, 40);
+    expect(menu.isMenuExpanded.value).toBe(false);
+
+    menu.isMenuExpanded.value = true;
+    layout.expandedLength = 180;
+    menu.ensureMenuInsideStage();
+
+    expect(menu.isMenuExpanded.value).toBe(true);
+    expect(menu.menuStyle.value).toEqual({
+      left: '280px',
+      top: '40px'
+    });
+  });
 });

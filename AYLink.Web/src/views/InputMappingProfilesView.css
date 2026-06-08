@@ -1,0 +1,237 @@
+.input-mapping-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.input-mapping-header {
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid var(--fluent-stroke-default);
+}
+
+.input-mapping-title-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+}
+
+.input-mapping-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+.input-mapping-actions,
+.row-actions,
+.input-mapping-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-box {
+  width: min(340px, 38vw);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 8px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-secondary);
+}
+
+.search-box svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.search-box input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fluent-text-primary);
+  font-size: 13px;
+}
+
+.input-mapping-table-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.input-mapping-table-header,
+.input-mapping-table-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(120px, 0.9fr) 120px 180px 360px;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 24px;
+}
+
+.input-mapping-table-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fluent-text-primary);
+  border-bottom: 1px solid var(--fluent-stroke-default);
+}
+
+.input-mapping-table-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.input-mapping-table-row {
+  position: relative;
+  min-height: 62px;
+  border-bottom: 1px solid color-mix(in srgb, var(--fluent-stroke-default) 72%, transparent);
+}
+
+.input-mapping-table-row:hover,
+.input-mapping-table-row.active {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.input-mapping-table-row.active {
+  box-shadow: none;
+}
+
+.input-mapping-table-row.active::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 3px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--fluent-accent-default);
+  transform: translateY(-50%);
+}
+
+.profile-main-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-name {
+  color: var(--fluent-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-description,
+.profile-muted {
+  color: var(--fluent-text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-mapping-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fluent-text-secondary);
+  font-size: 14px;
+}
+
+.input-mapping-pagination {
+  justify-content: flex-end;
+  padding: 12px 24px;
+  color: var(--fluent-text-secondary);
+  font-size: 13px;
+  border-top: 1px solid var(--fluent-stroke-default);
+}
+
+.input-mapping-pagination select {
+  margin-left: 6px;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.fluent-btn {
+  min-height: 32px;
+  min-width: 72px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--fluent-stroke-default);
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fluent-btn:hover:not(:disabled) {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.fluent-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fluent-btn.primary {
+  background: var(--fluent-accent-default);
+  border-color: var(--fluent-accent-default);
+  color: #fff;
+}
+
+.fluent-btn.compact {
+  min-width: 58px;
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+.fluent-btn.danger {
+  color: #ff8a8a;
+}
+
+@media (max-width: 1120px) {
+  .input-mapping-table-header,
+  .input-mapping-table-row {
+    grid-template-columns: minmax(220px, 1fr) 110px 110px 150px 260px;
+  }
+
+  .row-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 820px) {
+  .input-mapping-title-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-box {
+    width: auto;
+  }
+
+  .input-mapping-table-shell {
+    overflow-x: auto;
+  }
+
+  .input-mapping-table-header,
+  .input-mapping-table-row {
+    min-width: 960px;
+  }
+}

@@ -61,6 +61,10 @@
   background-color: var(--fluent-bg-solid);
 }
 
+.key-input {
+  width: 132px;
+}
+
 .fluent-color-picker {
   appearance: none;
   -webkit-appearance: none;

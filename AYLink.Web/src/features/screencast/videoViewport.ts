@@ -16,8 +16,10 @@ export interface PointerRatios {
 
 interface VideoViewportSource {
   getBoundingClientRect: () => DOMRect;
-  videoWidth: number;
-  videoHeight: number;
+  videoWidth?: number;
+  videoHeight?: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
 }
 
 interface ClientPoint {
@@ -31,8 +33,8 @@ export const getVideoViewport = (videoElement: VideoViewportSource | null, fillM
   const rect = videoElement.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
 
-  const videoWidth = videoElement.videoWidth || rect.width;
-  const videoHeight = videoElement.videoHeight || rect.height;
+  const videoWidth = videoElement.videoWidth || videoElement.naturalWidth || rect.width;
+  const videoHeight = videoElement.videoHeight || videoElement.naturalHeight || rect.height;
   if (videoWidth <= 0 || videoHeight <= 0) return null;
 
   if (fillMode) {

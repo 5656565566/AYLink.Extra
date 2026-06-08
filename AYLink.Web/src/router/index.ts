@@ -64,6 +64,12 @@ const router = createRouter({
       meta: { requiresAuth: true, permission: 'accounts.manage' }
     },
     {
+      path: '/settings/input-mappings',
+      name: 'input-mapping-profiles',
+      component: () => import('../views/InputMappingProfilesView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/device-settings/:id',
       name: 'device-settings',
       component: () => import('../views/DeviceSettingsView.vue'),

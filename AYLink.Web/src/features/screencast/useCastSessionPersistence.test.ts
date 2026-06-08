@@ -85,6 +85,20 @@ describe('useCastSessionPersistence', () => {
     expect(first.peerClose).toHaveBeenCalled();
   });
 
+  it('can keep other persisted connections for tab switching', () => {
+    const service = useCastSessionPersistence();
+    const first = createPersistedConnection({ tabKey: 'tab-1' });
+    const second = createPersistedConnection({ tabKey: 'tab-2' });
+
+    service.persistCurrentConnection('tab-1', first.connection);
+    service.persistCurrentConnection('tab-2', second.connection, { disposeOtherConnections: false });
+
+    expect(service.getPersistedConnection('tab-1')).toBe(first.connection);
+    expect(service.getPersistedConnection('tab-2')).toBe(second.connection);
+    expect(first.dataChannelClose).not.toHaveBeenCalled();
+    expect(first.peerClose).not.toHaveBeenCalled();
+  });
+
   it('clears persisted connections by tab key', () => {
     const service = useCastSessionPersistence();
     const connection = createPersistedConnection();

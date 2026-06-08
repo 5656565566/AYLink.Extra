@@ -153,6 +153,47 @@
         </SettingItem>
       </SettingSection>
 
+      <SettingSection :title="t('Settings.InputMapping', '按键映射')">
+        <SettingItem
+          :title="t('Settings.InputMappingProfiles', '方案管理')"
+          :description="t('Settings.InputMappingProfilesDescription', '按键映射到触控的方案管理，同时也是在这里选择方案 / 关闭功能')"
+        >
+          <button class="fluent-btn" @click="openInputMappingProfiles">{{ t('Settings.Manage', '管理') }}</button>
+        </SettingItem>
+        <SettingItem
+          :title="t('Settings.InputMappingMouseCaptureKey', '鼠标捕获按键')"
+          :description="t('Settings.InputMappingMouseCaptureKeyDescription', '用于进入或退出鼠标捕获，默认 Alt')"
+        >
+          <input class="fluent-input key-input" :value="inputMappingMouseCaptureKey" @change="onInputMappingMouseCaptureKeyChange" />
+        </SettingItem>
+        <SettingItem
+          :title="t('Settings.InputMappingMouseSensitivity', '鼠标灵敏度')"
+          :description="t('Settings.InputMappingMouseSensitivityDescription', '用于视角滑动映射的全局倍率')"
+        >
+          <input
+            class="fluent-input key-input"
+            type="number"
+            min="0.1"
+            max="5"
+            step="0.1"
+            :value="inputMappingMouseSensitivity"
+            @change="onInputMappingMouseSensitivityChange"
+          />
+        </SettingItem>
+        <SettingItem
+          :title="t('Settings.InputMappingToggleHintsKey', '关闭按键提示')"
+          :description="t('Settings.InputMappingToggleHintsKeyDescription', '显示或隐藏投屏上的按键提示，默认 ~')"
+        >
+          <input class="fluent-input key-input" :value="inputMappingToggleHintsKey" @change="onInputMappingToggleHintsKeyChange" />
+        </SettingItem>
+        <SettingItem
+          :title="t('Settings.InputMappingPauseKey', '暂停按键映射')"
+          :description="t('Settings.InputMappingPauseKeyDescription', '临时暂停或恢复按键映射，默认 -')"
+        >
+          <input class="fluent-input key-input" :value="inputMappingPauseKey" @change="onInputMappingPauseKeyChange" />
+        </SettingItem>
+      </SettingSection>
+
       <SettingSection :title="t('Settings.About', '关于')">
         <SettingItem :title="t('Settings.AppVersion', '应用版本')" :description="appVersionDescription">
         </SettingItem>

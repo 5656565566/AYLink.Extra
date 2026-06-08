@@ -65,8 +65,16 @@ export function useCastTabs(getTabTitle: (tab: CastTab) => string) {
   };
 
   const syncRouteToActiveTab = async () => {
-    if (Object.keys(route.query).length > 0) {
-      await router.replace({ name: 'screencast', query: {} });
+    const {
+      deviceId: _deviceId,
+      appPackage: _appPackage,
+      appName: _appName,
+      newDisplay: _newDisplay,
+      ...preservedQuery
+    } = route.query;
+
+    if (Object.keys(route.query).length !== Object.keys(preservedQuery).length) {
+      await router.replace({ name: 'screencast', query: preservedQuery });
     }
   };
 

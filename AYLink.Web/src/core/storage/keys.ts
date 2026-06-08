@@ -27,6 +27,15 @@ export const storageKeys = {
     overrideEnabled: 'aylink.webrtc.override.enabled',
     overrideConfig: 'aylink.webrtc.override.config',
   },
+  inputMapping: {
+    activeProfileId: 'aylink.inputMapping.activeProfileId',
+    enabled: 'aylink.inputMapping.enabled',
+    mouseCaptureKey: 'aylink.inputMapping.mouseCaptureKey',
+    mouseSensitivity: 'aylink.inputMapping.mouseSensitivity',
+    pauseKey: 'aylink.inputMapping.pauseKey',
+    profiles: 'aylink.inputMapping.profiles.v1',
+    toggleHintsKey: 'aylink.inputMapping.toggleHintsKey',
+  },
   workspace: {
     pendingOpenPrefix: 'aylink_pending',
   },

@@ -20,6 +20,15 @@ interface TouchPointerInputOptions {
   mouseCompatSuppressionMs: number;
 }
 
+export interface PointerRatiosCommand {
+  phase: PointerLifecyclePhase | 'move';
+  pointerId: number;
+  ratios: PointerRatios;
+  pressure?: number;
+  pointerType?: string;
+  onFinalized?: () => void;
+}
+
 export function useTouchPointerInput(options: TouchPointerInputOptions) {
   const activePointers = new Set<number>();
   const pointerGenerations = new Map<number, number>();
@@ -105,10 +114,11 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
     pointerControlQueues.clearPointerState(pointerId);
 
     if (getPointerGeneration(pointerId) !== releaseGeneration || activePointers.has(pointerId)) {
-      return;
+      return false;
     }
 
     clearLocalPointerState(pointerId);
+    return true;
   };
 
   const markTouchPointerActivity = () => {
@@ -123,7 +133,7 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
 
   const buildPointerLifecyclePayloads = (
     phase: PointerLifecyclePhase,
-    event: PointerEvent,
+    event: { pointerId: number; pressure: number },
     ratios: PointerRatios | null
   ) => {
     return buildTouchPointerLifecyclePayloads({
@@ -185,6 +195,103 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
     return options.enqueuePointerPayloadBuffers(payloads);
   };
 
+  const sendPointerRatiosCommand = (command: PointerRatiosCommand) => {
+    const pointerType = command.pointerType || 'touch';
+    const pressure = command.pressure ?? (command.phase === 'up' || command.phase === 'cancel' ? 0 : 1);
+
+    pointerSnapshots.set(command.pointerId, {
+      xRatio: command.ratios.xRatio,
+      yRatio: command.ratios.yRatio,
+      pointerType
+    });
+
+    if (command.phase === 'move') {
+      if (!activePointers.has(command.pointerId)) {
+        return false;
+      }
+
+      const channel = options.getPointerMoveSendChannel();
+      pendingPointerMoves.set(command.pointerId, {
+        pointerId: command.pointerId,
+        xRatio: command.ratios.xRatio,
+        yRatio: command.ratios.yRatio,
+        frameWidth: command.ratios.frameWidth,
+        frameHeight: command.ratios.frameHeight,
+        pressure: pressure || 1,
+      });
+      if (!channel || channel.readyState !== 'open') {
+        schedulePointerMoveFlush();
+        return true;
+      }
+      if (pointerControlQueues.canFlushPointerMoveImmediately()) {
+        flushPendingPointerMoves();
+        if (pendingPointerMoves.size === 0) {
+          return true;
+        }
+      }
+      schedulePointerMoveFlush();
+      return true;
+    }
+
+    if (command.phase === 'down') {
+      if (activePointers.has(command.pointerId) || pendingPointerReleases.has(command.pointerId) || queuedPointerReleases.has(command.pointerId)) {
+        releasePointer(command.pointerId, 'cancel');
+      }
+
+      flushPendingPointerReleases();
+      bumpPointerGeneration(command.pointerId);
+      const payloads = buildPointerLifecyclePayloads('down', {
+        pointerId: command.pointerId,
+        pressure
+      }, command.ratios);
+      if (!payloads || payloads.length === 0) {
+        return false;
+      }
+
+      if (options.enqueuePointerPayloadBuffers(payloads)) {
+        activePointers.add(command.pointerId);
+        pendingPointerReleases.delete(command.pointerId);
+        return true;
+      }
+
+      return false;
+    }
+
+    if (!activePointers.has(command.pointerId) && !pendingPointerReleases.has(command.pointerId)) {
+      return false;
+    }
+
+    if (queuedPointerReleases.has(command.pointerId)) {
+      return true;
+    }
+
+    const releasePhase: 'up' | 'cancel' = command.phase;
+    const releaseGeneration = getPointerGeneration(command.pointerId);
+    const payloads = buildPointerLifecyclePayloads(releasePhase, {
+      pointerId: command.pointerId,
+      pressure
+    }, command.ratios);
+    if (!payloads || payloads.length === 0) {
+      return false;
+    }
+
+    pendingPointerReleases.set(command.pointerId, releasePhase);
+    queuedPointerReleases.add(command.pointerId);
+    const queued = options.enqueuePointerPayloadBuffers(payloads, () => {
+      if (finalizePointerRelease(command.pointerId, releaseGeneration)) {
+        command.onFinalized?.();
+      }
+    });
+    if (!queued) {
+      queuedPointerReleases.delete(command.pointerId);
+      schedulePointerReleaseFlush();
+    } else {
+      activePointers.delete(command.pointerId);
+    }
+
+    return queued;
+  };
+
   function releasePointer(pointerId: number, phase: 'up' | 'cancel', event?: PointerEvent) {
     if (!activePointers.has(pointerId) && !pendingPointerReleases.has(pointerId)) return false;
 
@@ -217,6 +324,8 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
       const queued = options.enqueuePointerPayloadBuffers(payloads, finalizeRelease);
       if (!queued) {
         queuedPointerReleases.delete(pointerId);
+      } else {
+        activePointers.delete(pointerId);
       }
       return queued;
     };
@@ -251,9 +360,6 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
     for (const pointerId of [...activePointers]) {
       releasePointer(pointerId, phase);
     }
-
-    pointerGenerations.clear();
-    scrcpyPointerIdTracker.clear();
   };
 
   const releaseLingeringTouchPointers = (nextPointerId: number) => {
@@ -332,6 +438,7 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
   const clearAllPointerState = () => {
     activePointers.clear();
     pointerGenerations.clear();
+    pointerSnapshots.clear();
     scrcpyPointerIdTracker.clear();
     pointerControlQueues.clearAll();
   };
@@ -339,6 +446,7 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
   const resetAllPointerState = () => {
     activePointers.clear();
     pointerGenerations.clear();
+    pointerSnapshots.clear();
     scrcpyPointerIdTracker.reset();
     pointerControlQueues.clearAll();
   };
@@ -364,6 +472,7 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
     buildQueuedPointerMovePayload,
     buildPointerLifecyclePayloads,
     sendPointerMessage,
+    sendPointerRatiosCommand,
     releasePointer,
     releaseAllPointers,
     releaseLingeringTouchPointers,

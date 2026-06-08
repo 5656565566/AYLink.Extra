@@ -26,18 +26,18 @@ export function usePointerControlQueues(options: PointerControlQueuesOptions) {
   let lastPointerMoveFlushAt = 0;
 
   const stopPointerMoveFlushLoop = () => {
-    if (pointerMoveFlushHandle != null) {
+    if (pointerMoveFlushHandle !== null) {
       window.cancelAnimationFrame(pointerMoveFlushHandle);
       pointerMoveFlushHandle = null;
     }
-    if (pointerMoveSampleTimer != null) {
+    if (pointerMoveSampleTimer !== null) {
       window.clearTimeout(pointerMoveSampleTimer);
       pointerMoveSampleTimer = null;
     }
   };
 
   const stopPointerReleaseFlushLoop = () => {
-    if (pointerReleaseFlushHandle != null) {
+    if (pointerReleaseFlushHandle !== null) {
       window.cancelAnimationFrame(pointerReleaseFlushHandle);
       pointerReleaseFlushHandle = null;
     }
@@ -61,7 +61,7 @@ export function usePointerControlQueues(options: PointerControlQueuesOptions) {
   };
 
   const schedulePointerReleaseFlush = () => {
-    if (pointerReleaseFlushHandle != null || pendingPointerReleases.size === 0) {
+    if (pointerReleaseFlushHandle !== null || pendingPointerReleases.size === 0) {
       return;
     }
 
@@ -72,7 +72,7 @@ export function usePointerControlQueues(options: PointerControlQueuesOptions) {
   };
 
   const schedulePointerMoveFlush = () => {
-    if ((pointerMoveFlushHandle != null || pointerMoveSampleTimer != null) || pendingPointerMoves.size === 0) {
+    if ((pointerMoveFlushHandle !== null || pointerMoveSampleTimer !== null) || pendingPointerMoves.size === 0) {
       return;
     }
 
@@ -139,8 +139,8 @@ export function usePointerControlQueues(options: PointerControlQueuesOptions) {
   };
 
   const canFlushPointerMoveImmediately = () =>
-    pointerMoveFlushHandle == null
-    && pointerMoveSampleTimer == null
+    pointerMoveFlushHandle === null
+    && pointerMoveSampleTimer === null
     && now() - lastPointerMoveFlushAt >= options.getCurrentPointerMoveSampleIntervalMs();
 
   const clearPointerState = (pointerId: number) => {

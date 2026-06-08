@@ -36,7 +36,7 @@ export const buildPointerMovePayload = (
   move: PendingPointerMove,
   scrcpyPointerId: bigint | null
 ) => {
-  if (scrcpyPointerId == null) {
+  if (scrcpyPointerId === null || scrcpyPointerId === undefined) {
     return null;
   }
 
@@ -62,7 +62,7 @@ export const buildPointerLifecyclePayloads = (options: BuildPointerLifecyclePayl
   const pointerId = action === SCRCPY_ACTION_DOWN
     ? options.getOrCreateScrcpyPointerId(options.event.pointerId)
     : options.getScrcpyPointerId(options.event.pointerId);
-  if (pointerId == null) {
+  if (pointerId === null || pointerId === undefined) {
     return null;
   }
 

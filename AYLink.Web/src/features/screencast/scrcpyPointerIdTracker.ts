@@ -4,7 +4,7 @@ export function createScrcpyPointerIdTracker() {
 
   const getOrCreate = (sourcePointerId: number) => {
     const existing = pointerIds.get(sourcePointerId);
-    if (existing != null) {
+    if (existing !== undefined) {
       return existing;
     }
 

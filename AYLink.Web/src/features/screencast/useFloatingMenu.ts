@@ -171,6 +171,67 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     }
   };
 
+  const ensureMenuInsideStage = () => {
+    if (isDocked.value) {
+      const position = getDockedPosition(dockedEdge.value);
+      menuX.value = position.x;
+      menuY.value = position.y;
+    } else {
+      const clamped = clampCollapsedPosition(menuX.value, menuY.value);
+      menuX.value = clamped.x;
+      menuY.value = clamped.y;
+    }
+
+    if (isMenuExpanded.value) {
+      const bounds = options.getStageBounds();
+      const minX = bounds.offsetLeft + options.layout.margin;
+      const maxX = bounds.offsetLeft + bounds.width - options.layout.margin;
+      const minY = bounds.offsetTop + options.layout.margin;
+      const maxY = bounds.offsetTop + bounds.height - options.layout.margin;
+
+      for (let index = 0; index < 3; index += 1) {
+        const frame = getMenuFrame(menuX.value, menuY.value, true, bounds, options.layout);
+        if (isMenuFrameInsideStage(frame, bounds, options.layout)) {
+          break;
+        }
+
+        if (frame.width > maxX - minX || frame.height > maxY - minY) {
+          isMenuExpanded.value = false;
+          break;
+        }
+
+        let nextX = menuX.value;
+        let nextY = menuY.value;
+        if (frame.x < minX) {
+          nextX += minX - frame.x;
+        } else if (frame.x + frame.width > maxX) {
+          nextX -= frame.x + frame.width - maxX;
+        }
+
+        if (frame.y < minY) {
+          nextY += minY - frame.y;
+        } else if (frame.y + frame.height > maxY) {
+          nextY -= frame.y + frame.height - maxY;
+        }
+
+        const clamped = clampCollapsedPosition(nextX, nextY);
+        if (clamped.x === menuX.value && clamped.y === menuY.value) {
+          isMenuExpanded.value = false;
+          break;
+        }
+
+        menuX.value = clamped.x;
+        menuY.value = clamped.y;
+      }
+    }
+
+    if (!isDocked.value) {
+      syncFloatingMenuSideFromAnchor();
+    }
+    updateMenuRelativePosition();
+    persistMenuPlacement();
+  };
+
   const setFloatingMenuState = () => {
     isDocked.value = false;
   };
@@ -198,7 +259,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     } else {
       restoreMenuPositionFromRelative();
     }
-    collapseMenuIfExpandedFrameOverflows();
+    ensureMenuInsideStage();
   };
 
   const resolveDockEdge = () => {
@@ -330,6 +391,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     }
     setMenuPosition(menuX.value, menuY.value);
     void syncDockedMenuPosition();
+    void nextTick(() => ensureMenuInsideStage());
   };
 
   return {
@@ -355,6 +417,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     getDockedMenuPosition: getDockedPosition,
     applyDockPosition,
     initializeMenuPosition,
+    ensureMenuInsideStage,
     resolveDockEdge,
     handleMenuPointerEnter,
     handleMenuPointerLeave,

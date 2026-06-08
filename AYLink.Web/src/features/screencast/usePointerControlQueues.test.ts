@@ -47,11 +47,11 @@ describe('usePointerControlQueues', () => {
   });
 
   it('flushes unqueued pointer releases and leaves queued releases alone', () => {
-    let queues: ReturnType<typeof usePointerControlQueues>;
+    const queueRef: { current: ReturnType<typeof usePointerControlQueues> | null } = { current: null };
     const releasePointer = vi.fn((pointerId: number) => {
-      queues.pendingPointerReleases.delete(pointerId);
+      queueRef.current?.pendingPointerReleases.delete(pointerId);
     });
-    queues = usePointerControlQueues({
+    const queues = usePointerControlQueues({
       flushPendingPointerControlPayloads: vi.fn(),
       getPointerMoveSendChannel: () => null,
       getCurrentPointerMoveBufferLimit: () => 1024,
@@ -59,6 +59,7 @@ describe('usePointerControlQueues', () => {
       getScrcpyPointerId: () => null,
       releasePointer
     });
+    queueRef.current = queues;
 
     queues.pendingPointerReleases.set(1, 'up');
     queues.pendingPointerReleases.set(2, 'cancel');

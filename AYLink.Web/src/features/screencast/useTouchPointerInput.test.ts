@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   SCRCPY_ACTION_DOWN,
   SCRCPY_ACTION_MOVE,
+  SCRCPY_ACTION_UP,
   SCRCPY_MSG_INJECT_TOUCH_EVENT
 } from './scrcpyControlProtocol';
 import { useTouchPointerInput } from './useTouchPointerInput';
@@ -152,7 +153,124 @@ describe('useTouchPointerInput', () => {
     expect(input.activePointers.size).toBe(0);
     expect(input.pointerGenerations.size).toBe(0);
     expect(input.pendingPointerMoves.size).toBe(0);
+    expect(input.pointerSnapshots.size).toBe(0);
     expect(input.getScrcpyPointerIds().size).toBe(0);
     expect(input.getNextScrcpyPointerId()).toBe(0n);
+  });
+
+  it('keeps pointer state until a queued release has been sent', () => {
+    let releaseSent: (() => void) | undefined;
+    const { input } = createInput({
+      enqueuePointerPayloadBuffers: (payloads, onLastSent) => {
+        if (readTouchPayload(payloads[payloads.length - 1]).action === SCRCPY_ACTION_UP) {
+          releaseSent = onLastSent;
+        }
+        return true;
+      }
+    });
+
+    input.handlePointerDown(createPointerEvent(8));
+    input.releaseAllPointers('up');
+
+    expect(input.activePointers.has(8)).toBe(false);
+    expect(input.getScrcpyPointerId(8)).toBe(0n);
+
+    releaseSent?.();
+
+    expect(input.activePointers.has(8)).toBe(false);
+    expect(input.getScrcpyPointerId(8)).toBeNull();
+  });
+
+  it('sends pointer ratio commands without DOM pointer events', () => {
+    let releaseSent: (() => void) | undefined;
+    const queuedPayloads: Uint8Array[] = [];
+    const { input } = createInput({
+      enqueuePointerPayloadBuffers: (payloads, onLastSent) => {
+        queuedPayloads.push(...payloads);
+        if (readTouchPayload(payloads[payloads.length - 1]).action === SCRCPY_ACTION_UP) {
+          releaseSent = onLastSent;
+        }
+        return true;
+      }
+    });
+    const onFinalized = vi.fn();
+
+    expect(input.sendPointerRatiosCommand({
+      phase: 'down',
+      pointerId: 100,
+      ratios: {
+        xRatio: 0.2,
+        yRatio: 0.3,
+        frameWidth: 1000,
+        frameHeight: 800
+      },
+      pressure: 0.5
+    })).toBe(true);
+    expect(input.sendPointerRatiosCommand({
+      phase: 'up',
+      pointerId: 100,
+      ratios: {
+        xRatio: 0.25,
+        yRatio: 0.35,
+        frameWidth: 1000,
+        frameHeight: 800
+      },
+      pressure: 0,
+      onFinalized
+    })).toBe(true);
+
+    expect(queuedPayloads).toHaveLength(2);
+    expect(readTouchPayload(queuedPayloads[0])).toMatchObject({
+      action: SCRCPY_ACTION_DOWN,
+      pointerId: 0n,
+      x: 200,
+      y: 240
+    });
+    expect(readTouchPayload(queuedPayloads[1])).toMatchObject({
+      action: SCRCPY_ACTION_UP,
+      pointerId: 0n,
+      x: 250,
+      y: 280
+    });
+    expect(onFinalized).not.toHaveBeenCalled();
+    releaseSent?.();
+    expect(onFinalized).toHaveBeenCalledOnce();
+  });
+
+  it('does not finalize a stale release after the same virtual pointer is pressed again', () => {
+    let firstReleaseSent: (() => void) | undefined;
+    const { input } = createInput({
+      enqueuePointerPayloadBuffers: (payloads, onLastSent) => {
+        if (readTouchPayload(payloads[payloads.length - 1]).action === SCRCPY_ACTION_UP && !firstReleaseSent) {
+          firstReleaseSent = onLastSent;
+        }
+        return true;
+      }
+    });
+    const onFinalized = vi.fn();
+
+    expect(input.sendPointerRatiosCommand({
+      phase: 'down',
+      pointerId: 200,
+      ratios: { xRatio: 0.16, yRatio: 0.78, frameWidth: 1000, frameHeight: 800 }
+    })).toBe(true);
+    expect(input.sendPointerRatiosCommand({
+      phase: 'up',
+      pointerId: 200,
+      ratios: { xRatio: 0.16, yRatio: 0.78, frameWidth: 1000, frameHeight: 800 },
+      pressure: 0,
+      onFinalized
+    })).toBe(true);
+    expect(input.sendPointerRatiosCommand({
+      phase: 'down',
+      pointerId: 200,
+      ratios: { xRatio: 0.16, yRatio: 0.7, frameWidth: 1000, frameHeight: 800 }
+    })).toBe(true);
+
+    firstReleaseSent?.();
+
+    expect(onFinalized).not.toHaveBeenCalled();
+    expect(input.activePointers.has(200)).toBe(true);
+    expect(input.getScrcpyPointerId(200)).toBe(0n);
   });
 });

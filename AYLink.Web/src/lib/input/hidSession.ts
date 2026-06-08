@@ -94,12 +94,12 @@ export const createHidSession = (options: HidSessionOptions) => {
     pressedKeys.clear();
   };
 
-  const sendKeyboardEvent = (phase: 'down' | 'up', event: KeyboardEvent) => {
+  const sendKeyboardCode = (phase: 'down' | 'up', code: string) => {
     if (!options.getIsKeyboardEnabled() || !isKeyboardCreated) {
       return false;
     }
 
-    const hidKey = mapBrowserCodeToHidKey(event.code);
+    const hidKey = mapBrowserCodeToHidKey(code);
     if (!hidKey) {
       return false;
     }
@@ -114,6 +114,10 @@ export const createHidSession = (options: HidSessionOptions) => {
       buildUhidInputMessage(SCRCPY_HID_KEYBOARD_ID, buildHidKeyboardReport(pressedKeys))
     );
     return true;
+  };
+
+  const sendKeyboardEvent = (phase: 'down' | 'up', event: KeyboardEvent) => {
+    return sendKeyboardCode(phase, event.code);
   };
 
   const sendMouseEvent = (payload: HidMouseEventPayload) => {
@@ -190,6 +194,7 @@ export const createHidSession = (options: HidSessionOptions) => {
     initializeDevices,
     resetInputs,
     releaseDevices,
+    sendKeyboardCode,
     sendKeyboardEvent,
     sendMouseEvent,
     getCurrentMouseButtons: () => currentMouseButtons,

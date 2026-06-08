@@ -142,14 +142,20 @@ export function useCastSessionPersistence() {
     }
   };
 
-  const persistCurrentConnection = (tabKey: string, connection: PersistedCastConnection | null) => {
+  const persistCurrentConnection = (
+    tabKey: string,
+    connection: PersistedCastConnection | null,
+    options: { disposeOtherConnections?: boolean } = {}
+  ) => {
     if (!connection || !tabKey) {
       return;
     }
 
     window.__aylinkPersistedCastConnections ??= {};
     window.__aylinkPersistedCastConnections[tabKey] = connection;
-    disposeOtherPersistedConnections(tabKey);
+    if (options.disposeOtherConnections !== false) {
+      disposeOtherPersistedConnections(tabKey);
+    }
   };
 
   return {

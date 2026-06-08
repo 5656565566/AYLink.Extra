@@ -20,6 +20,7 @@ import {
   type WebRtcNetworkSettingsPayload
 } from '../services/webrtcSettings';
 import { apiFetch, readApiErrorMessage, resolveApiErrorMessage } from '../utils/api';
+import { storageKeys } from '../core/storage/keys';
 
 export default defineComponent({
   name: 'SettingsView',
@@ -106,6 +107,11 @@ export default defineComponent({
     const currentUser = auth.currentUser;
 
     const notifications = useNotification();
+
+    const inputMappingMouseCaptureKey = ref(localStorage.getItem(storageKeys.inputMapping.mouseCaptureKey) || 'Alt');
+    const inputMappingMouseSensitivity = ref(localStorage.getItem(storageKeys.inputMapping.mouseSensitivity) || '1');
+    const inputMappingToggleHintsKey = ref(localStorage.getItem(storageKeys.inputMapping.toggleHintsKey) || '~');
+    const inputMappingPauseKey = ref(localStorage.getItem(storageKeys.inputMapping.pauseKey) || '-');
 
     const canManageAccounts = computed(() => hasPermission('accounts.manage'));
     const canManageDevices = computed(() => hasPermission('devices.manage'));
@@ -383,6 +389,32 @@ export default defineComponent({
 
     function onWeakNetworkModeChange(event: Event) {
       setWeakNetworkMode((event.target as HTMLInputElement).checked);
+    }
+
+    function onInputMappingMouseCaptureKeyChange(event: Event) {
+      const value = ((event.target as HTMLInputElement).value || 'Alt').trim();
+      inputMappingMouseCaptureKey.value = value || 'Alt';
+      localStorage.setItem(storageKeys.inputMapping.mouseCaptureKey, inputMappingMouseCaptureKey.value);
+    }
+
+    function onInputMappingMouseSensitivityChange(event: Event) {
+      const rawValue = ((event.target as HTMLInputElement).value || '1').trim();
+      const numeric = Number(rawValue);
+      const normalized = Number.isFinite(numeric) ? String(Math.min(5, Math.max(0.1, numeric))) : '1';
+      inputMappingMouseSensitivity.value = normalized;
+      localStorage.setItem(storageKeys.inputMapping.mouseSensitivity, normalized);
+    }
+
+    function onInputMappingToggleHintsKeyChange(event: Event) {
+      const value = ((event.target as HTMLInputElement).value || '~').trim();
+      inputMappingToggleHintsKey.value = value || '~';
+      localStorage.setItem(storageKeys.inputMapping.toggleHintsKey, inputMappingToggleHintsKey.value);
+    }
+
+    function onInputMappingPauseKeyChange(event: Event) {
+      const value = ((event.target as HTMLInputElement).value || '-').trim();
+      inputMappingPauseKey.value = value || '-';
+      localStorage.setItem(storageKeys.inputMapping.pauseKey, inputMappingPauseKey.value);
     }
 
     function normalizeVersion(value: string) {
@@ -686,6 +718,10 @@ export default defineComponent({
 
     function openAccountManagement() {
       router.push({ name: 'account-settings' });
+    }
+
+    function openInputMappingProfiles() {
+      router.push({ name: 'input-mapping-profiles' });
     }
 
     function resetGroupForm() {
@@ -1305,6 +1341,10 @@ export default defineComponent({
       pointerSamplingRateHz,
       previewRefreshInterval,
       weakNetworkMode,
+      inputMappingMouseCaptureKey,
+      inputMappingMouseSensitivity,
+      inputMappingToggleHintsKey,
+      inputMappingPauseKey,
       setAdaptivePointerSampling,
       setBackgroundMute,
       setNewDisplayDpiMode,
@@ -1393,6 +1433,10 @@ export default defineComponent({
       onPointerSamplingRateChange,
       onPreviewRefreshIntervalChange,
       onWeakNetworkModeChange,
+      onInputMappingMouseCaptureKeyChange,
+      onInputMappingMouseSensitivityChange,
+      onInputMappingToggleHintsKeyChange,
+      onInputMappingPauseKeyChange,
       normalizeVersion,
       compareVersions,
       openExternalUrl,
@@ -1419,6 +1463,7 @@ export default defineComponent({
       saveLocalWebRtcSettings,
       loadLocalWebRtcSettings,
       openAccountManagement,
+      openInputMappingProfiles,
       openCreateGroupDialog,
       toggleGroupManagementList,
       openEditGroupDialog,

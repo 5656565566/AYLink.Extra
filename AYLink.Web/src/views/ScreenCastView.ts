@@ -12,12 +12,12 @@ import {
   ArrowExpand24Regular,
   Phone20Regular
 } from '@vicons/fluent';
-import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from '../composables/useI18n';
 import { useAppSettings } from '../services/appSettings';
 import { getAccessToken, useAuth } from '../services/auth';
 import { loadLocalWebRtcOverrideConfig, loadLocalWebRtcOverrideEnabled } from '../services/webrtcSettings';
-import { apiFetch, readApiErrorMessage } from '../utils/api';
+import { apiFetch } from '../utils/api';
 import WorkspaceTabs from '../components/WorkspaceTabs.vue';
 import {
   clearPendingReconnect as clearPendingReconnectTimer,
@@ -41,6 +41,40 @@ import {
 import { useCastDeviceContext } from '../features/screencast/useCastDeviceContext';
 import { useCastTabs } from '../features/screencast/useCastTabs';
 import { useCastSessionPersistence } from '../features/screencast/useCastSessionPersistence';
+import {
+  ANDROID_KEYCODE_BACK,
+  ANDROID_KEYCODE_HOME,
+  ANDROID_KEYCODE_MENU,
+  ANDROID_KEYCODE_MUTE,
+  ANDROID_KEYCODE_POWER,
+  ANDROID_KEYCODE_RECENT,
+  ANDROID_KEYCODE_VOLUME_DOWN,
+  ANDROID_KEYCODE_VOLUME_UP,
+  SCRCPY_ACTION_DOWN,
+  SCRCPY_ACTION_MOVE,
+  SCRCPY_ACTION_UP,
+  SCRCPY_MSG_INJECT_KEYCODE,
+  SCRCPY_MSG_INJECT_TOUCH_EVENT,
+  SCRCPY_MSG_RESIZE_DISPLAY,
+  SCRCPY_MSG_SET_SCREEN_POWER_MODE,
+  SCRCPY_PRIMARY_BUTTON,
+  buildInjectKeycodeMessage,
+  buildResizeDisplayMessage,
+  buildScreenPowerMessage,
+  buildTouchMessage,
+  mapAndroidCommandToKeycode,
+  mapBrowserCodeToAndroidKeyCode,
+  writeUInt16BE,
+  writeUInt32BE,
+  writeUInt64BE
+} from '../features/screencast/scrcpyControlProtocol';
+import {
+  getPointerRatios as getPointerRatiosFromViewport,
+  getVideoViewport as resolveVideoViewport
+} from '../features/screencast/videoViewport';
+import { useFloatingMenu } from '../features/screencast/useFloatingMenu';
+import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
+import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import type { CastTab } from '../types/screencast';
 import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
 import {
@@ -88,8 +122,6 @@ export default defineComponent({
     Phone20Regular
   },
   setup() {
-    type DockedEdge = 'left' | 'right' | 'none';
-
     interface WebRtcNetworkSettingsPayload {
       IceTransportPolicy?: string;
       IceServers?: Array<{
@@ -106,13 +138,6 @@ export default defineComponent({
       message?: string;
       detail?: string;
       retryable?: boolean;
-    }
-
-    interface PersistedFloatingMenuPlacement {
-      isDocked?: boolean;
-      dockedEdge?: DockedEdge;
-      relativeRight?: number;
-      relativeTop?: number;
     }
 
     const CAST_MENU_PLACEMENT_STORAGE_KEY = 'aylink_cast_menu_placement';
@@ -177,43 +202,13 @@ export default defineComponent({
 
     const MENU_EXPAND_DIRECTION_SWITCH_RATIO = 0.75;
 
+    const MENU_DRAG_THRESHOLD_PX = 4;
+
     const CLIPBOARD_WINDOW_MARGIN = 16;
 
     const CLIPBOARD_WINDOW_DEFAULT_WIDTH = 380;
 
     const CLIPBOARD_WINDOW_DEFAULT_HEIGHT = 220;
-
-    const SCRCPY_PRIMARY_BUTTON = 1;
-
-    const SCRCPY_MSG_INJECT_KEYCODE = 0;
-
-    const SCRCPY_MSG_INJECT_TOUCH_EVENT = 2;
-
-    const SCRCPY_MSG_SET_SCREEN_POWER_MODE = 10;
-
-    const SCRCPY_MSG_RESIZE_DISPLAY = 21;
-
-    const SCRCPY_ACTION_DOWN = 0;
-
-    const SCRCPY_ACTION_UP = 1;
-
-    const SCRCPY_ACTION_MOVE = 2;
-
-    const ANDROID_KEYCODE_BACK = 4;
-
-    const ANDROID_KEYCODE_HOME = 3;
-
-    const ANDROID_KEYCODE_MENU = 82;
-
-    const ANDROID_KEYCODE_RECENT = 187;
-
-    const ANDROID_KEYCODE_POWER = 26;
-
-    const ANDROID_KEYCODE_VOLUME_UP = 24;
-
-    const ANDROID_KEYCODE_VOLUME_DOWN = 25;
-
-    const ANDROID_KEYCODE_MUTE = 164;
 
     const { t } = useI18n();
 
@@ -260,9 +255,6 @@ export default defineComponent({
 
     let attachedVideoElement: HTMLVideoElement | null = null;
     const rtcConfigRequest = createLatestRequestController();
-    const clipboardRequest = createLatestRequestController();
-
-    const clipboardFloatElement = ref<HTMLDivElement | null>(null);
 
     const isConnected = ref(false);
 
@@ -326,55 +318,87 @@ export default defineComponent({
       return isOrientationConsistentForFill.value;
     });
 
-    const isMenuExpanded = ref(true);
+    const remoteClipboard = useRemoteClipboard({
+      margin: CLIPBOARD_WINDOW_MARGIN,
+      defaultWidth: CLIPBOARD_WINDOW_DEFAULT_WIDTH,
+      defaultHeight: CLIPBOARD_WINDOW_DEFAULT_HEIGHT,
+      getDeviceId: () => deviceId.value,
+      getStageBounds: () => getStageBounds(),
+      t
+    });
 
-    const isDocked = ref(true);
+    const {
+      clipboardFloatElement,
+      isClipboardWindowVisible,
+      clipboardText,
+      clipboardStatusText,
+      isClipboardLoading,
+      isClipboardSaving,
+      clipboardWindowX,
+      clipboardWindowY,
+      clipboardWindowStyle,
+      getClipboardWindowSize,
+      clampClipboardWindowPosition,
+      initializeClipboardWindowPosition,
+      clampClipboardWindowToStage,
+      applyRemoteClipboardText,
+      readClipboard,
+      syncClipboard,
+      pasteClipboard,
+      openClipboardWindow,
+      closeClipboardWindow,
+      toggleClipboardWindow,
+      startClipboardDrag,
+      handleWindowPointerMove: handleClipboardWindowPointerMove,
+      finishClipboardDrag,
+      cancelClipboardDrag
+    } = remoteClipboard;
 
-    const isMenuDragActive = ref(false);
+    const floatingMenu = useFloatingMenu({
+      storageKey: CAST_MENU_PLACEMENT_STORAGE_KEY,
+      layout: {
+        margin: MENU_MARGIN,
+        buttonSize: MENU_BUTTON_SIZE,
+        expandedLength: MENU_EXPANDED_LENGTH,
+        expandDirectionSwitchRatio: MENU_EXPAND_DIRECTION_SWITCH_RATIO
+      },
+      dragThresholdPx: MENU_DRAG_THRESHOLD_PX,
+      dockSnapDistancePx: 64,
+      getStageBounds: () => getStageBounds()
+    });
 
-    const isClipboardWindowVisible = ref(false);
-
-    const clipboardText = ref('');
-
-    const clipboardStatusText = ref('');
-
-    const isClipboardLoading = ref(false);
-
-    const isClipboardSaving = ref(false);
-
-    const clipboardWindowX = ref(0);
-
-    const clipboardWindowY = ref(0);
-
-    const dockedEdge = ref<DockedEdge>('right');
-
-    const isMenuHorizontalLocked = ref(false);
-
-    const menuX = ref(0);
-
-    const menuY = ref(0);
-
-    const menuRelativeX = ref(0);
-
-    const menuRelativeY = ref(0.5);
+    const {
+      isMenuExpanded,
+      isDocked,
+      isMenuDragActive,
+      dockedEdge,
+      menuX,
+      menuY,
+      menuRelativeX,
+      menuRelativeY,
+      isHorizontalLayout,
+      menuStyle,
+      clampCollapsedMenuPosition,
+      updateMenuRelativePosition,
+      setMenuPosition,
+      restoreMenuPositionFromRelative,
+      loadPersistedMenuPlacement,
+      applyDockPosition,
+      initializeMenuPosition,
+      handleMenuPointerEnter,
+      handleMenuPointerLeave,
+      syncDockedMenuPosition,
+      finishMenuDrag,
+      startMenuDrag,
+      handleWindowPointerMove: handleMenuWindowPointerMove,
+      toggleMenu
+    } = floatingMenu;
 
     let remoteVideoStream = new MediaStream();
 
     let remoteAudioStream = new MediaStream();
 
     const remoteTracks = new Map<'audio' | 'video', MediaStreamTrack>();
-
-    const activePointers = new Set<number>();
-
-    const pointerGenerations = new Map<number, number>();
-
-    const pointerSnapshots = new Map<number, { xRatio: number; yRatio: number; pointerType: string }>();
-
-    const pendingPointerReleases = new Map<number, 'up' | 'cancel'>();
-
-    const queuedPointerReleases = new Set<number>();
-
-    const pendingPointerMoves = new Map<number, PendingPointerMove>();
 
     let peerConnection: RTCPeerConnection | null = null;
 
@@ -490,6 +514,63 @@ export default defineComponent({
 
     const pendingPointerControlPayloads = controlChannels.pendingPointerControlPayloads;
 
+    const touchPointerInput = useTouchPointerInput({
+      getVideoElement: () => videoElement.value,
+      getPointerRatios: (event) => getPointerRatios(event),
+      getPrimaryControlChannel: () => dataChannel,
+      getPointerMoveSendChannel: () => getPointerMoveSendChannel(),
+      getCurrentPointerMoveBufferLimit: () => getCurrentPointerMoveBufferLimit(),
+      getCurrentPointerMoveSampleIntervalMs: () => getCurrentPointerMoveSampleIntervalMs(),
+      flushPendingPointerControlPayloads: () => flushPendingPointerControlPayloads(),
+      enqueuePointerPayloadBuffers: (payloads, onLastSent) => enqueuePointerPayloadBuffers(payloads, onLastSent),
+      mouseCompatSuppressionMs: MOUSE_COMPAT_SUPPRESSION_MS
+    });
+
+    const {
+      activePointers,
+      pointerGenerations,
+      pointerSnapshots,
+      pointerControlQueues,
+      pendingPointerReleases,
+      queuedPointerReleases,
+      pendingPointerMoves,
+      createSyntheticPointerEvent,
+      getOrCreateScrcpyPointerId,
+      getScrcpyPointerId,
+      releaseScrcpyPointerId,
+      clearLocalPointerState,
+      getPointerGeneration,
+      bumpPointerGeneration,
+      finalizePointerRelease,
+      markTouchPointerActivity,
+      shouldIgnoreCompatMouse,
+      buildQueuedPointerMovePayload,
+      buildPointerLifecyclePayloads,
+      sendPointerMessage,
+      releasePointer,
+      releaseAllPointers: releaseTouchPointers,
+      releaseLingeringTouchPointers,
+      getLatestPointerSample,
+      handlePointerDown,
+      handlePointerMove,
+      handlePointerUp,
+      handlePointerCancel,
+      handlePointerCaptureLost,
+      clearAllPointerState,
+      resetAllPointerState,
+      stopPointerMoveFlushLoop,
+      stopPointerReleaseFlushLoop,
+      flushPendingPointerReleases,
+      schedulePointerReleaseFlush,
+      schedulePointerMoveFlush,
+      flushPendingPointerMoves
+    } = touchPointerInput;
+
+    const releaseAllPointers = (phase: 'up' | 'cancel' = 'cancel') => {
+      releaseTouchPointers(phase);
+      activeMousePointerId = null;
+    };
+
     let pendingResumePlaybackTimer: number | null = null;
 
     let pendingDisplayResizeTimer: number | null = null;
@@ -516,48 +597,9 @@ export default defineComponent({
 
     let videoContainerResizeObserver: ResizeObserver | null = null;
 
-    let dragStartOffset = { x: 0, y: 0 };
-
-    let dragStartPoint = { x: 0, y: 0 };
-
-    let isDraggingMenu = false;
-
-    let didDragMenu = false;
-
-    let wasMenuExpandedAtDragStart = false;
-
-    let currentMenuExpandDirection: 'left' | 'right' = 'right';
-
-    let isDraggingClipboard = false;
-
-    let clipboardDragStartOffset = { x: 0, y: 0 };
-
-    let nextScrcpyPointerId = 0n;
-
-    const scrcpyPointerIds = new Map<number, bigint>();
-
-    let lastTouchPointerAt = 0;
-
-    let pointerMoveFlushHandle: number | null = null;
-
-    let pointerMoveSampleTimer: number | null = null;
-
-    let pointerReleaseFlushHandle: number | null = null;
-
-    let lastPointerMoveFlushAt = 0;
-
     let isIceRestartInFlight = false;
 
     let currentScrcpySessionId = '';
-
-    interface PendingPointerMove {
-      pointerId: number;
-      xRatio: number;
-      yRatio: number;
-      frameWidth: number;
-      frameHeight: number;
-      pressure: number;
-    }
 
     const getTabTitle = (tab: CastTab) => {
       const baseTitle = tab.deviceName || t('Screencast.DefaultTabTitle', '设备投屏');
@@ -651,63 +693,6 @@ export default defineComponent({
       connecting: isConnecting.value,
       connected: isConnected.value
     }));
-
-    const menuStyle = computed(() => {
-      const frame = getMenuFrameAt(menuX.value, menuY.value, isMenuExpanded.value);
-      return {
-        left: `${frame.x}px`,
-        top: `${frame.y}px`
-      };
-    });
-
-    const getClipboardWindowSize = () => {
-      const rect = clipboardFloatElement.value?.getBoundingClientRect();
-      return {
-        width: rect?.width && rect.width > 0 ? rect.width : CLIPBOARD_WINDOW_DEFAULT_WIDTH,
-        height: rect?.height && rect.height > 0 ? rect.height : CLIPBOARD_WINDOW_DEFAULT_HEIGHT
-      };
-    };
-
-    const clampClipboardWindowPosition = (x: number, y: number) => {
-      const bounds = getStageBounds();
-      const size = getClipboardWindowSize();
-      const minX = bounds.offsetLeft + CLIPBOARD_WINDOW_MARGIN;
-      const minY = bounds.offsetTop + CLIPBOARD_WINDOW_MARGIN;
-      const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - size.width - CLIPBOARD_WINDOW_MARGIN);
-      const maxY = Math.max(minY, bounds.offsetTop + bounds.height - size.height - CLIPBOARD_WINDOW_MARGIN);
-      return {
-        x: Math.min(Math.max(minX, x), maxX),
-        y: Math.min(Math.max(minY, y), maxY)
-      };
-    };
-
-    const initializeClipboardWindowPosition = () => {
-      const bounds = getStageBounds();
-      const size = getClipboardWindowSize();
-      const clamped = clampClipboardWindowPosition(
-        bounds.offsetLeft + bounds.width - size.width - CLIPBOARD_WINDOW_MARGIN,
-        bounds.offsetTop + bounds.height - size.height - CLIPBOARD_WINDOW_MARGIN
-      );
-      clipboardWindowX.value = clamped.x;
-      clipboardWindowY.value = clamped.y;
-    };
-
-    const clipboardWindowStyle = computed(() => {
-      let x = clipboardWindowX.value;
-      let y = clipboardWindowY.value;
-      if (x === 0 && y === 0) {
-        const bounds = getStageBounds();
-        const size = getClipboardWindowSize();
-        x = bounds.offsetLeft + bounds.width - size.width - CLIPBOARD_WINDOW_MARGIN;
-        y = bounds.offsetTop + bounds.height - size.height - CLIPBOARD_WINDOW_MARGIN;
-      }
-      return {
-        left: `${x}px`,
-        top: `${y}px`,
-        right: 'auto',
-        bottom: 'auto'
-      };
-    });
 
     const getPersistentAudioElement = () => {
       if (!window.__aylinkPersistentAudioElement) {
@@ -874,17 +859,6 @@ export default defineComponent({
       videoStreamHealth.start(connectionId);
     };
 
-    const stopPointerMoveFlushLoop = () => {
-      if (pointerMoveFlushHandle != null) {
-        window.cancelAnimationFrame(pointerMoveFlushHandle);
-        pointerMoveFlushHandle = null;
-      }
-      if (pointerMoveSampleTimer != null) {
-        window.clearTimeout(pointerMoveSampleTimer);
-        pointerMoveSampleTimer = null;
-      }
-    };
-
     const getHighFrequencyControlChannel = () =>
       controlChannels.getHighFrequencyControlChannel();
 
@@ -935,13 +909,6 @@ export default defineComponent({
 
     const stopPointerControlFlushLoop = () => {
       controlChannels.stopPointerControlFlushLoop();
-    };
-
-    const stopPointerReleaseFlushLoop = () => {
-      if (pointerReleaseFlushHandle != null) {
-        window.cancelAnimationFrame(pointerReleaseFlushHandle);
-        pointerReleaseFlushHandle = null;
-      }
     };
 
     const flushPendingPointerControlPayloads = () => {
@@ -1178,311 +1145,6 @@ export default defineComponent({
       };
     };
 
-    const doesVerticalLayoutOverflowAt = (y: number) => {
-      const bounds = getStageBounds();
-      const stageBottom = bounds.offsetTop + bounds.height - MENU_MARGIN;
-      return y + MENU_EXPANDED_LENGTH > stageBottom;
-    };
-
-    const shouldUseHorizontalLayoutAt = (y: number) => {
-      if (!isMenuExpanded.value) {
-        return false;
-      }
-
-      return isMenuHorizontalLocked.value || doesVerticalLayoutOverflowAt(y);
-    };
-
-    const getMenuBoundsAt = (y: number) => {
-      const horizontal = shouldUseHorizontalLayoutAt(y);
-      return {
-        horizontal,
-        width: horizontal ? (isMenuExpanded.value ? MENU_EXPANDED_LENGTH : MENU_BUTTON_SIZE) : MENU_BUTTON_SIZE,
-        height: horizontal ? MENU_BUTTON_SIZE : (isMenuExpanded.value ? MENU_EXPANDED_LENGTH : MENU_BUTTON_SIZE)
-      };
-    };
-
-    const isHorizontalLayout = computed(() => getMenuBoundsAt(menuY.value).horizontal);
-
-    const getMenuExpandDirectionAt = (x: number, y: number, expanded = isMenuExpanded.value) => {
-      const bounds = getStageBounds();
-      const centerX = x + (MENU_BUTTON_SIZE / 2);
-      const centerRatio = bounds.width <= 0 ? 0.5 : (centerX - bounds.offsetLeft) / bounds.width;
-      if (!expanded) {
-        return centerRatio <= 0.5 ? 'right' : 'left';
-      }
-
-      const menuBounds = getMenuBoundsAt(y);
-      if (!menuBounds.horizontal) {
-        return centerRatio <= 0.5 ? 'right' : 'left';
-      }
-
-      const extraWidth = Math.max(0, menuBounds.width - MENU_BUTTON_SIZE);
-      const availableLeft = centerX - (MENU_BUTTON_SIZE / 2) - bounds.offsetLeft - MENU_MARGIN;
-      const availableRight = bounds.offsetLeft + bounds.width - (centerX + (MENU_BUTTON_SIZE / 2)) - MENU_MARGIN;
-      const leftEnough = availableLeft >= extraWidth;
-      const rightEnough = availableRight >= extraWidth;
-
-      if (leftEnough && !rightEnough) {
-        return 'left';
-      }
-
-      if (rightEnough && !leftEnough) {
-        return 'right';
-      }
-
-      if (leftEnough && rightEnough) {
-        if (centerRatio <= (1 - MENU_EXPAND_DIRECTION_SWITCH_RATIO)) {
-          return 'right';
-        }
-
-        if (centerRatio >= MENU_EXPAND_DIRECTION_SWITCH_RATIO) {
-          return 'left';
-        }
-
-        return currentMenuExpandDirection;
-      }
-
-      return availableRight >= availableLeft ? 'right' : 'left';
-    };
-
-    const getMenuFrameAt = (x: number, y: number, expanded: boolean) => {
-      if (!expanded) {
-        return {
-          x,
-          y,
-          width: MENU_BUTTON_SIZE,
-          height: MENU_BUTTON_SIZE,
-          horizontal: false,
-          direction: getMenuExpandDirectionAt(x, y, false)
-        };
-      }
-
-      const bounds = getMenuBoundsAt(y);
-      const direction = getMenuExpandDirectionAt(x, y, true);
-      return {
-        x: bounds.horizontal && direction === 'left' ? x - (bounds.width - MENU_BUTTON_SIZE) : x,
-        y,
-        width: bounds.width,
-        height: bounds.height,
-        horizontal: bounds.horizontal,
-        direction
-      };
-    };
-
-    const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(min, value), max);
-
-    const getCollapsedMenuPositionRange = () => {
-      const bounds = getStageBounds();
-      const minX = bounds.offsetLeft + MENU_MARGIN;
-      const maxX = Math.max(minX, bounds.offsetLeft + bounds.width - MENU_BUTTON_SIZE - MENU_MARGIN);
-      const minY = bounds.offsetTop + MENU_MARGIN;
-      const maxY = Math.max(minY, bounds.offsetTop + bounds.height - MENU_BUTTON_SIZE - MENU_MARGIN);
-      return { minX, maxX, minY, maxY };
-    };
-
-    const clampCollapsedMenuPosition = (x: number, y: number) => {
-      const range = getCollapsedMenuPositionRange();
-      return {
-        x: clampValue(x, range.minX, range.maxX),
-        y: clampValue(y, range.minY, range.maxY)
-      };
-    };
-
-    const clampExpandedMenuPosition = (x: number, y: number) => {
-      const bounds = getStageBounds();
-      const frame = getMenuFrameAt(x, y, true);
-      const minFrameX = bounds.offsetLeft + MENU_MARGIN;
-      const maxFrameX = Math.max(minFrameX, bounds.offsetLeft + bounds.width - frame.width - MENU_MARGIN);
-      const minFrameY = bounds.offsetTop + MENU_MARGIN;
-      const maxFrameY = Math.max(minFrameY, bounds.offsetTop + bounds.height - frame.height - MENU_MARGIN);
-      const clampedFrameX = Math.min(Math.max(minFrameX, frame.x), maxFrameX);
-      const clampedFrameY = Math.min(Math.max(minFrameY, frame.y), maxFrameY);
-      return {
-        x: frame.horizontal && frame.direction === 'left'
-          ? clampedFrameX + (frame.width - MENU_BUTTON_SIZE)
-          : clampedFrameX,
-        y: clampedFrameY
-      };
-    };
-
-    const clampMenuPosition = (x: number, y: number) => {
-      return isMenuExpanded.value
-        ? clampExpandedMenuPosition(x, y)
-        : clampCollapsedMenuPosition(x, y);
-    };
-
-    const syncMenuSideState = () => {
-      currentMenuExpandDirection = getMenuExpandDirectionAt(menuX.value, menuY.value, isMenuExpanded.value);
-    };
-
-    const shouldCollapseExpandedMenuWhileDragging = (_event: PointerEvent, _rawX: number, rawY: number, _clampedX: number, clampedY: number) => {
-      if (!wasMenuExpandedAtDragStart) {
-        return false;
-      }
-
-      const wasClampedVertically = Math.abs(rawY - clampedY) > 0.5;
-      return wasClampedVertically
-        && doesVerticalLayoutOverflowAt(rawY)
-        && rawY > clampedY;
-    };
-
-    const updateMenuRelativePosition = () => {
-      const clamped = clampCollapsedMenuPosition(menuX.value, menuY.value);
-      const range = getCollapsedMenuPositionRange();
-
-      menuRelativeX.value = range.maxX <= range.minX ? 0 : (range.maxX - clamped.x) / (range.maxX - range.minX);
-      menuRelativeY.value = range.maxY <= range.minY ? 0 : (clamped.y - range.minY) / (range.maxY - range.minY);
-    };
-
-    const persistMenuPlacement = () => {
-      try {
-        const placement: PersistedFloatingMenuPlacement = {
-          isDocked: isDocked.value,
-          dockedEdge: dockedEdge.value,
-          relativeRight: menuRelativeX.value,
-          relativeTop: menuRelativeY.value
-        };
-        localStorage.setItem(CAST_MENU_PLACEMENT_STORAGE_KEY, JSON.stringify(placement));
-      } catch {
-        // ignore local persistence failures
-      }
-    };
-
-    const setMenuPosition = (x: number, y: number, syncRelative = true) => {
-      const clamped = clampMenuPosition(x, y);
-      menuX.value = clamped.x;
-      menuY.value = clamped.y;
-      syncMenuSideState();
-      if (isMenuExpanded.value) {
-        isMenuHorizontalLocked.value = doesVerticalLayoutOverflowAt(clamped.y);
-      } else {
-        isMenuHorizontalLocked.value = false;
-      }
-      if (syncRelative) {
-        updateMenuRelativePosition();
-      }
-      persistMenuPlacement();
-    };
-
-    const restoreMenuPositionFromRelative = () => {
-      const range = getCollapsedMenuPositionRange();
-
-      setMenuPosition(
-        range.maxX - (range.maxX - range.minX) * menuRelativeX.value,
-        range.minY + (range.maxY - range.minY) * menuRelativeY.value,
-        false
-      );
-    };
-
-    const loadPersistedMenuPlacement = () => {
-      try {
-        const raw = localStorage.getItem(CAST_MENU_PLACEMENT_STORAGE_KEY);
-        if (!raw) {
-          return;
-        }
-
-        const parsed = JSON.parse(raw) as PersistedFloatingMenuPlacement | null;
-        if (!parsed || typeof parsed !== 'object') {
-          return;
-        }
-
-        if (typeof parsed.relativeRight === 'number' && Number.isFinite(parsed.relativeRight)) {
-          menuRelativeX.value = Math.min(Math.max(parsed.relativeRight, 0), 1);
-        }
-
-        if (typeof parsed.relativeTop === 'number' && Number.isFinite(parsed.relativeTop)) {
-          menuRelativeY.value = Math.min(Math.max(parsed.relativeTop, 0), 1);
-        }
-
-        if (parsed.dockedEdge === 'left' || parsed.dockedEdge === 'right' || parsed.dockedEdge === 'none') {
-          dockedEdge.value = parsed.dockedEdge;
-        }
-
-        if (typeof parsed.isDocked === 'boolean') {
-          isDocked.value = parsed.isDocked;
-        }
-      } catch {
-        // ignore local persistence failures
-      }
-    };
-
-    const setFloatingMenuState = () => {
-      isDocked.value = false;
-      dockedEdge.value = 'none';
-    };
-
-    const setDockedMenuState = (edge: Exclude<DockedEdge, 'none'>) => {
-      isDocked.value = true;
-      dockedEdge.value = edge;
-    };
-
-    const getDockedMenuPosition = (edge: Exclude<DockedEdge, 'none'>) => {
-      const bounds = getStageBounds();
-      const menuBounds = getMenuBoundsAt(menuY.value);
-      const collapsedRange = getCollapsedMenuPositionRange();
-      const maxY = Math.max(
-        collapsedRange.minY,
-        bounds.offsetTop + bounds.height - menuBounds.height - MENU_MARGIN
-      );
-      const y = clampValue(menuY.value, collapsedRange.minY, maxY);
-      return {
-        x: edge === 'left' ? collapsedRange.minX : collapsedRange.maxX,
-        y
-      };
-    };
-
-    const applyDockPosition = (edge: DockedEdge, collapseExpanded = false) => {
-      if (edge === 'none') {
-        return;
-      }
-
-      setDockedMenuState(edge);
-      if (collapseExpanded && isMenuExpanded.value) {
-        isMenuExpanded.value = false;
-        isMenuHorizontalLocked.value = false;
-      }
-      const position = getDockedMenuPosition(edge);
-      setMenuPosition(position.x, position.y);
-    };
-
-    const collapseDockedExpandedMenu = () => {
-      if (!isDocked.value || dockedEdge.value === 'none' || !isMenuExpanded.value) {
-        return false;
-      }
-
-      isMenuExpanded.value = false;
-      isMenuHorizontalLocked.value = false;
-      applyDockPosition(dockedEdge.value);
-      return true;
-    };
-
-    const initializeMenuPosition = () => {
-      if (isDocked.value && dockedEdge.value !== 'none') {
-        applyDockPosition(dockedEdge.value);
-      } else {
-        restoreMenuPositionFromRelative();
-      }
-    };
-
-    const resolveDockEdge = () => {
-      const collapsedRange = getCollapsedMenuPositionRange();
-      const leftDockX = collapsedRange.minX;
-      const rightDockX = collapsedRange.maxX;
-      const distances = [
-        { edge: 'left' as DockedEdge, value: Math.abs(menuX.value - leftDockX) },
-        { edge: 'right' as DockedEdge, value: Math.abs(menuX.value - rightDockX) }
-      ].sort((a, b) => a.value - b.value);
-
-      const nearest = distances[0];
-      if (nearest.value <= 64) {
-        applyDockPosition(nearest.edge, true);
-      } else {
-        setFloatingMenuState();
-        setMenuPosition(menuX.value, menuY.value);
-      }
-      persistMenuPlacement();
-    };
-
     const syncRefsFromActiveTab = () => {
       const tab = activeTab.value;
       deviceId.value = tab?.deviceId ?? '';
@@ -1512,23 +1174,6 @@ export default defineComponent({
     const handleTabOpened = async () => {
       await refreshDeviceContext();
       scheduleStartConnection();
-    };
-
-    const createSyntheticPointerEvent = (pointerId: number, xRatio = 0.5, yRatio = 0.5): PointerEvent | null => {
-      if (!videoElement.value) return null;
-      const rect = videoElement.value.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return null;
-      const snapshot = pointerSnapshots.get(pointerId);
-
-      return new PointerEvent('pointercancel', {
-        pointerId,
-        pointerType: snapshot?.pointerType ?? 'touch',
-        isPrimary: true,
-        clientX: rect.left + rect.width * (snapshot?.xRatio ?? xRatio),
-        clientY: rect.top + rect.height * (snapshot?.yRatio ?? yRatio),
-        buttons: 0,
-        pressure: 0
-      });
     };
 
     const setupControlChannel = (channel: RTCDataChannel) => {
@@ -2122,160 +1767,6 @@ export default defineComponent({
       pointerMoveBufferLimit: POINTER_MOVE_BUFFER_LIMIT
     });
 
-    const writeUInt16BE = (view: DataView, offset: number, value: number) => {
-      view.setUint16(offset, Math.max(0, Math.min(0xffff, value)), false);
-    };
-
-    const writeUInt32BE = (view: DataView, offset: number, value: number) => {
-      view.setUint32(offset, value >>> 0, false);
-    };
-
-    const writeUInt64BE = (view: DataView, offset: number, value: bigint) => {
-      view.setBigUint64(offset, value, false);
-    };
-
-    const getOrCreateScrcpyPointerId = (pointerId: number) => {
-      const existing = scrcpyPointerIds.get(pointerId);
-      if (existing != null) {
-        return existing;
-      }
-
-      const nextId = nextScrcpyPointerId;
-      nextScrcpyPointerId += 1n;
-      scrcpyPointerIds.set(pointerId, nextId);
-      return nextId;
-    };
-
-    const getScrcpyPointerId = (pointerId: number) => scrcpyPointerIds.get(pointerId) ?? null;
-
-    const releaseScrcpyPointerId = (pointerId: number) => {
-      scrcpyPointerIds.delete(pointerId);
-    };
-
-    const buildInjectKeycodeMessage = (action: number, keycode: number, repeat = 0, metaState = 0) => {
-      const buffer = new ArrayBuffer(14);
-      const view = new DataView(buffer);
-      view.setUint8(0, SCRCPY_MSG_INJECT_KEYCODE);
-      view.setUint8(1, action);
-      writeUInt32BE(view, 2, keycode);
-      writeUInt32BE(view, 6, repeat);
-      writeUInt32BE(view, 10, metaState);
-      return new Uint8Array(buffer);
-    };
-
-    const buildScreenPowerMessage = (isOn: boolean) => {
-      const payload = new Uint8Array(2);
-      payload[0] = SCRCPY_MSG_SET_SCREEN_POWER_MODE;
-      payload[1] = isOn ? 1 : 0;
-      return payload;
-    };
-
-    const buildResizeDisplayMessage = (width: number, height: number) => {
-      const buffer = new ArrayBuffer(5);
-      const view = new DataView(buffer);
-      view.setUint8(0, SCRCPY_MSG_RESIZE_DISPLAY);
-      writeUInt16BE(view, 1, width);
-      writeUInt16BE(view, 3, height);
-      return new Uint8Array(buffer);
-    };
-
-    const buildTouchMessage = (
-      action: number,
-      pointerId: bigint,
-      x: number,
-      y: number,
-      screenWidth: number,
-      screenHeight: number,
-      pressure: number,
-      actionButton: number,
-      buttons: number
-    ) => {
-      const buffer = new ArrayBuffer(32);
-      const view = new DataView(buffer);
-      view.setUint8(0, SCRCPY_MSG_INJECT_TOUCH_EVENT);
-      view.setUint8(1, action);
-      writeUInt64BE(view, 2, pointerId);
-      writeUInt32BE(view, 10, x);
-      writeUInt32BE(view, 14, y);
-      writeUInt16BE(view, 18, screenWidth);
-      writeUInt16BE(view, 20, screenHeight);
-      writeUInt16BE(view, 22, Math.round(Math.max(0, Math.min(1, pressure)) * 0xffff));
-      writeUInt32BE(view, 24, actionButton);
-      writeUInt32BE(view, 28, buttons);
-      return new Uint8Array(buffer);
-    };
-
-    const mapAndroidCommandToKeycode = (action: string) => {
-      switch (action.toLowerCase()) {
-        case 'back':
-          return ANDROID_KEYCODE_BACK;
-        case 'home':
-          return ANDROID_KEYCODE_HOME;
-        case 'menu':
-          return ANDROID_KEYCODE_MENU;
-        case 'recent':
-          return ANDROID_KEYCODE_RECENT;
-        case 'power':
-          return ANDROID_KEYCODE_POWER;
-        case 'volumeup':
-          return ANDROID_KEYCODE_VOLUME_UP;
-        case 'volumedown':
-          return ANDROID_KEYCODE_VOLUME_DOWN;
-        case 'mute':
-          return ANDROID_KEYCODE_MUTE;
-        default:
-          return 0;
-      }
-    };
-
-    const mapBrowserCodeToAndroidKeyCode = (code: string) => {
-      switch (code) {
-        case 'Enter':
-        case 'NumpadEnter':
-          return 66;
-        case 'Escape':
-          return 111;
-        case 'Backspace':
-          return 67;
-        case 'Tab':
-          return 61;
-        case 'Space':
-          return 62;
-        case 'ArrowUp':
-          return 19;
-        case 'ArrowDown':
-          return 20;
-        case 'ArrowLeft':
-          return 21;
-        case 'ArrowRight':
-          return 22;
-        case 'ShiftLeft':
-        case 'ShiftRight':
-          return 59;
-        case 'ControlLeft':
-        case 'ControlRight':
-          return 113;
-        case 'AltLeft':
-        case 'AltRight':
-          return 57;
-        default:
-          break;
-      }
-
-      if (code.startsWith('Key') && code.length === 4) {
-        return 29 + (code.charCodeAt(3) - 65);
-      }
-
-      if (code.startsWith('Digit') && code.length === 6) {
-        const digit = code.charCodeAt(5) - 48;
-        if (digit >= 0 && digit <= 9) {
-          return digit === 0 ? 7 : 8 + digit - 1;
-        }
-      }
-
-      return 0;
-    };
-
     const initializeHidDevices = () => {
       hidSession.initializeDevices();
     };
@@ -2408,189 +1899,6 @@ export default defineComponent({
         pendingResumePlaybackTimer = null;
         void resumeMediaPlayback();
       }, delayMs);
-    };
-
-    const applyRemoteClipboardText = (text: string) => {
-      clipboardText.value = text;
-    };
-
-    const readClipboard = async () => {
-      const { requestId, signal } = clipboardRequest.begin();
-      const targetDeviceId = normalizeDeviceId(deviceId.value);
-      if (!targetDeviceId) {
-        clipboardStatusText.value = t('Screencast.NoDeviceSelected', '未选中设备');
-        clipboardRequest.finalize(requestId);
-        return;
-      }
-
-      isClipboardLoading.value = true;
-      clipboardStatusText.value = t('Screencast.ClipboardReading', '正在读取...');
-
-      try {
-        const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
-          signal,
-          timeoutMs: 15000,
-        });
-        if (!clipboardRequest.isLatest(requestId)) {
-          return;
-        }
-        if (!response.ok) {
-          clipboardStatusText.value = await readApiErrorMessage(response, t('Screencast.ClipboardReadFailed', '读取失败'));
-          return;
-        }
-
-        const payload = await response.json() as { text?: string };
-        applyRemoteClipboardText(String(payload.text ?? ''));
-        clipboardStatusText.value = t('Screencast.ClipboardReadSuccess', '读取成功');
-      } catch (error) {
-        if (!isAbortError(error)) {
-          console.error('Failed to load remote clipboard:', {
-            deviceId: targetDeviceId,
-            error
-          });
-          clipboardStatusText.value = t('Screencast.ClipboardReadFailed', '读取失败');
-        }
-      } finally {
-        if (clipboardRequest.isLatest(requestId)) {
-          isClipboardLoading.value = false;
-        }
-        clipboardRequest.finalize(requestId);
-      }
-    };
-
-    const syncClipboard = async () => {
-      const { requestId, signal } = clipboardRequest.begin();
-      const targetDeviceId = normalizeDeviceId(deviceId.value);
-      if (!targetDeviceId) {
-        clipboardStatusText.value = t('Screencast.NoDeviceSelected', '未选中设备');
-        clipboardRequest.finalize(requestId);
-        return;
-      }
-
-      isClipboardSaving.value = true;
-      clipboardStatusText.value = t('Screencast.ClipboardSyncing', '正在同步...');
-
-      try {
-        const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
-          method: 'PUT',
-          signal,
-          timeoutMs: 15000,
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            text: clipboardText.value
-          })
-        });
-        if (!clipboardRequest.isLatest(requestId)) {
-          return;
-        }
-        if (!response.ok) {
-          clipboardStatusText.value = await readApiErrorMessage(response, t('Screencast.ClipboardSyncFailed', '同步失败'));
-          return;
-        }
-        clipboardStatusText.value = t('Screencast.ClipboardSyncSuccess', '已同步');
-      } catch (error) {
-        if (!isAbortError(error)) {
-          console.error('Failed to save remote clipboard:', {
-            deviceId: targetDeviceId,
-            error
-          });
-          clipboardStatusText.value = t('Screencast.ClipboardSyncFailed', '同步失败');
-        }
-      } finally {
-        if (clipboardRequest.isLatest(requestId)) {
-          isClipboardSaving.value = false;
-        }
-        clipboardRequest.finalize(requestId);
-      }
-    };
-
-    const pasteClipboard = async () => {
-      const { requestId, signal } = clipboardRequest.begin();
-      const targetDeviceId = normalizeDeviceId(deviceId.value);
-      if (!targetDeviceId) {
-        clipboardStatusText.value = t('Screencast.NoDeviceSelected', '未选中设备');
-        clipboardRequest.finalize(requestId);
-        return;
-      }
-
-      isClipboardSaving.value = true;
-      clipboardStatusText.value = t('Screencast.ClipboardPasting', '正在粘贴...');
-
-      try {
-        const response = await apiFetch(`/api/devices/${targetDeviceId}/clipboard`, {
-          method: 'POST',
-          signal,
-          timeoutMs: 15000,
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            text: clipboardText.value
-          })
-        });
-        if (!clipboardRequest.isLatest(requestId)) {
-          return;
-        }
-        if (!response.ok) {
-          clipboardStatusText.value = await readApiErrorMessage(response, t('Screencast.ClipboardPasteFailed', '粘贴失败'));
-          return;
-        }
-        clipboardStatusText.value = t('Screencast.ClipboardPasteSuccess', '已发送粘贴');
-      } catch (error) {
-        if (!isAbortError(error)) {
-          console.error('Failed to paste remote clipboard:', {
-            deviceId: targetDeviceId,
-            error
-          });
-          clipboardStatusText.value = t('Screencast.ClipboardPasteFailed', '粘贴失败');
-        }
-      } finally {
-        if (clipboardRequest.isLatest(requestId)) {
-          isClipboardSaving.value = false;
-        }
-        clipboardRequest.finalize(requestId);
-      }
-    };
-
-    const openClipboardWindow = () => {
-      if (clipboardWindowX.value === 0 && clipboardWindowY.value === 0) {
-        initializeClipboardWindowPosition();
-      } else {
-        const clamped = clampClipboardWindowPosition(clipboardWindowX.value, clipboardWindowY.value);
-        clipboardWindowX.value = clamped.x;
-        clipboardWindowY.value = clamped.y;
-      }
-      isClipboardWindowVisible.value = true;
-    };
-
-    const closeClipboardWindow = () => {
-      isClipboardWindowVisible.value = false;
-    };
-
-    const toggleClipboardWindow = () => {
-      if (isClipboardWindowVisible.value) {
-        closeClipboardWindow();
-        return;
-      }
-
-      openClipboardWindow();
-    };
-
-    const startClipboardDrag = (event: PointerEvent) => {
-      const target = event.currentTarget as HTMLElement | null;
-      if (!target) {
-        return;
-      }
-
-      event.preventDefault();
-      isDraggingClipboard = true;
-      clipboardDragStartOffset = {
-        x: event.clientX - clipboardWindowX.value,
-        y: event.clientY - clipboardWindowY.value
-      };
-      target.setPointerCapture?.(event.pointerId);
     };
 
     const requestFullscreen = async () => {
@@ -2949,13 +2257,8 @@ export default defineComponent({
       activeConnectionId++;
       stopFlexDisplayHeartbeat();
       clearPendingDisplayResize();
-      activePointers.clear();
-      pointerGenerations.clear();
-      scrcpyPointerIds.clear();
+      clearAllPointerState();
       currentScrcpySessionId = '';
-      pendingPointerReleases.clear();
-      queuedPointerReleases.clear();
-      pendingPointerMoves.clear();
       controlChannels.clearPendingPointerControlPayloads();
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = '';
@@ -3006,13 +2309,7 @@ export default defineComponent({
       stopFlexDisplayHeartbeat();
       stopVideoStreamWatchdog();
       clearPendingDisplayResize();
-      activePointers.clear();
-      pointerGenerations.clear();
-      scrcpyPointerIds.clear();
-      nextScrcpyPointerId = 0n;
-      pendingPointerReleases.clear();
-      queuedPointerReleases.clear();
-      pendingPointerMoves.clear();
+      resetAllPointerState();
       controlChannels.clearPendingPointerControlPayloads();
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = '';
@@ -3139,473 +2436,19 @@ export default defineComponent({
     };
 
     const getVideoViewport = () => {
-      if (!videoElement.value) return null;
-      const rect = videoElement.value.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return null;
-
-      const videoWidth = videoElement.value.videoWidth || rect.width;
-      const videoHeight = videoElement.value.videoHeight || rect.height;
-      if (videoWidth <= 0 || videoHeight <= 0) return null;
-
-      if (effectiveFillMode.value) {
-        return {
-          offsetX: rect.left,
-          offsetY: rect.top,
-          displayWidth: rect.width,
-          displayHeight: rect.height,
-          frameWidth: Math.round(videoWidth),
-          frameHeight: Math.round(videoHeight)
-        };
-      }
-
-      const scale = Math.min(rect.width / videoWidth, rect.height / videoHeight);
-      const displayWidth = videoWidth * scale;
-      const displayHeight = videoHeight * scale;
-      const offsetX = rect.left + (rect.width - displayWidth) / 2;
-      const offsetY = rect.top + (rect.height - displayHeight) / 2;
-
-      return {
-        offsetX,
-        offsetY,
-        displayWidth,
-        displayHeight,
-        frameWidth: Math.round(videoWidth),
-        frameHeight: Math.round(videoHeight)
-      };
+      return resolveVideoViewport(videoElement.value, effectiveFillMode.value);
     };
 
     const getPointerRatios = (event: PointerEvent) => {
-      const viewport = getVideoViewport();
-      if (!viewport) return null;
-
-      const xRatio = (event.clientX - viewport.offsetX) / viewport.displayWidth;
-      const yRatio = (event.clientY - viewport.offsetY) / viewport.displayHeight;
-      return {
-        xRatio: Math.min(1, Math.max(0, xRatio)),
-        yRatio: Math.min(1, Math.max(0, yRatio)),
-        frameWidth: viewport.frameWidth,
-        frameHeight: viewport.frameHeight
-      };
-    };
-
-    const clearLocalPointerState = (pointerId: number) => {
-      activePointers.delete(pointerId);
-      pendingPointerReleases.delete(pointerId);
-      queuedPointerReleases.delete(pointerId);
-      pendingPointerMoves.delete(pointerId);
-      pointerGenerations.delete(pointerId);
-      pointerSnapshots.delete(pointerId);
-      releaseScrcpyPointerId(pointerId);
-      try {
-        videoElement.value?.releasePointerCapture?.(pointerId);
-      } catch {
-        // Ignore release failures when the browser has already dropped capture.
-      }
-    };
-
-    const getPointerGeneration = (pointerId: number) => pointerGenerations.get(pointerId) ?? 0;
-
-    const bumpPointerGeneration = (pointerId: number) => {
-      const nextGeneration = getPointerGeneration(pointerId) + 1;
-      pointerGenerations.set(pointerId, nextGeneration);
-      return nextGeneration;
-    };
-
-    const finalizePointerRelease = (pointerId: number, releaseGeneration: number) => {
-      pendingPointerReleases.delete(pointerId);
-      queuedPointerReleases.delete(pointerId);
-      pendingPointerMoves.delete(pointerId);
-
-      if (getPointerGeneration(pointerId) !== releaseGeneration || activePointers.has(pointerId)) {
-        return;
-      }
-
-      clearLocalPointerState(pointerId);
-    };
-
-    const flushPendingPointerReleases = () => {
-      flushPendingPointerControlPayloads();
-      for (const [pointerId, phase] of [...pendingPointerReleases.entries()]) {
-        if (queuedPointerReleases.has(pointerId)) {
-          continue;
-        }
-        releasePointer(pointerId, phase);
-      }
-
-      if (pendingPointerReleases.size > 0) {
-        schedulePointerReleaseFlush();
-        return;
-      }
-
-      stopPointerReleaseFlushLoop();
-    };
-
-    const schedulePointerReleaseFlush = () => {
-      if (pointerReleaseFlushHandle != null || pendingPointerReleases.size === 0) {
-        return;
-      }
-
-      pointerReleaseFlushHandle = window.requestAnimationFrame(() => {
-        pointerReleaseFlushHandle = null;
-        flushPendingPointerReleases();
-      });
-    };
-
-    const schedulePointerMoveFlush = () => {
-      if ((pointerMoveFlushHandle != null || pointerMoveSampleTimer != null) || pendingPointerMoves.size === 0) {
-        return;
-      }
-
-      const now = performance.now();
-      const elapsed = now - lastPointerMoveFlushAt;
-      const delayMs = Math.max(0, getCurrentPointerMoveSampleIntervalMs() - elapsed);
-
-      const requestFlushFrame = () => {
-        pointerMoveSampleTimer = null;
-        pointerMoveFlushHandle = window.requestAnimationFrame(() => {
-          pointerMoveFlushHandle = null;
-          flushPendingPointerMoves();
-        });
-      };
-
-      if (delayMs <= 0) {
-        requestFlushFrame();
-        return;
-      }
-
-      pointerMoveSampleTimer = window.setTimeout(requestFlushFrame, delayMs);
-    };
-
-    const flushPendingPointerMoves = () => {
-      flushPendingPointerControlPayloads();
-      const channel = getPointerMoveSendChannel();
-      if (!channel || channel.readyState !== 'open') {
-        return;
-      }
-
-      if (channel.bufferedAmount > getCurrentPointerMoveBufferLimit()) {
-        schedulePointerMoveFlush();
-        return;
-      }
-
-      const moves = [...pendingPointerMoves.values()];
-      pendingPointerMoves.clear();
-      let sentAnyMove = false;
-
-      for (const move of moves) {
-        const pointerId = getScrcpyPointerId(move.pointerId);
-        if (pointerId == null) {
-          continue;
-        }
-
-        const payload = buildTouchMessage(
-          SCRCPY_ACTION_MOVE,
-          pointerId,
-          Math.trunc(move.xRatio * move.frameWidth),
-          Math.trunc(move.yRatio * move.frameHeight),
-          move.frameWidth,
-          move.frameHeight,
-          move.pressure,
-          0,
-          SCRCPY_PRIMARY_BUTTON
-        );
-
-        try {
-          channel.send(payload);
-          sentAnyMove = true;
-        } catch (error) {
-          console.warn('Pointer move send failed:', error);
-          pendingPointerMoves.set(move.pointerId, move);
-          schedulePointerMoveFlush();
-          return;
-        }
-      }
-
-      if (pendingPointerMoves.size > 0) {
-        schedulePointerMoveFlush();
-        return;
-      }
-
-      if (sentAnyMove) {
-        lastPointerMoveFlushAt = performance.now();
-      }
-    };
-
-    const markTouchPointerActivity = () => {
-      lastTouchPointerAt = performance.now();
-    };
-
-    const shouldIgnoreCompatMouse = () => performance.now() - lastTouchPointerAt < MOUSE_COMPAT_SUPPRESSION_MS;
-
-    const buildQueuedPointerMovePayload = (move: PendingPointerMove) => {
-      const pointerId = getScrcpyPointerId(move.pointerId);
-      if (pointerId == null) {
-        return null;
-      }
-
-      return buildTouchMessage(
-        SCRCPY_ACTION_MOVE,
-        pointerId,
-        Math.trunc(move.xRatio * move.frameWidth),
-        Math.trunc(move.yRatio * move.frameHeight),
-        move.frameWidth,
-        move.frameHeight,
-        move.pressure,
-        0,
-        SCRCPY_PRIMARY_BUTTON
-      );
-    };
-
-    const buildPointerLifecyclePayloads = (
-      phase: 'down' | 'up' | 'cancel',
-      event: PointerEvent,
-      ratios: ReturnType<typeof getPointerRatios>
-    ) => {
-      if (!ratios) {
-        return null;
-      }
-
-      const action = phase === 'down' ? SCRCPY_ACTION_DOWN : SCRCPY_ACTION_UP;
-      const pointerId = action === SCRCPY_ACTION_DOWN
-        ? getOrCreateScrcpyPointerId(event.pointerId)
-        : getScrcpyPointerId(event.pointerId);
-      if (pointerId == null) {
-        return null;
-      }
-
-      const payloads: Uint8Array[] = [];
-      const pendingMove = pendingPointerMoves.get(event.pointerId);
-      if (phase !== 'down' && pendingMove) {
-        const movePayload = buildQueuedPointerMovePayload(pendingMove);
-        if (movePayload) {
-          payloads.push(movePayload);
-        }
-      }
-
-      const x = Math.trunc(ratios.xRatio * ratios.frameWidth);
-      const y = Math.trunc(ratios.yRatio * ratios.frameHeight);
-      const isUp = action === SCRCPY_ACTION_UP;
-      payloads.push(
-        buildTouchMessage(
-          action,
-          pointerId,
-          x,
-          y,
-          ratios.frameWidth,
-          ratios.frameHeight,
-          isUp ? 0 : (event.pressure || 1),
-          SCRCPY_PRIMARY_BUTTON,
-          isUp ? 0 : SCRCPY_PRIMARY_BUTTON
-        )
-      );
-
-      return payloads;
-    };
-
-    const sendPointerMessage = (phase: 'down' | 'up' | 'move' | 'cancel', event: PointerEvent) => {
-      const isMove = phase === 'move';
-      const channel = isMove ? getPointerMoveSendChannel() : dataChannel;
-      if (!channel || channel.readyState !== 'open') {
-        if (!isMove) {
-          return false;
-        }
-      }
-
-      const ratios = getPointerRatios(event);
-      if (!ratios) return false;
-
-      pointerSnapshots.set(event.pointerId, {
-        xRatio: ratios.xRatio,
-        yRatio: ratios.yRatio,
-        pointerType: event.pointerType || 'touch'
-      });
-
-      if (isMove) {
-        pendingPointerMoves.set(event.pointerId, {
-          pointerId: event.pointerId,
-          xRatio: ratios.xRatio,
-          yRatio: ratios.yRatio,
-          frameWidth: ratios.frameWidth,
-          frameHeight: ratios.frameHeight,
-          pressure: event.pressure || 1,
-        });
-        if (!channel || channel.readyState !== 'open') {
-          schedulePointerMoveFlush();
-          return true;
-        }
-        if (pointerMoveFlushHandle == null && pointerMoveSampleTimer == null && performance.now() - lastPointerMoveFlushAt >= getCurrentPointerMoveSampleIntervalMs()) {
-          flushPendingPointerMoves();
-          if (pendingPointerMoves.size === 0) {
-            return true;
-          }
-        }
-        schedulePointerMoveFlush();
-        return true;
-      }
-
-      const payloads = buildPointerLifecyclePayloads(phase, event, ratios);
-      if (!payloads || payloads.length === 0) {
-        return false;
-      }
-
-      return enqueuePointerPayloadBuffers(payloads);
-    };
-
-    const releasePointer = (pointerId: number, phase: 'up' | 'cancel', event?: PointerEvent) => {
-      if (!activePointers.has(pointerId) && !pendingPointerReleases.has(pointerId)) return false;
-
-      if (queuedPointerReleases.has(pointerId)) {
-        return true;
-      }
-
-      const releaseGeneration = getPointerGeneration(pointerId);
-      const finalizeRelease = () => {
-        finalizePointerRelease(pointerId, releaseGeneration);
-      };
-
-      const attemptRelease = (pointerEvent?: PointerEvent | null) => {
-        if (!pointerEvent) {
-          return false;
-        }
-
-        const ratios = getPointerRatios(pointerEvent);
-        if (!ratios) {
-          return false;
-        }
-
-        const payloads = buildPointerLifecyclePayloads(phase, pointerEvent, ratios);
-        if (!payloads || payloads.length === 0) {
-          return false;
-        }
-
-        pendingPointerReleases.set(pointerId, phase);
-        queuedPointerReleases.add(pointerId);
-        const queued = enqueuePointerPayloadBuffers(payloads, finalizeRelease);
-        if (!queued) {
-          queuedPointerReleases.delete(pointerId);
-        }
-        return queued;
-      };
-
-      const pointerEvent = event ?? createSyntheticPointerEvent(pointerId);
-      if (attemptRelease(pointerEvent)) {
-        return true;
-      }
-
-      const fallbackPointerEvent = createSyntheticPointerEvent(pointerId);
-      if (attemptRelease(fallbackPointerEvent)) {
-        return true;
-      }
-
-      if (!fallbackPointerEvent) {
-        queuedPointerReleases.delete(pointerId);
-        pendingPointerReleases.set(pointerId, phase);
-        schedulePointerReleaseFlush();
-        return false;
-      }
-
-      queuedPointerReleases.delete(pointerId);
-      pendingPointerReleases.set(pointerId, phase);
-      schedulePointerReleaseFlush();
-      return false;
-    };
-
-    const releaseAllPointers = (phase: 'up' | 'cancel' = 'cancel') => {
-      pendingPointerMoves.clear();
-      stopPointerMoveFlushLoop();
-
-      for (const pointerId of [...activePointers]) {
-        releasePointer(pointerId, phase);
-      }
-
-      activeMousePointerId = null;
-      pointerGenerations.clear();
-      scrcpyPointerIds.clear();
-    };
-
-    const releaseLingeringTouchPointers = (nextPointerId: number) => {
-      const stalePointerIds = new Set<number>([
-        ...activePointers,
-        ...pendingPointerReleases.keys(),
-        ...queuedPointerReleases,
-      ]);
-
-      for (const pointerId of stalePointerIds) {
-        if (pointerId === nextPointerId) {
-          continue;
-        }
-
-        releasePointer(pointerId, 'cancel');
-      }
-    };
-
-    const getLatestPointerSample = (event: PointerEvent) => {
-      if (typeof event.getCoalescedEvents !== 'function') {
-        return event;
-      }
-
-      const samples = event.getCoalescedEvents();
-      return samples.length > 0 ? samples[samples.length - 1] : event;
-    };
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') return;
-      markTouchPointerActivity();
-      if (activePointers.has(event.pointerId) || pendingPointerReleases.has(event.pointerId) || queuedPointerReleases.has(event.pointerId)) {
-        releasePointer(event.pointerId, 'cancel');
-      }
-      releaseLingeringTouchPointers(event.pointerId);
-      flushPendingPointerReleases();
-      bumpPointerGeneration(event.pointerId);
-      videoElement.value?.setPointerCapture?.(event.pointerId);
-      if (sendPointerMessage('down', event)) {
-        activePointers.add(event.pointerId);
-        pendingPointerReleases.delete(event.pointerId);
-        return;
-      }
-
-      try {
-        videoElement.value?.releasePointerCapture?.(event.pointerId);
-      } catch {
-        // Ignore release failures if capture was never established.
-      }
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') return;
-      markTouchPointerActivity();
-      if (!activePointers.has(event.pointerId)) return;
-      sendPointerMessage('move', getLatestPointerSample(event));
-    };
-
-    const handlePointerUp = (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') return;
-      markTouchPointerActivity();
-      releasePointer(event.pointerId, 'up', event);
-    };
-
-    const handlePointerCancel = (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') return;
-      markTouchPointerActivity();
-      releasePointer(event.pointerId, 'cancel', event);
-    };
-
-    const handlePointerCaptureLost = (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') return;
-      markTouchPointerActivity();
-      releasePointer(event.pointerId, 'cancel', event);
+      return getPointerRatiosFromViewport(event, getVideoViewport());
     };
 
     const handleWindowPointerUp = (event: PointerEvent) => {
-      if (isDraggingClipboard) {
-        isDraggingClipboard = false;
-        const clamped = clampClipboardWindowPosition(clipboardWindowX.value, clipboardWindowY.value);
-        clipboardWindowX.value = clamped.x;
-        clipboardWindowY.value = clamped.y;
+      if (finishClipboardDrag()) {
         return;
       }
 
-      if (isDraggingMenu) {
+      if (floatingMenu.getIsDraggingMenu()) {
         finishMenuDrag();
         return;
       }
@@ -3614,11 +2457,9 @@ export default defineComponent({
     };
 
     const handleWindowPointerCancel = (event: PointerEvent) => {
-      if (isDraggingClipboard) {
-        isDraggingClipboard = false;
-      }
+      cancelClipboardDrag();
 
-      if (isDraggingMenu) {
+      if (floatingMenu.getIsDraggingMenu()) {
         finishMenuDrag();
       }
 
@@ -3626,39 +2467,11 @@ export default defineComponent({
     };
 
     const handleWindowPointerMove = (event: PointerEvent) => {
-      if (isDraggingClipboard) {
-        const position = clampClipboardWindowPosition(
-          event.clientX - clipboardDragStartOffset.x,
-          event.clientY - clipboardDragStartOffset.y
-        );
-        clipboardWindowX.value = position.x;
-        clipboardWindowY.value = position.y;
+      if (handleClipboardWindowPointerMove(event)) {
         return;
       }
 
-      if (!isDraggingMenu) return;
-
-      const rawX = event.clientX - dragStartOffset.x;
-      const rawY = event.clientY - dragStartOffset.y;
-
-      if (isMenuExpanded.value) {
-        const expandedPosition = clampExpandedMenuPosition(rawX, rawY);
-        if (shouldCollapseExpandedMenuWhileDragging(event, rawX, rawY, expandedPosition.x, expandedPosition.y)) {
-          isMenuExpanded.value = false;
-          isMenuHorizontalLocked.value = false;
-          setMenuPosition(rawX, rawY);
-        } else {
-          setMenuPosition(expandedPosition.x, expandedPosition.y);
-        }
-      } else {
-        setMenuPosition(rawX, rawY);
-      }
-
-      const distanceX = Math.abs(event.clientX - dragStartPoint.x);
-      const distanceY = Math.abs(event.clientY - dragStartPoint.y);
-      if (distanceX > 3 || distanceY > 3) {
-        didDragMenu = true;
-      }
+      handleMenuWindowPointerMove(event);
     };
 
     const buildMousePointerEvent = (event: MouseEvent, type: string): PointerEvent | null => {
@@ -3742,7 +2555,7 @@ export default defineComponent({
     };
 
     const handleWindowBlur = () => {
-      isDraggingClipboard = false;
+      cancelClipboardDrag();
       finishMenuDrag();
       releaseAllPointers('cancel');
       resetHidInputs();
@@ -3838,16 +2651,14 @@ export default defineComponent({
     const handleWindowResize = () => {
       if (menuX.value === 0 && menuY.value === 0) {
         initializeMenuPosition();
-      } else if (isDocked.value && dockedEdge.value !== 'none') {
+      } else if (isDocked.value) {
         applyDockPosition(dockedEdge.value);
       } else {
         restoreMenuPositionFromRelative();
       }
 
       if (isClipboardWindowVisible.value || clipboardWindowX.value !== 0 || clipboardWindowY.value !== 0) {
-        const clamped = clampClipboardWindowPosition(clipboardWindowX.value, clipboardWindowY.value);
-        clipboardWindowX.value = clamped.x;
-        clipboardWindowY.value = clamped.y;
+        clampClipboardWindowToStage();
       }
 
       scheduleDisplayResize();
@@ -3943,90 +2754,9 @@ export default defineComponent({
       videoContainerResizeObserver = null;
     };
 
-    const handleMenuPointerEnter = () => {
-      if (isDocked.value && !isMenuExpanded.value) {
-        setMenuPosition(menuX.value, menuY.value);
-      }
-    };
-
-    const handleMenuPointerLeave = () => {
-      if (!isDraggingMenu && isDocked.value && !isMenuExpanded.value) {
-        applyDockPosition(dockedEdge.value);
-      }
-    };
-
-    const syncDockedMenuPosition = async () => {
-      await nextTick();
-      if (!isDocked.value || dockedEdge.value === 'none' || (menuX.value === 0 && menuY.value === 0)) {
-        return;
-      }
-
-      applyDockPosition(dockedEdge.value);
-    };
-
-    const finishMenuDrag = () => {
-      if (!isDraggingMenu) return;
-      isDraggingMenu = false;
-      isMenuDragActive.value = false;
-      setMenuPosition(menuX.value, menuY.value);
-      resolveDockEdge();
-    };
-
-    const startMenuDrag = (event: PointerEvent) => {
-      const target = event.currentTarget as HTMLElement | null;
-      if (!target) return;
-      event.preventDefault();
-      isDraggingMenu = true;
-      isMenuDragActive.value = true;
-      didDragMenu = false;
-      wasMenuExpandedAtDragStart = isMenuExpanded.value;
-
-      if (isDocked.value && dockedEdge.value !== 'none') {
-        const position = getDockedMenuPosition(dockedEdge.value);
-        menuX.value = position.x;
-        menuY.value = position.y;
-      }
-
-      setFloatingMenuState();
-      setMenuPosition(menuX.value, menuY.value);
-
-      dragStartOffset = {
-        x: event.clientX - menuX.value,
-        y: event.clientY - menuY.value
-      };
-      dragStartPoint = {
-        x: event.clientX,
-        y: event.clientY
-      };
-      target.setPointerCapture?.(event.pointerId);
-    };
-
-    const toggleMenu = () => {
-      if (didDragMenu) {
-        didDragMenu = false;
-        return;
-      }
-
-      isMenuExpanded.value = !isMenuExpanded.value;
-      if (!isMenuExpanded.value) {
-        isMenuHorizontalLocked.value = false;
-      }
-      setMenuPosition(menuX.value, menuY.value);
-      void syncDockedMenuPosition();
-    };
-
     watch(
       () => deviceId.value,
-      () => {
-        clipboardStatusText.value = '';
-
-        if (!isClipboardWindowVisible.value) {
-          clipboardText.value = '';
-          return;
-        }
-
-        openClipboardWindow();
-      }
+      () => remoteClipboard.handleDeviceChanged()
     );
 
     watch(
@@ -4056,25 +2786,9 @@ export default defineComponent({
       syncBackgroundMuteState();
     });
 
-    watch(
-      () => [isMenuExpanded.value, isHorizontalLayout.value, dockedEdge.value, isDocked.value],
-      (current, previous) => {
-        if (!isDocked.value || dockedEdge.value === 'none') {
-          return;
-        }
-
-        const [, , currentDockedEdge] = current;
-        const [, , previousDockedEdge] = previous ?? current;
-        if (isMenuExpanded.value && currentDockedEdge !== previousDockedEdge && collapseDockedExpandedMenu()) {
-          return;
-        }
-        void syncDockedMenuPosition();
-      }
-    );
-
     const cleanupCastViewResources = (preserveForBackground: boolean) => {
       rtcConfigRequest.dispose();
-      clipboardRequest.dispose();
+      remoteClipboard.dispose();
       cancelDeviceContextRequests();
       disableAutoReconnect();
       cleanupPersistTabs();
@@ -4265,7 +2979,6 @@ export default defineComponent({
       clipboardWindowX,
       clipboardWindowY,
       dockedEdge,
-      isMenuHorizontalLocked,
       menuX,
       menuY,
       menuRelativeX,
@@ -4301,23 +3014,15 @@ export default defineComponent({
       hasUsedInitialConnectionWarmup,
       lastDisplayResizeRequest,
       videoContainerResizeObserver,
-      dragStartOffset,
-      dragStartPoint,
-      isDraggingMenu,
-      didDragMenu,
-      wasMenuExpandedAtDragStart,
-      currentMenuExpandDirection,
-      isDraggingClipboard,
-      clipboardDragStartOffset,
-      nextScrcpyPointerId,
-      scrcpyPointerIds,
+      nextScrcpyPointerId: touchPointerInput.getNextScrcpyPointerId(),
+      scrcpyPointerIds: touchPointerInput.getScrcpyPointerIds(),
       currentHidMouseButtons: hidSession.getCurrentMouseButtons(),
       pressedHidKeys: hidSession.getPressedKeys(),
-      lastTouchPointerAt,
-      pointerMoveFlushHandle,
-      pointerMoveSampleTimer,
-      pointerReleaseFlushHandle,
-      lastPointerMoveFlushAt,
+      lastTouchPointerAt: touchPointerInput.getLastTouchPointerAt(),
+      pointerMoveFlushHandle: pointerControlQueues.getPointerMoveFlushHandle(),
+      pointerMoveSampleTimer: pointerControlQueues.getPointerMoveSampleTimer(),
+      pointerReleaseFlushHandle: pointerControlQueues.getPointerReleaseFlushHandle(),
+      lastPointerMoveFlushAt: pointerControlQueues.getLastPointerMoveFlushAt(),
       controlChannels,
       isIceRestartInFlight,
       currentScrcpySessionId,
@@ -4379,17 +3084,8 @@ export default defineComponent({
       disposeAllPersistedConnections,
       restorePersistedConnection,
       getStageBounds,
-      doesVerticalLayoutOverflowAt,
-      shouldUseHorizontalLayoutAt,
-      getMenuBoundsAt,
       isHorizontalLayout,
-      getMenuExpandDirectionAt,
-      getMenuFrameAt,
       clampCollapsedMenuPosition,
-      clampExpandedMenuPosition,
-      clampMenuPosition,
-      syncMenuSideState,
-      shouldCollapseExpandedMenuWhileDragging,
       updateMenuRelativePosition,
       setMenuPosition,
       restoreMenuPositionFromRelative,

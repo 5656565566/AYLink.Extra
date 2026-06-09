@@ -194,6 +194,39 @@ describe('inputMappingRuntime', () => {
     ]);
   });
 
+  it('supports tap control mode for virtual joystick bindings', () => {
+    const profile = createEmptyInputMappingProfile('tap joystick');
+    profile.bindings.push({
+      id: 'turn-right',
+      label: 'right',
+      trigger: { type: 'keyboard', code: 'KeyD' },
+      action: {
+        type: 'virtualJoystick',
+        center: { x: 0.5, y: 0.5 },
+        radius: 0.1,
+        direction: { x: 1, y: 0 },
+        controlMode: 'tap'
+      }
+    });
+    const runtime = createInputMappingRuntime(profile);
+
+    expect(runtime.handleKeyboardEvent('down', { code: 'KeyD' }).commands).toEqual([
+      expect.objectContaining({
+        type: 'touch',
+        phase: 'down',
+        pointerKey: 'binding:turn-right',
+        point: { x: 0.6, y: 0.5 }
+      }),
+      expect.objectContaining({
+        type: 'touch',
+        phase: 'up',
+        pointerKey: 'binding:turn-right',
+        point: { x: 0.6, y: 0.5 }
+      })
+    ]);
+    expect(runtime.handleKeyboardEvent('up', { code: 'KeyD' }).commands).toEqual([]);
+  });
+
   it('creates mouse look touch movement while pointer lock is active', () => {
     const runtime = createInputMappingRuntime(createMouseLookProfile());
 
@@ -235,6 +268,31 @@ describe('inputMappingRuntime', () => {
       'move',
       'up',
       'down'
+    ]);
+  });
+
+  it('releases mouse look before starting fixed left-button attack', () => {
+    const profile = createMouseLookProfile();
+    profile.bindings.push({
+      id: 'fire',
+      label: '攻击',
+      trigger: { type: 'mouseButton', button: 0 },
+      action: { type: 'hold', point: { x: 0.82, y: 0.64 } }
+    });
+    const runtime = createInputMappingRuntime(profile);
+
+    runtime.handleMouseMove({ movementX: 12, movementY: 0, pointerLocked: true });
+    const result = runtime.handleMouseButtonEvent('down', { button: 0 });
+
+    expect(result.commands).toEqual([
+      expect.objectContaining({ type: 'touch', phase: 'up', pointerKey: 'mouseLook' }),
+      {
+        type: 'touch',
+        phase: 'down',
+        pointerKey: 'binding:fire',
+        point: { x: 0.82, y: 0.64 },
+        pressure: 1
+      }
     ]);
   });
 

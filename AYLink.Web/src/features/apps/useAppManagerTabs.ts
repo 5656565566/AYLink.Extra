@@ -72,6 +72,10 @@ export function useAppManagerTabs(
   }) satisfies AppManagerTab;
 
   const syncRouteToActiveTab = async () => {
+    if (!isAppsRouteActive.value) {
+      return;
+    }
+
     if (Object.keys(route.query).length > 0) {
       await router.replace({ name: 'apps', query: {} });
     }
@@ -162,6 +166,10 @@ export function useAppManagerTabs(
   watch(
     () => route.query,
     async () => {
+      if (!isAppsRouteActive.value) {
+        return;
+      }
+
       await consumeIncomingTab();
     },
   );

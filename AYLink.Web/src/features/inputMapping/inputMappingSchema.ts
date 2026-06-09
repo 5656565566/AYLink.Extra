@@ -31,13 +31,13 @@ export type InputMappingAction =
   | { type: 'tap'; point: NormalizedPoint; durationMs?: number }
   | { type: 'rapidTap'; point: NormalizedPoint; mode: 'whileHeld' | 'burst'; tapsPerSecond: number; tapCount?: number }
   | { type: 'hold'; point: NormalizedPoint }
-  | { type: 'virtualJoystick'; center: NormalizedPoint; radius: number; direction: NormalizedPoint; group?: string }
-  | { type: 'swipe'; from: NormalizedPoint; to: NormalizedPoint; durationMs: number }
-  | { type: 'mouseLook'; touchStart: NormalizedPoint; sensitivityX: number; sensitivityY: number; invertY?: boolean; maxStep?: number }
+  | { type: 'virtualJoystick'; center: NormalizedPoint; radius: number; direction: NormalizedPoint; group?: string; controlMode?: 'slide' | 'tap' }
+  | { type: 'swipe'; from: NormalizedPoint; to: NormalizedPoint; durationMs: number; path?: NormalizedPoint[]; straight?: boolean; startHoldMs?: number }
+  | { type: 'mouseLook'; touchStart: NormalizedPoint; sensitivityX: number; sensitivityY: number; invertY?: boolean; maxStep?: number; rangeX?: number; rangeY?: number }
   | { type: 'hidKey'; code: string }
   | { type: 'hidMouseButton'; button: number };
 
-export type InputMappingStickerShape = 'key' | 'button' | 'joystick' | 'mouse' | 'text';
+export type InputMappingStickerShape = 'key' | 'button' | 'joystick' | 'look' | 'aimArea' | 'mouse' | 'text';
 
 export interface InputMappingSticker {
   enabled?: boolean;
@@ -45,6 +45,7 @@ export interface InputMappingSticker {
   keyText?: string;
   label?: string;
   shape?: InputMappingStickerShape;
+  role?: 'attack';
   opacity?: number;
 }
 

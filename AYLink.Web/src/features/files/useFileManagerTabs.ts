@@ -105,6 +105,10 @@ export function useFileManagerTabs(
   }
 
   async function syncRouteToActiveTab() {
+    if (!isFilesRouteActive.value) {
+      return;
+    }
+
     if (Object.keys(route.query).length > 0) {
       await router.replace({ name: 'files', query: {} });
     }
@@ -184,6 +188,10 @@ export function useFileManagerTabs(
   watch(
     () => route.query,
     async () => {
+      if (!isFilesRouteActive.value) {
+        return;
+      }
+
       await consumeIncomingTab();
     },
   );

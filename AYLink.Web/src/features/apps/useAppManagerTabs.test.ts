@@ -119,4 +119,22 @@ describe('useAppManagerTabs', () => {
     expect(mounted.result.deviceId.value).toBe('77');
     expect(onTabChanged).toHaveBeenCalled();
   });
+
+  it('does not rewrite unrelated routes when kept alive and route query changes', async () => {
+    const mounted = mountComposable(() => useAppManagerTabs(
+      () => '应用管理',
+      async () => undefined,
+    ));
+    unmount = mounted.unmount;
+    await nextTick();
+
+    routerReplace.mockClear();
+    consumeWorkspaceOpenMock.mockClear();
+    routeState.name = 'input-mapping-profiles';
+    routeState.query = { mode: 'manage' };
+    await nextTick();
+
+    expect(routerReplace).not.toHaveBeenCalled();
+    expect(consumeWorkspaceOpenMock).not.toHaveBeenCalledWith('apps');
+  });
 });

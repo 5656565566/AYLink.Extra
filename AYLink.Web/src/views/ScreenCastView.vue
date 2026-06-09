@@ -60,6 +60,9 @@
         @wheel="blockInputMappingEditPointer"
       ></div>
       <div v-if="hasCastTabs && inputMappingStickers.length > 0 && (isInputMappingEditMode || isInputMappingHintsVisible)" class="input-mapping-sticker-layer" aria-hidden="true">
+        <svg v-if="isInputMappingEditMode && getInputMappingSwipePathPolyline()" class="input-mapping-swipe-path">
+          <polyline :points="getInputMappingSwipePathPolyline()" />
+        </svg>
         <div
           v-for="sticker in inputMappingStickers"
           :key="sticker.bindingId"
@@ -79,17 +82,27 @@
           @pointercancel="finishInputMappingStickerDrag"
           @contextmenu="openInputMappingStickerConfig($event, sticker)"
         >
-          <template v-if="sticker.shape === 'joystick' && sticker.dpadKeys">
+          <template v-if="(sticker.shape === 'joystick' || sticker.shape === 'look') && sticker.dpadKeys">
             <div class="input-mapping-sticker__dpad">
               <span></span>
               <span class="input-mapping-sticker__dpad-key">{{ sticker.dpadKeys.up }}</span>
               <span></span>
               <span class="input-mapping-sticker__dpad-key">{{ sticker.dpadKeys.left }}</span>
-              <span></span>
+              <span class="input-mapping-sticker__dpad-center">
+                <Eye20Regular v-if="sticker.shape === 'look'" />
+              </span>
               <span class="input-mapping-sticker__dpad-key">{{ sticker.dpadKeys.right }}</span>
               <span></span>
               <span class="input-mapping-sticker__dpad-key">{{ sticker.dpadKeys.down }}</span>
               <span></span>
+            </div>
+          </template>
+          <template v-else-if="sticker.shape === 'aimArea'">
+            <div class="input-mapping-sticker__aim-area">
+              <span class="input-mapping-sticker__aim-handle input-mapping-sticker__aim-handle--nw" @pointerdown="startInputMappingAimAreaResize($event, sticker, -1, -1)"></span>
+              <span class="input-mapping-sticker__aim-handle input-mapping-sticker__aim-handle--ne" @pointerdown="startInputMappingAimAreaResize($event, sticker, 1, -1)"></span>
+              <span class="input-mapping-sticker__aim-handle input-mapping-sticker__aim-handle--sw" @pointerdown="startInputMappingAimAreaResize($event, sticker, -1, 1)"></span>
+              <span class="input-mapping-sticker__aim-handle input-mapping-sticker__aim-handle--se" @pointerdown="startInputMappingAimAreaResize($event, sticker, 1, 1)"></span>
             </div>
           </template>
           <template v-else>
@@ -101,9 +114,10 @@
       <div
         v-if="isInputMappingEditMode && inputMappingContextMenu.visible"
         class="input-mapping-palette"
-        :style="{ left: `${inputMappingContextMenu.x}px`, top: `${inputMappingContextMenu.y}px` }"
+        :style="getInputMappingPaletteStyle()"
         @pointerdown.stop
         @click.stop
+        @contextmenu.prevent.stop
       >
         <button
           v-for="item in inputMappingStickerPaletteItems"
@@ -124,40 +138,137 @@
         :style="getInputMappingConfigPanelStyle()"
         @pointerdown.stop
         @click.stop
+        @contextmenu.prevent.stop
       >
         <div class="input-mapping-config-panel__body">
           <div class="input-mapping-config-panel__title">{{ selectedInputMappingConfigTitle }}</div>
-          <label>
+          <label v-if="selectedInputMappingCanEditTrigger">
             <span>触发按键</span>
             <button
               type="button"
-              class="input-mapping-config-panel__select"
+              class="input-mapping-config-panel__capture-btn"
               @click="startInputMappingTriggerCapture"
               @mousedown="captureSelectedInputMappingMouseButton"
+              @mouseup.stop.prevent
+              @pointerup.stop.prevent
               @contextmenu.prevent
             >
               {{ inputMappingCaptureBindingId ? '按下按键...' : (selectedInputMappingSticker.keyText || '捕获按键') }}
             </button>
           </label>
+          <label v-if="selectedInputMappingJoystickDirectionBindings.length > 0">
+            <span>方向按键</span>
+            <div class="input-mapping-config-panel__dpad-bindings">
+              <button
+                v-for="item in selectedInputMappingJoystickDirectionBindings"
+                :key="item.binding.id"
+                type="button"
+                class="input-mapping-config-panel__capture-btn"
+                @click="startInputMappingBindingTriggerCapture(item.binding.id, $event)"
+                @mousedown="captureSelectedInputMappingMouseButton"
+                @mouseup.stop.prevent
+                @pointerup.stop.prevent
+                @contextmenu.prevent
+              >
+                {{ item.title }} {{ inputMappingCaptureBindingId === item.binding.id ? '按下按键...' : getInputMappingTriggerText(item.binding) }}
+              </button>
+            </div>
+          </label>
+          <label v-if="selectedInputMappingPressMode">
+            <span>操作方式</span>
+            <select class="input-mapping-config-panel__select" :value="selectedInputMappingPressMode" @change="updateSelectedInputMappingPressMode">
+              <option value="tap">单击</option>
+              <option value="hold">可长按</option>
+            </select>
+          </label>
           <label>
             <span>备注</span>
             <input type="text" maxlength="5" :value="selectedInputMappingStickerLabelText" placeholder="建议 5 字以内" @change="updateSelectedInputMappingLabel" />
           </label>
+          <label v-if="selectedInputMappingJoystickBindings.length > 0">
+            <span>操作方式</span>
+            <select class="input-mapping-config-panel__select" :value="selectedInputMappingJoystickControlMode" @change="updateSelectedInputMappingJoystickControlMode">
+              <option value="slide">滑动控制</option>
+              <option value="tap">点击控制</option>
+            </select>
+          </label>
+          <label v-if="selectedInputMappingJoystickBindings.length > 0">
+            <span>{{ selectedInputMappingSticker?.shape === 'look' ? '幅度' : '大小' }}</span>
+            <input
+              type="number"
+              min="1"
+              max="200"
+              :value="selectedInputMappingJoystickSizePercent"
+              @input="updateSelectedInputMappingJoystickSize"
+              @change="updateSelectedInputMappingJoystickSize"
+            />
+          </label>
           <label v-if="selectedInputMappingRapidTapAction">
             <span>操作方式</span>
             <select class="input-mapping-config-panel__select" :value="selectedInputMappingRapidTapAction.mode" @change="updateSelectedInputMappingRapidTapMode">
-              <option value="whileHeld">长按连击</option>
-              <option value="burst">按键后连击</option>
+              <option value="whileHeld">长按连点</option>
+              <option value="burst">按键后连点</option>
             </select>
           </label>
           <label v-if="selectedInputMappingRapidTapAction">
-            <span>{{ selectedInputMappingRapidTapAction.mode === 'burst' ? '连击次数' : '每秒连击次数' }}</span>
+            <span>{{ selectedInputMappingRapidTapAction.mode === 'burst' ? '连点次数' : '每秒连点次数' }}</span>
             <input
               type="number"
               min="1"
               :max="selectedInputMappingRapidTapAction.mode === 'burst' ? 200 : 60"
               :value="selectedInputMappingRapidTapAction.mode === 'burst' ? (selectedInputMappingRapidTapAction.tapCount || 20) : selectedInputMappingRapidTapAction.tapsPerSecond"
               @change="updateSelectedInputMappingRapidTapCount"
+            />
+          </label>
+          <label v-if="selectedInputMappingSwipeAction">
+            <span>轨迹</span>
+            <button
+              type="button"
+              class="input-mapping-config-panel__capture-btn"
+              @click="toggleSelectedInputMappingSwipeDrawing"
+            >
+              {{ isSelectedInputMappingSwipeDrawing ? '停止绘制' : '绘制轨迹' }}
+            </button>
+          </label>
+          <label v-if="selectedInputMappingSwipeAction">
+            <span>直线轨迹</span>
+            <button
+              type="button"
+              class="input-mapping-config-panel__switch"
+              :class="{ 'is-off': selectedInputMappingSwipeAction.straight !== true }"
+              @click="updateSelectedInputMappingSwipeStraight"
+            ></button>
+          </label>
+          <label v-if="selectedInputMappingSwipeAction">
+            <span>起始停留(ms)</span>
+            <input
+              type="number"
+              min="0"
+              max="5000"
+              :value="selectedInputMappingSwipeAction.startHoldMs || 0"
+              @change="updateSelectedInputMappingSwipeStartHold"
+            />
+          </label>
+          <label v-if="selectedInputMappingMouseLookAction">
+            <span>X 轴范围</span>
+            <input
+              type="number"
+              min="1"
+              max="200"
+              :value="selectedInputMappingMouseLookRangePercent.x"
+              @input="updateSelectedInputMappingMouseLookRange('x', $event)"
+              @change="updateSelectedInputMappingMouseLookRange('x', $event)"
+            />
+          </label>
+          <label v-if="selectedInputMappingMouseLookAction">
+            <span>Y 轴范围</span>
+            <input
+              type="number"
+              min="1"
+              max="200"
+              :value="selectedInputMappingMouseLookRangePercent.y"
+              @input="updateSelectedInputMappingMouseLookRange('y', $event)"
+              @change="updateSelectedInputMappingMouseLookRange('y', $event)"
             />
           </label>
           <label>

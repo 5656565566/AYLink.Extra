@@ -16,6 +16,9 @@ export interface InputMappingStickerItem {
   labelEnabled: boolean;
   shape: InputMappingStickerShape;
   opacity: number;
+  radius?: number;
+  width?: number;
+  height?: number;
   dpadKeys?: {
     up?: string;
     left?: string;
@@ -42,6 +45,7 @@ function getTriggerText(trigger: InputMappingTrigger) {
 
 function getDefaultStickerShape(trigger: InputMappingTrigger, action: InputMappingAction): InputMappingStickerShape {
   if (action.type === 'virtualJoystick') return 'joystick';
+  if (action.type === 'mouseLook') return 'aimArea';
   if (trigger.type === 'mouseButton' || trigger.type === 'mouseMove') return 'mouse';
   return 'key';
 }
@@ -55,10 +59,7 @@ function getActionPoint(action: InputMappingAction): NormalizedPoint | null {
     case 'virtualJoystick':
       return action.center;
     case 'swipe':
-      return {
-        x: (action.from.x + action.to.x) / 2,
-        y: (action.from.y + action.to.y) / 2
-      };
+      return action.from;
     case 'mouseLook':
       return action.touchStart;
     case 'hidKey':
@@ -101,6 +102,8 @@ function buildJoystickStickers(profile: InputMappingProfile): InputMappingSticke
     center: NormalizedPoint;
     keys: NonNullable<InputMappingStickerItem['dpadKeys']>;
     opacity: number;
+    radius: number;
+    shape: InputMappingStickerShape;
   }>();
 
   for (const binding of profile.bindings) {
@@ -118,12 +121,18 @@ function buildJoystickStickers(profile: InputMappingProfile): InputMappingSticke
       bindingIds: [],
       center: binding.action.center,
       keys: {},
-      opacity: binding.sticker?.opacity ?? 0.9
+      opacity: binding.sticker?.opacity ?? 0.9,
+      radius: binding.action.radius,
+      shape: binding.sticker?.shape === 'look' ? 'look' : 'joystick'
     };
 
     group.bindingIds.push(binding.id);
-    group.keys[direction] = binding.sticker?.keyText || getTriggerText(binding.trigger);
+    group.keys[direction] = binding.sticker?.keyText ?? getTriggerText(binding.trigger);
     group.opacity = Math.max(group.opacity, binding.sticker?.opacity ?? 0.9);
+    group.radius = Math.max(group.radius, binding.action.radius);
+    if (binding.sticker?.shape === 'look') {
+      group.shape = 'look';
+    }
     groups.set(groupKey, group);
   }
 
@@ -138,8 +147,9 @@ function buildJoystickStickers(profile: InputMappingProfile): InputMappingSticke
     ].filter(Boolean).join(''),
     label: '',
     labelEnabled: false,
-    shape: 'joystick',
+    shape: group.shape,
     opacity: group.opacity,
+    radius: group.radius,
     dpadKeys: group.keys
   }));
 }
@@ -162,15 +172,22 @@ export function buildInputMappingStickers(profile: InputMappingProfile): InputMa
       continue;
     }
 
-    stickers.push({
+    const item: InputMappingStickerItem = {
       bindingId: binding.id,
       point,
-      keyText: sticker?.keyText || getTriggerText(binding.trigger),
+      keyText: sticker?.keyText ?? getTriggerText(binding.trigger),
       label: sticker?.labelEnabled === false ? '' : (sticker?.label ?? binding.label),
       labelEnabled: sticker?.labelEnabled !== false,
       shape: sticker?.shape ?? getDefaultStickerShape(binding.trigger, binding.action),
       opacity: sticker?.opacity ?? 0.9
-    });
+    };
+
+    if (binding.action.type === 'mouseLook') {
+      item.width = (binding.action.rangeX ?? binding.action.maxStep ?? 0.08) * 2;
+      item.height = (binding.action.rangeY ?? binding.action.maxStep ?? 0.08) * 2;
+    }
+
+    stickers.push(item);
   }
 
   return stickers;

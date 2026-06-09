@@ -65,6 +65,10 @@ export function useCastTabs(getTabTitle: (tab: CastTab) => string) {
   };
 
   const syncRouteToActiveTab = async () => {
+    if (!isScreencastRouteActive.value) {
+      return;
+    }
+
     const {
       deviceId: _deviceId,
       appPackage: _appPackage,

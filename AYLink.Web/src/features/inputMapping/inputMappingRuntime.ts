@@ -2,8 +2,7 @@ import {
   addNormalizedPoints,
   clampNormalizedPoint,
   normalizeDirection,
-  resolveVirtualJoystickPoint,
-  scaleNormalizedPoint
+  resolveVirtualJoystickPoint
 } from './inputMappingCoordinates';
 import {
   createInputMappingResult,
@@ -152,6 +151,48 @@ function createRapidTapBurstCommands(binding: InputMappingBinding): InputMapping
   return commands;
 }
 
+function createSwipeCommands(binding: InputMappingBinding): InputMappingCommand[] {
+  if (binding.action.type !== 'swipe') {
+    return [];
+  }
+
+  const action = binding.action;
+  const pointerKey = getBindingPointerKey(binding);
+  const route = action.straight === true || !action.path || action.path.length < 2
+    ? [action.from, action.to]
+    : action.path;
+  const startHoldMs = Math.max(0, Math.round(action.startHoldMs ?? 0));
+  const durationMs = Math.max(1, Math.round(action.durationMs));
+  const lastPoint = route[route.length - 1] ?? action.to;
+  const commands: InputMappingCommand[] = [
+    { type: 'touch', phase: 'down', pointerKey, point: route[0] ?? action.from, pressure: 1 }
+  ];
+
+  for (let index = 1; index < route.length; index += 1) {
+    const moveDelayMs = route.length === 2
+      ? Math.round(durationMs / 2)
+      : Math.round((durationMs * index) / Math.max(1, route.length - 1));
+    commands.push({
+      type: 'touch',
+      phase: 'move',
+      pointerKey,
+      point: route[index],
+      pressure: 1,
+      delayMs: startHoldMs + moveDelayMs
+    });
+  }
+
+  commands.push({
+    type: 'touch',
+    phase: 'up',
+    pointerKey,
+    point: lastPoint,
+    pressure: 0,
+    delayMs: startHoldMs + durationMs
+  });
+  return commands;
+}
+
 function hasKeyboardModifier(input: InputMappingKeyboardInput, modifier: string) {
   switch (modifier.toLowerCase()) {
     case 'alt':
@@ -223,12 +264,11 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
         return [{ type: 'touch', phase: 'down', pointerKey, point: action.point, pressure: 1 }];
       }
       case 'swipe':
-        return [
-          { type: 'touch', phase: 'down', pointerKey, point: action.from, pressure: 1 },
-          { type: 'touch', phase: 'move', pointerKey, point: action.to, pressure: 1, delayMs: Math.round(action.durationMs / 2) },
-          { type: 'touch', phase: 'up', pointerKey, point: action.to, pressure: 0, delayMs: action.durationMs }
-        ];
+        return createSwipeCommands(binding);
       case 'virtualJoystick':
+        if (action.controlMode === 'tap') {
+          return createTapCommands(binding, resolveVirtualJoystickPoint(action.center, action.radius, normalizeDirection(action.direction)));
+        }
         return updateJoystickBinding(binding, true);
       case 'hidKey':
         return [{ type: 'hidKey', phase: 'down', code: action.code }];
@@ -258,6 +298,9 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
         activeRapidTapBindings.delete(binding.id);
         return [{ type: 'stopTouchRepeat', pointerKey: getBindingPointerKey(binding) }];
       case 'virtualJoystick':
+        if (action.controlMode === 'tap') {
+          return [];
+        }
         return updateJoystickBinding(binding, false);
       case 'hidKey':
         return [{ type: 'hidKey', phase: 'up', code: action.code }];
@@ -383,12 +426,14 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
     const action = binding.action;
     const touchStart = action.touchStart;
     const maxStep = action.maxStep ?? 0.08;
+    const rangeX = action.rangeX ?? maxStep;
+    const rangeY = action.rangeY ?? maxStep;
     const delta = {
       x: (input.movementX / 1000) * action.sensitivityX,
       y: (input.movementY / 1000) * action.sensitivityY * (action.invertY ? -1 : 1)
     };
     const nextPoint = clampNormalizedPoint(addNormalizedPoints(mouseLookState.isDown ? mouseLookState.point : touchStart, delta));
-    const distanceFromStart = Math.hypot(nextPoint.x - touchStart.x, nextPoint.y - touchStart.y);
+    const exceedsRange = Math.abs(nextPoint.x - touchStart.x) > rangeX || Math.abs(nextPoint.y - touchStart.y) > rangeY;
     const commands: InputMappingCommand[] = [];
 
     if (!mouseLookState.isDown) {
@@ -397,11 +442,11 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
       commands.push({ type: 'touch', phase: 'down', pointerKey: 'mouseLook', point: touchStart, pressure: 1 });
     }
 
-    if (distanceFromStart > maxStep) {
-      const limitedDelta = scaleNormalizedPoint(normalizeDirection({
-        x: nextPoint.x - touchStart.x,
-        y: nextPoint.y - touchStart.y
-      }), maxStep);
+    if (exceedsRange) {
+      const limitedDelta = {
+        x: Math.min(rangeX, Math.max(-rangeX, nextPoint.x - touchStart.x)),
+        y: Math.min(rangeY, Math.max(-rangeY, nextPoint.y - touchStart.y))
+      };
       const limitedPoint = clampNormalizedPoint(addNormalizedPoints(touchStart, limitedDelta));
       commands.push({ type: 'touch', phase: 'move', pointerKey: 'mouseLook', point: limitedPoint, pressure: 1 });
       commands.push({ type: 'touch', phase: 'up', pointerKey: 'mouseLook', point: limitedPoint, pressure: 0 });
@@ -454,7 +499,23 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
     },
 
     handleMouseButtonEvent(phase, input) {
-      return handleBindings(phase, compiledProfile?.mouseButtonBindingsByButton.get(input.button));
+      const result = handleBindings(phase, compiledProfile?.mouseButtonBindingsByButton.get(input.button));
+      if (phase !== 'down' || input.button !== 0) {
+        return result;
+      }
+
+      const releaseCommands = releaseMouseLook('up');
+      if (releaseCommands.length === 0) {
+        return result;
+      }
+
+      return {
+        handled: result.handled || releaseCommands.length > 0,
+        commands: [
+          ...releaseCommands,
+          ...result.commands
+        ]
+      };
     },
 
     handleMouseMove(input) {

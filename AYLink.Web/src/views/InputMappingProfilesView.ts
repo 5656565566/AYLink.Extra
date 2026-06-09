@@ -14,6 +14,7 @@ import {
 } from '../features/inputMapping/inputMappingSchema';
 import { createLocalInputMappingProfileStore } from '../features/inputMapping/inputMappingProfileStore';
 import { getInputMappingTabState, setInputMappingTabState } from '../features/inputMapping/inputMappingTabState';
+import { sanitizeDownloadFileName } from '../lib/input/normalize';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -224,7 +225,7 @@ export default defineComponent({
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${fullProfile.name || fullProfile.id}.aylink-input-map.json`;
+      link.download = sanitizeDownloadFileName(`${fullProfile.name || fullProfile.id}.json`, `${fullProfile.id}.json`);
       link.click();
       URL.revokeObjectURL(url);
     };
@@ -289,7 +290,18 @@ export default defineComponent({
     };
 
     const goBack = () => {
-      router.back();
+      if (route.query.mode === 'manage') {
+        void router.push({ name: 'settings' });
+        return;
+      }
+
+      void router.push({
+        name: 'screencast',
+        query: {
+          ...(routeAppPackageName.value ? { appPackage: routeAppPackageName.value } : {}),
+          ...(routeInputMappingTabKey.value ? { inputMappingTabKey: routeInputMappingTabKey.value } : {})
+        }
+      });
     };
 
     onMounted(refreshProfiles);

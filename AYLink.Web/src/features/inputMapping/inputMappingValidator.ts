@@ -150,6 +150,9 @@ function validateAction(action: InputMappingAction | unknown, path: string, issu
     case 'virtualJoystick':
       validateNormalizedPoint(action.center, `${path}.center`, issues);
       validateDirection(action.direction, `${path}.direction`, issues);
+      if (action.controlMode !== null && action.controlMode !== undefined && action.controlMode !== 'slide' && action.controlMode !== 'tap') {
+        issues.push({ path: `${path}.controlMode`, message: '方向按键操作方式无效' });
+      }
       {
         const radius = action.radius;
         if (!isFiniteNumber(radius) || radius <= 0 || radius > 1) {
@@ -160,6 +163,19 @@ function validateAction(action: InputMappingAction | unknown, path: string, issu
     case 'swipe':
       validateNormalizedPoint(action.from, `${path}.from`, issues);
       validateNormalizedPoint(action.to, `${path}.to`, issues);
+      if (action.path !== null && action.path !== undefined) {
+        if (!Array.isArray(action.path) || action.path.length < 2) {
+          issues.push({ path: `${path}.path`, message: '滑动轨迹至少需要两个点' });
+        } else {
+          action.path.forEach((point, index) => validateNormalizedPoint(point, `${path}.path[${index}]`, issues));
+        }
+      }
+      if (action.straight !== null && action.straight !== undefined && typeof action.straight !== 'boolean') {
+        issues.push({ path: `${path}.straight`, message: '直线轨迹开关必须是布尔值' });
+      }
+      if (action.startHoldMs !== null && action.startHoldMs !== undefined && (!isFiniteNumber(action.startHoldMs) || action.startHoldMs < 0)) {
+        issues.push({ path: `${path}.startHoldMs`, message: '起始停留时间必须是非负数字' });
+      }
       {
         const durationMs = action.durationMs;
         if (!isFiniteNumber(durationMs) || durationMs <= 0) {
@@ -185,6 +201,12 @@ function validateAction(action: InputMappingAction | unknown, path: string, issu
         const maxStep = action.maxStep;
         if (maxStep !== null && maxStep !== undefined && (!isFiniteNumber(maxStep) || maxStep <= 0 || maxStep > 1)) {
           issues.push({ path: `${path}.maxStep`, message: 'maxStep 必须是 0..1 之间的正数' });
+        }
+      }
+      for (const axis of ['rangeX', 'rangeY'] as const) {
+        const range = action[axis];
+        if (range !== null && range !== undefined && (!isFiniteNumber(range) || range <= 0 || range > 1)) {
+          issues.push({ path: `${path}.${axis}`, message: '视角范围必须是 0..1 之间的正数' });
         }
       }
       break;
@@ -221,12 +243,16 @@ function validateSticker(sticker: unknown, path: string, issues: InputMappingVal
     issues.push({ path: `${path}.point`, message: '贴纸坐标已移除，请使用动作坐标' });
   }
 
-  if (sticker.shape !== null && sticker.shape !== undefined && !['key', 'button', 'joystick', 'mouse', 'text'].includes(String(sticker.shape))) {
+  if (sticker.shape !== null && sticker.shape !== undefined && !['key', 'button', 'joystick', 'look', 'aimArea', 'mouse', 'text'].includes(String(sticker.shape))) {
     issues.push({ path: `${path}.shape`, message: '贴纸形状无效' });
   }
 
   if (sticker.labelEnabled !== null && sticker.labelEnabled !== undefined && typeof sticker.labelEnabled !== 'boolean') {
     issues.push({ path: `${path}.labelEnabled`, message: '备注显示开关必须是布尔值' });
+  }
+
+  if (sticker.role !== null && sticker.role !== undefined && sticker.role !== 'attack') {
+    issues.push({ path: `${path}.role`, message: '贴纸角色无效' });
   }
 
   if (sticker.opacity !== null && sticker.opacity !== undefined) {

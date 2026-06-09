@@ -128,4 +128,15 @@ describe('useCastTabs', () => {
     expect(onTabOpened).toHaveBeenCalled();
     expect(syncRefsFromActiveTab).toHaveBeenCalled();
   });
+
+  it('does not rewrite unrelated routes when syncing cached cast state', async () => {
+    const mounted = mountComposable(() => useCastTabs((tab) => tab.deviceName));
+    unmount = mounted.unmount;
+
+    routeState.name = 'input-mapping-profiles';
+    routeState.query = { mode: 'manage' };
+    await mounted.result.syncRouteToActiveTab();
+
+    expect(routerReplace).not.toHaveBeenCalled();
+  });
 });

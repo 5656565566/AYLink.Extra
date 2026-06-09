@@ -93,6 +93,10 @@ export function useTerminalWorkspace() {
   };
 
   const syncRouteToActiveTab = async () => {
+    if (!isTerminalRouteActive.value) {
+      return;
+    }
+
     if (Object.keys(route.query).length > 0) {
       await router.replace({ name: 'terminal', query: {} });
     }
@@ -386,6 +390,10 @@ export function useTerminalWorkspace() {
   watch(
     () => route.query,
     async () => {
+      if (!isTerminalRouteActive.value) {
+        return;
+      }
+
       await consumeIncomingTab();
     }
   );

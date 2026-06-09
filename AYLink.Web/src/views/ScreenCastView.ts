@@ -26,7 +26,6 @@ import {
   Target24Regular,
   EyeTracking24Regular,
   Flash24Regular,
-  CursorHover24Regular,
   Sparkle24Regular
 } from '@vicons/fluent';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
@@ -165,7 +164,6 @@ export default defineComponent({
     Target24Regular,
     EyeTracking24Regular,
     Flash24Regular,
-    CursorHover24Regular,
     Sparkle24Regular
   },
   setup() {
@@ -674,13 +672,31 @@ export default defineComponent({
 
     const inputMappingCaptureIgnoreMouseUntil = ref(0);
 
+    const inputMappingCaptureSuppressClickUntil = ref(0);
+
     const inputMappingStickerDrag = ref<{
       bindingId: string;
       offsetX: number;
       offsetY: number;
     } | null>(null);
 
+    const inputMappingAimAreaResize = ref<{
+      bindingId: string;
+      signX: -1 | 1;
+      signY: -1 | 1;
+    } | null>(null);
+
     const inputMappingStickerLayoutRevision = ref(0);
+
+    const inputMappingSwipeRecordingBindingId = ref('');
+
+    const inputMappingSwipeRecordingPath = ref<NormalizedPoint[]>([]);
+
+    const inputMappingSwipeRecordingStartedAt = ref(0);
+
+    const inputMappingSwipeDrawingBindingId = ref('');
+
+    const inputMappingSwipeDrawingRestoreMenu = ref(false);
 
     const inputMappingStickers = computed(() => {
       const profile = activeInputMappingProfile.value;
@@ -730,6 +746,65 @@ export default defineComponent({
       return profile.bindings.find((binding) => binding.id === sticker.bindingId) ?? null;
     });
 
+    const selectedInputMappingJoystickBindings = computed(() => {
+      const profile = activeInputMappingProfile.value;
+      const sticker = selectedInputMappingSticker.value;
+      if (!profile || !sticker || !sticker.bindingId.startsWith('joystick:')) {
+        return [];
+      }
+
+      const bindingIds = getJoystickStickerBindingIds(sticker.bindingId);
+      return profile.bindings.filter((binding) => bindingIds.includes(binding.id) && binding.action.type === 'virtualJoystick');
+    });
+
+    const selectedInputMappingJoystickControlMode = computed(() => {
+      const action = selectedInputMappingJoystickBindings.value[0]?.action;
+      return action?.type === 'virtualJoystick' ? (action.controlMode ?? 'slide') : 'slide';
+    });
+
+    const selectedInputMappingJoystickSizePercent = computed(() => {
+      const action = selectedInputMappingJoystickBindings.value[0]?.action;
+      return action?.type === 'virtualJoystick' ? Math.round((action.radius / 0.08) * 100) : 100;
+    });
+
+    const selectedInputMappingJoystickDirectionBindings = computed(() => {
+      const directionOrder = [
+        ['up', '上'] as const,
+        ['left', '左'] as const,
+        ['down', '下'] as const,
+        ['right', '右'] as const
+      ];
+      const items: Array<{ directionKey: string; title: string; binding: InputMappingBinding }> = [];
+
+      for (const [directionKey, title] of directionOrder) {
+        const binding = selectedInputMappingJoystickBindings.value.find((item) => {
+          if (item.action.type !== 'virtualJoystick') {
+            return false;
+          }
+          if (directionKey === 'up') return item.action.direction.y < 0;
+          if (directionKey === 'down') return item.action.direction.y > 0;
+          if (directionKey === 'left') return item.action.direction.x < 0;
+          return item.action.direction.x > 0;
+        });
+
+        if (binding) {
+          items.push({ directionKey, title, binding });
+        }
+      }
+
+      return items;
+    });
+
+    const selectedInputMappingIsAttackBinding = computed(() => {
+      const binding = selectedInputMappingBinding.value;
+      return binding?.sticker?.role === 'attack' || binding?.id.startsWith('fire-') === true;
+    });
+
+    const selectedInputMappingCanEditTrigger = computed(() => {
+      const binding = selectedInputMappingBinding.value;
+      return !!binding && binding.action.type !== 'mouseLook' && !selectedInputMappingIsAttackBinding.value;
+    });
+
     const selectedInputMappingStickerLabelText = computed(() => {
       const binding = selectedInputMappingBinding.value;
       return binding?.sticker?.label ?? binding?.label ?? selectedInputMappingSticker.value?.label ?? '';
@@ -747,8 +822,12 @@ export default defineComponent({
         return '方向按键';
       }
 
-      if (binding?.action.type === 'mouseLook') {
+      if (sticker.shape === 'look') {
         return '视角移动';
+      }
+
+      if (binding?.action.type === 'mouseLook') {
+        return '准星键';
       }
 
       if (binding?.action.type === 'swipe') {
@@ -768,14 +847,13 @@ export default defineComponent({
 
     const inputMappingStickerPaletteItems = [
       { type: 'click', title: '点击按键', iconComponent: CursorClick24Regular },
-      { type: 'rapidTap', title: '连击按键', iconComponent: TapDouble24Regular },
+      { type: 'rapidTap', title: '连点按键', iconComponent: TapDouble24Regular },
       { type: 'swipe', title: '滑动键位', iconComponent: SwipeRight24Regular },
       { type: 'joystick', title: '方向按键', iconComponent: Apps24Regular },
       { type: 'aim', title: '准星键', iconComponent: Target24Regular },
       { type: 'look', title: '视角移动', iconComponent: EyeTracking24Regular },
-      { type: 'fire', title: '攻击键', iconComponent: Flash24Regular },
-      { type: 'mouse', title: '右键行走', iconComponent: CursorHover24Regular },
-      { type: 'skill', title: '技能施法', iconComponent: Sparkle24Regular }
+      { type: 'fire', title: '攻击键', iconComponent: Flash24Regular }
+      // { type: 'skill', title: '技能施法', iconComponent: Sparkle24Regular }
     ];
 
     const inputMappingTouchBridge = createInputMappingTouchBridge({
@@ -2775,7 +2853,10 @@ export default defineComponent({
       return {
         left: `${viewport.offsetX - originX + viewport.displayWidth * sticker.point.x}px`,
         top: `${viewport.offsetY - originY + viewport.displayHeight * sticker.point.y}px`,
-        opacity: `${sticker.opacity}`
+        opacity: `${sticker.opacity}`,
+        '--joystick-size': sticker.radius ? `${Math.round((sticker.radius / 0.08) * 76)}px` : undefined,
+        '--aim-area-width': sticker.width ? `${Math.round(viewport.displayWidth * sticker.width)}px` : undefined,
+        '--aim-area-height': sticker.height ? `${Math.round(viewport.displayHeight * sticker.height)}px` : undefined
       };
     };
 
@@ -2801,6 +2882,27 @@ export default defineComponent({
       };
     };
 
+    const getInputMappingPaletteStyle = () => {
+      void inputMappingStickerLayoutRevision.value;
+
+      const stageRect = videoContainer.value?.getBoundingClientRect();
+      if (!stageRect) {
+        return {
+          display: 'none'
+        };
+      }
+
+      const paletteWidth = 246;
+      const paletteHeight = Math.min(360, Math.max(0, stageRect.height - 32));
+      const margin = 8;
+      const maxX = Math.max(margin, stageRect.width - paletteWidth - margin);
+      const maxY = Math.max(margin, stageRect.height - paletteHeight - margin);
+      return {
+        left: `${Math.min(maxX, Math.max(margin, inputMappingContextMenu.value.x))}px`,
+        top: `${Math.min(maxY, Math.max(margin, inputMappingContextMenu.value.y))}px`
+      };
+    };
+
     const getInputMappingPointFromClient = (clientX: number, clientY: number) => {
       const viewport = getVideoViewport();
       if (!viewport || viewport.displayWidth <= 0 || viewport.displayHeight <= 0) {
@@ -2817,9 +2919,24 @@ export default defineComponent({
       return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     };
 
+    const formatInputMappingKeyboardCode = (code: string) => {
+      switch (code) {
+        case 'ArrowUp':
+          return '↑';
+        case 'ArrowLeft':
+          return '←';
+        case 'ArrowDown':
+          return '↓';
+        case 'ArrowRight':
+          return '→';
+        default:
+          return code.replace(/^Key/, '').replace(/^Digit/, '');
+      }
+    };
+
     const getInputMappingTriggerText = (binding: InputMappingBinding) => {
       if (binding.trigger.type === 'keyboard') {
-        return binding.trigger.code.replace(/^Key/, '').replace(/^Digit/, '');
+        return formatInputMappingKeyboardCode(binding.trigger.code);
       }
       if (binding.trigger.type === 'mouseButton') {
         if (binding.trigger.button === 0) return '左键';
@@ -2858,18 +2975,23 @@ export default defineComponent({
             sticker: { ...sticker, label: '连击' }
           }];
         case 'swipe':
-          return [{
-            id,
-            label: '滑动',
-            trigger: { type: 'keyboard', code: 'Digit1' },
-            action: {
-              type: 'swipe',
-              from: point,
-              to: { x: Math.min(1, point.x + 0.08), y: point.y },
-              durationMs: 120
-            },
-            sticker: { ...sticker, label: '滑动' }
-          }];
+          {
+            const to = { x: Math.min(1, point.x + 0.08), y: point.y };
+            return [{
+              id,
+              label: '滑动',
+              trigger: { type: 'keyboard', code: 'Digit1' },
+              action: {
+                type: 'swipe',
+                from: point,
+                to,
+                durationMs: 120,
+                straight: false,
+                startHoldMs: 0
+              },
+              sticker: { ...sticker, label: '滑动' }
+            }];
+          }
         case 'joystick': {
           const group = createInputMappingBindingId('movement');
           const directions = [
@@ -2887,7 +3009,8 @@ export default defineComponent({
               center: point,
               radius: 0.08,
               direction,
-              group
+              group,
+              controlMode: 'slide'
             },
             sticker: {
               keyText,
@@ -2898,40 +3021,41 @@ export default defineComponent({
           }));
         }
         case 'look':
-          return [{
-            id,
-            label: '视角',
-            trigger: { type: 'mouseMove', activation: 'pointerLock' },
-            action: {
-              type: 'mouseLook',
-              touchStart: point,
-              sensitivityX: 1,
-              sensitivityY: 1,
-              invertY: false,
-              maxStep: 0.08
-            },
-            sticker: {
-              keyText: '',
-              label: '',
-              shape: 'mouse',
-              opacity: 0.55
-            }
-          }];
+          {
+            const group = createInputMappingBindingId('look');
+            const directions = [
+              ['look-up', '↑', 'ArrowUp', { x: 0, y: -1 }],
+              ['look-left', '←', 'ArrowLeft', { x: -1, y: 0 }],
+              ['look-down', '↓', 'ArrowDown', { x: 0, y: 1 }],
+              ['look-right', '→', 'ArrowRight', { x: 1, y: 0 }]
+            ] as const;
+            return directions.map(([suffix, keyText, code, direction]) => ({
+              id: `${group}-${suffix}`,
+              label: '视角移动',
+              trigger: { type: 'keyboard', code },
+              action: {
+                type: 'virtualJoystick',
+                center: point,
+                radius: 0.08,
+                direction,
+                group,
+                controlMode: 'slide'
+              },
+              sticker: {
+                keyText,
+                label: '',
+                shape: 'look' as const,
+                opacity: 0.86
+              }
+            }));
+          }
         case 'fire':
           return [{
             id,
             label: '攻击',
             trigger: { type: 'mouseButton', button: 0 },
-            action: { type: 'tap', point },
-            sticker: { ...sticker, keyText: '左键', label: '攻击', shape: 'mouse' }
-          }];
-        case 'mouse':
-          return [{
-            id,
-            label: '右键',
-            trigger: { type: 'mouseButton', button: 2 },
             action: { type: 'hold', point },
-            sticker: { ...sticker, keyText: '右键', label: '右键', shape: 'mouse' }
+            sticker: { ...sticker, keyText: '左键', label: '攻击', shape: 'mouse', role: 'attack' }
           }];
         case 'skill':
           return [{
@@ -2945,9 +3069,24 @@ export default defineComponent({
           return [{
             id,
             label: '准星',
-            trigger: { type: 'keyboard', code: 'KeyQ' },
-            action: { type: 'tap', point },
-            sticker: { ...sticker, keyText: 'Q', label: '准星' }
+            trigger: { type: 'mouseMove', activation: 'pointerLock' },
+            action: {
+              type: 'mouseLook',
+              touchStart: point,
+              sensitivityX: 1,
+              sensitivityY: 1,
+              invertY: false,
+              maxStep: 0.08,
+              rangeX: 0.08,
+              rangeY: 0.08
+            },
+            sticker: {
+              keyText: '',
+              label: '',
+              labelEnabled: false,
+              shape: 'aimArea',
+              opacity: 0.72
+            }
           }];
         case 'click':
         default:
@@ -3033,9 +3172,24 @@ export default defineComponent({
       void updateSelectedInputMappingBindingSticker({ labelEnabled: binding.sticker?.labelEnabled === false });
     };
 
-    const startInputMappingTriggerCapture = () => {
-      const binding = selectedInputMappingBinding.value;
-      if (!binding) {
+    const stopInputMappingCaptureEvent = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if ('stopImmediatePropagation' in event && typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
+    };
+
+    const startInputMappingBindingTriggerCapture = (bindingId: string, event?: Event) => {
+      if (event) {
+        stopInputMappingCaptureEvent(event);
+      }
+      if (Date.now() < inputMappingCaptureSuppressClickUntil.value) {
+        return;
+      }
+      const profile = activeInputMappingProfile.value;
+      const binding = profile?.bindings.find((item) => item.id === bindingId);
+      if (!binding || binding.action.type === 'mouseLook') {
         return;
       }
 
@@ -3043,13 +3197,27 @@ export default defineComponent({
       inputMappingCaptureBindingId.value = binding.id;
     };
 
+    const startInputMappingTriggerCapture = (event?: Event) => {
+      if (event) {
+        stopInputMappingCaptureEvent(event);
+      }
+      if (Date.now() < inputMappingCaptureSuppressClickUntil.value) {
+        return;
+      }
+      const binding = selectedInputMappingBinding.value;
+      if (!binding || !selectedInputMappingCanEditTrigger.value) {
+        return;
+      }
+
+      startInputMappingBindingTriggerCapture(binding.id);
+    };
+
     const captureSelectedInputMappingMouseButton = (event: MouseEvent) => {
       if (!inputMappingCaptureBindingId.value) {
         return;
       }
 
-      event.preventDefault();
-      event.stopPropagation();
+      stopInputMappingCaptureEvent(event);
       if (Date.now() < inputMappingCaptureIgnoreMouseUntil.value) {
         return;
       }
@@ -3067,7 +3235,7 @@ export default defineComponent({
       binding.trigger = { type: 'keyboard', code: event.code };
       binding.sticker = {
         ...binding.sticker,
-        keyText: event.code.replace(/^Key/, '').replace(/^Digit/, '')
+        keyText: formatInputMappingKeyboardCode(event.code)
       };
       inputMappingCaptureBindingId.value = '';
       await saveActiveInputMappingProfile();
@@ -3089,6 +3257,7 @@ export default defineComponent({
       };
       inputMappingCaptureBindingId.value = '';
       inputMappingCaptureIgnoreMouseUntil.value = 0;
+      inputMappingCaptureSuppressClickUntil.value = Date.now() + 500;
       await saveActiveInputMappingProfile();
       return true;
     };
@@ -3113,6 +3282,7 @@ export default defineComponent({
       selectedInputMappingStickerId.value = '';
       inputMappingCaptureBindingId.value = '';
       inputMappingCaptureIgnoreMouseUntil.value = 0;
+      inputMappingCaptureSuppressClickUntil.value = 0;
       await saveActiveInputMappingProfile();
     };
 
@@ -3138,13 +3308,9 @@ export default defineComponent({
         if (binding.action.type === 'tap' || binding.action.type === 'rapidTap' || binding.action.type === 'hold') {
           binding.action.point = point;
         } else if (binding.action.type === 'swipe') {
-          const center = {
-            x: (binding.action.from.x + binding.action.to.x) / 2,
-            y: (binding.action.from.y + binding.action.to.y) / 2
-          };
           const delta = {
-            x: point.x - center.x,
-            y: point.y - center.y
+            x: point.x - binding.action.from.x,
+            y: point.y - binding.action.from.y
           };
           binding.action.from = {
             x: Math.min(1, Math.max(0, binding.action.from.x + delta.x)),
@@ -3154,6 +3320,12 @@ export default defineComponent({
             x: Math.min(1, Math.max(0, binding.action.to.x + delta.x)),
             y: Math.min(1, Math.max(0, binding.action.to.y + delta.y))
           };
+          if (binding.action.path) {
+            binding.action.path = binding.action.path.map((pathPoint) => ({
+              x: Math.min(1, Math.max(0, pathPoint.x + delta.x)),
+              y: Math.min(1, Math.max(0, pathPoint.y + delta.y))
+            }));
+          }
         } else if (binding.action.type === 'mouseLook') {
           binding.action.touchStart = point;
         }
@@ -3162,10 +3334,146 @@ export default defineComponent({
       await saveActiveInputMappingProfile();
     };
 
+    const updateInputMappingAimAreaRange = async (bindingId: string, clientX: number, clientY: number) => {
+      const point = getInputMappingPointFromClient(clientX, clientY);
+      const profile = activeInputMappingProfile.value;
+      const binding = profile?.bindings.find((item) => item.id === bindingId);
+      if (!point || binding?.action.type !== 'mouseLook') {
+        return;
+      }
+
+      binding.action.rangeX = Math.min(0.2, Math.max(0.004, Math.abs(point.x - binding.action.touchStart.x)));
+      binding.action.rangeY = Math.min(0.2, Math.max(0.004, Math.abs(point.y - binding.action.touchStart.y)));
+      binding.action.maxStep = Math.max(binding.action.rangeX, binding.action.rangeY);
+      refreshInputMappingStickerLayout();
+      await saveActiveInputMappingProfile();
+    };
+
     const selectedInputMappingRapidTapAction = computed(() => {
       const action = selectedInputMappingBinding.value?.action;
       return action?.type === 'rapidTap' ? action : null;
     });
+
+    const selectedInputMappingPressMode = computed(() => {
+      const binding = selectedInputMappingBinding.value;
+      if (!binding || selectedInputMappingIsAttackBinding.value) {
+        return '';
+      }
+
+      return binding.action.type === 'tap' || binding.action.type === 'hold' ? binding.action.type : '';
+    });
+
+    const selectedInputMappingSwipeAction = computed(() => {
+      const action = selectedInputMappingBinding.value?.action;
+      return action?.type === 'swipe' ? action : null;
+    });
+
+    const selectedInputMappingMouseLookAction = computed(() => {
+      const action = selectedInputMappingBinding.value?.action;
+      return action?.type === 'mouseLook' ? action : null;
+    });
+
+    const selectedInputMappingMouseLookRangePercent = computed(() => {
+      const action = selectedInputMappingMouseLookAction.value;
+      return {
+        x: action ? Math.round(((action.rangeX ?? action.maxStep ?? 0.08) / 0.08) * 100) : 100,
+        y: action ? Math.round(((action.rangeY ?? action.maxStep ?? 0.08) / 0.08) * 100) : 100
+      };
+    });
+
+    const isSelectedInputMappingSwipeDrawing = computed(() =>
+      !!selectedInputMappingBinding.value
+      && inputMappingSwipeDrawingBindingId.value === selectedInputMappingBinding.value.id
+    );
+
+    const getInputMappingSwipePathPoints = () => {
+      const action = selectedInputMappingSwipeAction.value;
+      if (!action) {
+        return [];
+      }
+
+      if (isSelectedInputMappingSwipeDrawing.value && inputMappingSwipeRecordingPath.value.length > 0) {
+        return inputMappingSwipeRecordingPath.value;
+      }
+
+      return action.path && action.path.length >= 2 ? action.path : [];
+    };
+
+    const getInputMappingSwipePathPolyline = () => {
+      void inputMappingStickerLayoutRevision.value;
+
+      const viewport = getVideoViewport();
+      const stageRect = videoContainer.value?.getBoundingClientRect();
+      const points = getInputMappingSwipePathPoints();
+      if (!viewport || !stageRect || points.length < 2) {
+        return '';
+      }
+
+      return points.map((point) => {
+        const x = viewport.offsetX - stageRect.left + viewport.displayWidth * point.x;
+        const y = viewport.offsetY - stageRect.top + viewport.displayHeight * point.y;
+        return `${x},${y}`;
+      }).join(' ');
+    };
+
+    const saveInputMappingSwipeRecordingPath = async () => {
+      const profile = activeInputMappingProfile.value;
+      const binding = profile?.bindings.find((item) => item.id === inputMappingSwipeRecordingBindingId.value);
+      if (binding?.action.type !== 'swipe' || inputMappingSwipeRecordingPath.value.length < 2) {
+        return;
+      }
+
+      const path = inputMappingSwipeRecordingPath.value;
+      binding.action.from = path[0];
+      binding.action.to = path[path.length - 1];
+      binding.action.path = path;
+      binding.action.durationMs = Math.max(80, Date.now() - inputMappingSwipeRecordingStartedAt.value);
+      await saveActiveInputMappingProfile();
+    };
+
+    const toggleSelectedInputMappingSwipeDrawing = async () => {
+      const binding = selectedInputMappingBinding.value;
+      if (!binding || binding.action.type !== 'swipe') {
+        return;
+      }
+
+      if (inputMappingSwipeDrawingBindingId.value === binding.id) {
+        await saveInputMappingSwipeRecordingPath();
+        inputMappingSwipeDrawingBindingId.value = '';
+        inputMappingSwipeRecordingBindingId.value = '';
+        inputMappingSwipeRecordingPath.value = [];
+        inputMappingSwipeRecordingStartedAt.value = 0;
+        inputMappingSwipeDrawingRestoreMenu.value = false;
+        return;
+      }
+
+      inputMappingSwipeDrawingBindingId.value = binding.id;
+      inputMappingSwipeRecordingBindingId.value = '';
+      inputMappingSwipeRecordingPath.value = [];
+      inputMappingSwipeRecordingStartedAt.value = 0;
+      refreshInputMappingStickerLayout();
+    };
+
+    const updateSelectedInputMappingSwipeStraight = () => {
+      const action = selectedInputMappingSwipeAction.value;
+      if (!action) {
+        return;
+      }
+
+      action.straight = action.straight !== true;
+      void saveActiveInputMappingProfile();
+    };
+
+    const updateSelectedInputMappingSwipeStartHold = (event: Event) => {
+      const action = selectedInputMappingSwipeAction.value;
+      if (!action) {
+        return;
+      }
+
+      const value = Number((event.target as HTMLInputElement | null)?.value || 0);
+      action.startHoldMs = Math.min(5000, Math.max(0, Math.round(Number.isFinite(value) ? value : 0)));
+      void saveActiveInputMappingProfile();
+    };
 
     const updateSelectedInputMappingRapidTapMode = (event: Event) => {
       const action = selectedInputMappingRapidTapAction.value;
@@ -3191,6 +3499,70 @@ export default defineComponent({
       } else {
         action.tapsPerSecond = Math.min(60, normalized);
       }
+      void saveActiveInputMappingProfile();
+    };
+
+    const updateSelectedInputMappingPressMode = (event: Event) => {
+      const binding = selectedInputMappingBinding.value;
+      if (!binding || selectedInputMappingIsAttackBinding.value) {
+        return;
+      }
+
+      const value = (event.target as HTMLSelectElement | null)?.value;
+      if (value === 'hold' && binding.action.type === 'tap') {
+        binding.action = {
+          type: 'hold',
+          point: binding.action.point
+        };
+      } else if (value === 'tap' && binding.action.type === 'hold') {
+        binding.action = {
+          type: 'tap',
+          point: binding.action.point
+        };
+      }
+      void saveActiveInputMappingProfile();
+    };
+
+    const updateSelectedInputMappingJoystickControlMode = (event: Event) => {
+      const value = (event.target as HTMLSelectElement | null)?.value;
+      const controlMode = value === 'tap' ? 'tap' : 'slide';
+      for (const binding of selectedInputMappingJoystickBindings.value) {
+        if (binding.action.type === 'virtualJoystick') {
+          binding.action.controlMode = controlMode;
+        }
+      }
+      void saveActiveInputMappingProfile();
+    };
+
+    const updateSelectedInputMappingJoystickSize = (event: Event) => {
+      const value = Number((event.target as HTMLInputElement | null)?.value || 100);
+      const percent = Math.min(200, Math.max(1, Math.round(Number.isFinite(value) ? value : 100)));
+      const radius = Math.min(0.2, Math.max(0.004, (0.08 * percent) / 100));
+      for (const binding of selectedInputMappingJoystickBindings.value) {
+        if (binding.action.type === 'virtualJoystick') {
+          binding.action.radius = radius;
+        }
+      }
+      refreshInputMappingStickerLayout();
+      void saveActiveInputMappingProfile();
+    };
+
+    const updateSelectedInputMappingMouseLookRange = (axis: 'x' | 'y', event: Event) => {
+      const action = selectedInputMappingMouseLookAction.value;
+      if (!action) {
+        return;
+      }
+
+      const value = Number((event.target as HTMLInputElement | null)?.value || 100);
+      const percent = Math.min(200, Math.max(1, Math.round(Number.isFinite(value) ? value : 100)));
+      const range = Math.min(0.2, Math.max(0.004, (0.08 * percent) / 100));
+      if (axis === 'x') {
+        action.rangeX = range;
+      } else {
+        action.rangeY = range;
+      }
+      action.maxStep = Math.max(action.rangeX ?? action.maxStep ?? 0.08, action.rangeY ?? action.maxStep ?? 0.08);
+      refreshInputMappingStickerLayout();
       void saveActiveInputMappingProfile();
     };
 
@@ -3221,6 +3593,27 @@ export default defineComponent({
 
     const closeInputMappingProfileDialog = () => {
       isInputMappingProfileDialogVisible.value = false;
+    };
+
+    const leaveInputMappingEditModeAfterSave = () => {
+      if (!isInputMappingEditMode.value) {
+        return;
+      }
+
+      isInputMappingEditMode.value = false;
+      selectedInputMappingStickerId.value = '';
+      closeInputMappingContextMenu();
+      inputMappingCaptureBindingId.value = '';
+      inputMappingCaptureIgnoreMouseUntil.value = 0;
+      void router.replace({
+        name: 'screencast',
+        query: {
+          ...route.query,
+          inputMappingEdit: undefined,
+          inputMappingNew: undefined,
+          inputMappingProfileId: undefined
+        }
+      });
     };
 
     const submitInputMappingProfileDialog = async () => {
@@ -3261,22 +3654,7 @@ export default defineComponent({
           title: t('InputMapping.SaveSuccess', '保存成功'),
           message: profile.name
         });
-        if (isNewInputMappingProfileDraft.value) {
-          isInputMappingEditMode.value = false;
-          selectedInputMappingStickerId.value = '';
-          closeInputMappingContextMenu();
-          inputMappingCaptureBindingId.value = '';
-          inputMappingCaptureIgnoreMouseUntil.value = 0;
-          void router.replace({
-            name: 'screencast',
-            query: {
-              ...route.query,
-              inputMappingEdit: undefined,
-              inputMappingNew: undefined,
-              inputMappingProfileId: undefined
-            }
-          });
-        }
+        leaveInputMappingEditModeAfterSave();
       } catch (error) {
         notifications.show({
           type: 'error',
@@ -3310,6 +3688,7 @@ export default defineComponent({
           title: t('InputMapping.SaveSuccess', '保存成功'),
           message: activeInputMappingProfile.value?.name || t('InputMapping.ProfileSaved', '按键映射方案已保存')
         });
+        leaveInputMappingEditModeAfterSave();
       } catch (error) {
         notifications.show({
           type: 'error',
@@ -3513,6 +3892,66 @@ export default defineComponent({
 
     const activeFloatingMenuItemCount = computed(() => activeFloatingMenuItems.value.length);
 
+    const pushInputMappingSwipeRecordingPoint = (point: NormalizedPoint) => {
+      const path = inputMappingSwipeRecordingPath.value;
+      const lastPoint = path[path.length - 1];
+      if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 0.004) {
+        path.push(point);
+      }
+    };
+
+    const handleInputMappingSwipeRecordingPointer = async (event: PointerEvent) => {
+      if (!inputMappingSwipeRecordingBindingId.value || event.button !== 0 && event.type === 'pointerdown') {
+        return false;
+      }
+
+      const point = getInputMappingPointFromClient(event.clientX, event.clientY);
+      if (!point) {
+        return false;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.type === 'pointerdown') {
+        const profile = activeInputMappingProfile.value;
+        const binding = profile?.bindings.find((item) => item.id === inputMappingSwipeRecordingBindingId.value);
+        inputMappingSwipeRecordingPath.value = binding?.action.type === 'swipe' ? [binding.action.from] : [point];
+        inputMappingSwipeRecordingStartedAt.value = Date.now();
+        return true;
+      }
+
+      if (event.type === 'pointermove') {
+        if (inputMappingSwipeRecordingPath.value.length > 0) {
+          pushInputMappingSwipeRecordingPoint(point);
+        }
+        return true;
+      }
+
+      if (event.type === 'pointerup' && inputMappingSwipeRecordingPath.value.length > 0) {
+        pushInputMappingSwipeRecordingPoint(point);
+        const profile = activeInputMappingProfile.value;
+        const binding = profile?.bindings.find((item) => item.id === inputMappingSwipeRecordingBindingId.value);
+        if (binding?.action.type === 'swipe') {
+          const path = inputMappingSwipeRecordingPath.value.length >= 2
+            ? inputMappingSwipeRecordingPath.value
+            : [];
+          if (path.length >= 2) {
+            binding.action.from = path[0];
+            binding.action.to = path[path.length - 1];
+            binding.action.path = path;
+            binding.action.durationMs = Math.max(80, Date.now() - inputMappingSwipeRecordingStartedAt.value);
+            selectedInputMappingStickerId.value = binding.id;
+            await saveActiveInputMappingProfile();
+          }
+        }
+        inputMappingSwipeRecordingBindingId.value = '';
+        inputMappingSwipeRecordingStartedAt.value = 0;
+        return true;
+      }
+
+      return false;
+    };
+
     const blockInputMappingEditPointer = (event: Event) => {
       if (!isInputMappingEditMode.value) {
         return;
@@ -3538,6 +3977,7 @@ export default defineComponent({
       }
 
       event.preventDefault();
+      event.stopPropagation();
       const stageRect = videoContainer.value?.getBoundingClientRect();
       const point = getInputMappingPointFromClient(event.clientX, event.clientY);
       selectedInputMappingStickerId.value = '';
@@ -3577,6 +4017,15 @@ export default defineComponent({
       event.preventDefault();
       event.stopPropagation();
       selectedInputMappingStickerId.value = sticker.bindingId;
+      if (sticker.bindingId === inputMappingSwipeDrawingBindingId.value) {
+        inputMappingSwipeRecordingBindingId.value = sticker.bindingId;
+        inputMappingSwipeDrawingRestoreMenu.value = isMenuExpanded.value;
+        isMenuExpanded.value = false;
+        void handleInputMappingSwipeRecordingPointer(event);
+        (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+        return;
+      }
+
       inputMappingStickerDrag.value = {
         bindingId: sticker.bindingId,
         offsetX: 0,
@@ -3585,7 +4034,35 @@ export default defineComponent({
       (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
     };
 
+    const startInputMappingAimAreaResize = (event: PointerEvent, sticker: InputMappingStickerItem, signX: -1 | 1, signY: -1 | 1) => {
+      if (!isInputMappingEditMode.value || sticker.shape !== 'aimArea') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      selectedInputMappingStickerId.value = sticker.bindingId;
+      inputMappingAimAreaResize.value = {
+        bindingId: sticker.bindingId,
+        signX,
+        signY
+      };
+      void updateInputMappingAimAreaRange(sticker.bindingId, event.clientX, event.clientY);
+      (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+    };
+
     const moveInputMappingStickerDrag = (event: PointerEvent) => {
+      if (inputMappingAimAreaResize.value) {
+        event.preventDefault();
+        void updateInputMappingAimAreaRange(inputMappingAimAreaResize.value.bindingId, event.clientX, event.clientY);
+        return;
+      }
+
+      if (inputMappingSwipeRecordingBindingId.value) {
+        void handleInputMappingSwipeRecordingPointer(event);
+        return;
+      }
+
       if (!inputMappingStickerDrag.value) {
         return;
       }
@@ -3595,6 +4072,33 @@ export default defineComponent({
     };
 
     const finishInputMappingStickerDrag = (event: PointerEvent) => {
+      if (inputMappingAimAreaResize.value) {
+        try {
+          (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
+        } catch {
+          // Ignore capture release failures while leaving edit mode or changing tabs.
+        }
+        inputMappingAimAreaResize.value = null;
+        return;
+      }
+
+      if (inputMappingSwipeRecordingBindingId.value) {
+        void handleInputMappingSwipeRecordingPointer(event);
+        try {
+          (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
+        } catch {
+          // Ignore capture release failures while leaving edit mode or changing tabs.
+        }
+        if (inputMappingSwipeDrawingRestoreMenu.value) {
+          inputMappingSwipeDrawingRestoreMenu.value = false;
+          void nextTick(() => {
+            isMenuExpanded.value = true;
+            ensureMenuInsideStage();
+          });
+        }
+        return;
+      }
+
       if (!inputMappingStickerDrag.value) {
         return;
       }
@@ -4304,8 +4808,18 @@ export default defineComponent({
       selectedInputMappingStickerId,
       selectedInputMappingSticker,
       selectedInputMappingBinding,
+      selectedInputMappingJoystickBindings,
+      selectedInputMappingJoystickDirectionBindings,
+      selectedInputMappingJoystickControlMode,
+      selectedInputMappingJoystickSizePercent,
       selectedInputMappingRapidTapAction,
+      selectedInputMappingPressMode,
+      selectedInputMappingSwipeAction,
+      selectedInputMappingMouseLookAction,
+      selectedInputMappingMouseLookRangePercent,
       selectedInputMappingStickerLabelText,
+      selectedInputMappingCanEditTrigger,
+      isSelectedInputMappingSwipeDrawing,
       selectedInputMappingConfigTitle,
       isInputMappingHintsVisible,
       isInputMappingEnabled,
@@ -4536,7 +5050,9 @@ export default defineComponent({
       getVideoViewport,
       refreshInputMappingStickerLayout,
       getInputMappingStickerStyle,
+      getInputMappingSwipePathPolyline,
       getInputMappingConfigPanelStyle,
+      getInputMappingPaletteStyle,
       handleInputMappingStageContextMenu,
       closeInputMappingContextMenu,
       closeInputMappingProfileDialog,
@@ -4547,14 +5063,24 @@ export default defineComponent({
       blockInputMappingEditPointer,
       addInputMappingStickerFromPalette,
       updateSelectedInputMappingLabel,
+      updateSelectedInputMappingJoystickControlMode,
+      updateSelectedInputMappingJoystickSize,
+      updateSelectedInputMappingMouseLookRange,
+      updateSelectedInputMappingPressMode,
       updateSelectedInputMappingRapidTapMode,
       updateSelectedInputMappingRapidTapCount,
+      updateSelectedInputMappingSwipeStraight,
+      updateSelectedInputMappingSwipeStartHold,
+      toggleSelectedInputMappingSwipeDrawing,
       toggleSelectedInputMappingStickerEnabled,
+      getInputMappingTriggerText,
+      startInputMappingBindingTriggerCapture,
       startInputMappingTriggerCapture,
       deleteSelectedInputMappingBinding,
       selectInputMappingSticker,
       openInputMappingStickerConfig,
       startInputMappingStickerDrag,
+      startInputMappingAimAreaResize,
       moveInputMappingStickerDrag,
       finishInputMappingStickerDrag,
       getPointerRatios,

@@ -73,6 +73,41 @@ describe('inputMappingStickers', () => {
     ]);
   });
 
+  it('builds edit-only aim area stickers from mouse look actions', () => {
+    const profile = createEmptyInputMappingProfile('aim');
+    profile.bindings.push({
+      id: 'aim',
+      label: '准星',
+      trigger: { type: 'mouseMove', activation: 'pointerLock' },
+      action: {
+        type: 'mouseLook',
+        touchStart: { x: 0.5, y: 0.4 },
+        sensitivityX: 1,
+        sensitivityY: 1,
+        rangeX: 0.1,
+        rangeY: 0.06
+      },
+      sticker: {
+        keyText: '',
+        label: '',
+        labelEnabled: false,
+        shape: 'aimArea'
+      }
+    });
+
+    expect(buildInputMappingStickers(profile)).toEqual([
+      expect.objectContaining({
+        bindingId: 'aim',
+        point: { x: 0.5, y: 0.4 },
+        keyText: '',
+        label: '',
+        shape: 'aimArea',
+        width: 0.2,
+        height: 0.12
+      })
+    ]);
+  });
+
   it('skips disabled stickers and bindings without a resolvable sticker point', () => {
     const profile = createEmptyInputMappingProfile('stickers');
     profile.bindings.push(

@@ -143,6 +143,23 @@
             <span>备注</span>
             <input type="text" maxlength="5" :value="selectedInputMappingStickerLabelText" placeholder="建议 5 字以内" @change="updateSelectedInputMappingLabel" />
           </label>
+          <label v-if="selectedInputMappingRapidTapAction">
+            <span>操作方式</span>
+            <select class="input-mapping-config-panel__select" :value="selectedInputMappingRapidTapAction.mode" @change="updateSelectedInputMappingRapidTapMode">
+              <option value="whileHeld">长按连击</option>
+              <option value="burst">按键后连击</option>
+            </select>
+          </label>
+          <label v-if="selectedInputMappingRapidTapAction">
+            <span>{{ selectedInputMappingRapidTapAction.mode === 'burst' ? '连击次数' : '每秒连击次数' }}</span>
+            <input
+              type="number"
+              min="1"
+              :max="selectedInputMappingRapidTapAction.mode === 'burst' ? 200 : 60"
+              :value="selectedInputMappingRapidTapAction.mode === 'burst' ? (selectedInputMappingRapidTapAction.tapCount || 20) : selectedInputMappingRapidTapAction.tapsPerSecond"
+              @change="updateSelectedInputMappingRapidTapCount"
+            />
+          </label>
           <label>
             <span>开启此提示</span>
             <button
@@ -189,6 +206,43 @@
       </div>
     </div>
 
+    <div v-if="isInputMappingProfileDialogVisible" class="input-mapping-profile-dialog-backdrop" @click.self="closeInputMappingProfileDialog">
+      <div class="input-mapping-profile-dialog">
+        <div class="input-mapping-profile-dialog__header">
+          <div class="input-mapping-profile-dialog__title">
+            {{ inputMappingProfileDialogMode === 'new' ? t('InputMapping.SaveNewProfile', '保存新增方案') : t('InputMapping.EditProfileInfo', '编辑方案信息') }}
+          </div>
+          <button type="button" class="input-mapping-profile-dialog__close" @click="closeInputMappingProfileDialog">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="input-mapping-profile-dialog__body">
+          <label>
+            <span>{{ t('InputMapping.ProfileName', '名称') }}</span>
+            <input v-model="inputMappingProfileForm.name" type="text" maxlength="40" :placeholder="t('InputMapping.ProfileNamePlaceholder', '例如：和平精英三指方案')" />
+          </label>
+          <label>
+            <span>{{ t('InputMapping.Author', '作者') }}</span>
+            <input v-model="inputMappingProfileForm.author" type="text" maxlength="32" :placeholder="t('InputMapping.AuthorPlaceholder', '可选')" />
+          </label>
+          <label>
+            <span>{{ t('InputMapping.PackageName', '包名') }}</span>
+            <input v-model="inputMappingProfileForm.packageName" type="text" maxlength="120" :placeholder="t('InputMapping.PackageNamePlaceholder', '自动获取当前应用包名，可手动调整')" />
+          </label>
+          <label>
+            <span>{{ t('Common.Description', '说明') }}</span>
+            <textarea v-model="inputMappingProfileForm.description" maxlength="160" rows="3" :placeholder="t('InputMapping.DescriptionPlaceholder', '可选')" />
+          </label>
+        </div>
+        <div class="input-mapping-profile-dialog__footer">
+          <button type="button" class="input-mapping-profile-dialog__btn" @click="closeInputMappingProfileDialog">{{ t('Common.Cancel', '取消') }}</button>
+          <button type="button" class="input-mapping-profile-dialog__btn input-mapping-profile-dialog__btn--primary" @click="submitInputMappingProfileDialog">
+            {{ t('Common.Save', '保存') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div
       v-if="hasCastTabs"
       class="floating-menu"
@@ -216,60 +270,18 @@
         <div class="dot" :class="statusDotClass"></div>
       </div>
 
-      <div v-if="isMenuExpanded && isInputMappingEditMode" class="menu-items input-mapping-edit-menu-items">
-        <button type="button" class="menu-item" :title="t('InputMapping.SaveProfile', '保存方案')" @click="saveInputMappingProfileFromEditMenu">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.75C5 4.78 5.78 4 6.75 4H15.25L19 7.75V18.25C19 19.22 18.22 20 17.25 20H6.75C5.78 20 5 19.22 5 18.25V5.75Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 4V9H15V4M8 17V13H16V17" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        </button>
-        <button type="button" class="menu-item" :title="t('InputMapping.ExitEdit', '退出编辑')" @click="exitInputMappingEditMode">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </button>
-        <button type="button" class="menu-item" :title="t('InputMapping.BackToProfiles', '返回管理')" @click="backToInputMappingProfiles">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7H20M4 12H20M4 17H14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M15 15L18 18L21 15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-      </div>
-
-      <div v-else-if="isMenuExpanded" class="menu-items">
-        <button type="button" class="menu-item" :title="t('Screencast.Back', '返回')" @click="sendAndroidCommand('back')">
-          <ChevronLeft20Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.Home', '主页')" @click="sendAndroidCommand('home')">
-          <Home20Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.Menu', '菜单')" @click="sendAndroidCommand('menu')">
-          <List20Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.RecentApps', '最近任务')" @click="sendAndroidCommand('recent')">
-          <AppRecent20Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.Power', '电源')" @click="sendAndroidCommand('power')">
-          <Power20Regular />
-        </button>
-        <button type="button" class="menu-item" :title="effectiveFillMode ? t('Screencast.FitDisplay', '适应显示') : t('Screencast.FillDisplay', '拉伸填充')" @click="toggleFillMode">
-          <ArrowExpand24Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.Fullscreen', '全屏')" @click="toggleFullscreen">
-          <FullScreenMaximize20Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.RemoteClipboard', '远端剪贴板')" @click="toggleClipboardWindow">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M9 4.75C9 3.78 9.78 3 10.75 3H13.25C14.22 3 15 3.78 15 4.75V5H16.25C17.22 5 18 5.78 18 6.75V18.25C18 19.22 17.22 20 16.25 20H7.75C6.78 20 6 19.22 6 18.25V6.75C6 5.78 6.78 5 7.75 5H9V4.75Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M9 7H15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.VolumeUp', '音量加')" @click="sendAndroidCommand('volumeup')">
-          <Speaker220Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.VolumeDown', '音量减')" @click="sendAndroidCommand('volumedown')">
-          <Speaker020Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.Mute', '静音')" @click="sendAndroidCommand('mute')">
-          <SpeakerMute20Regular />
-        </button>
-        <button type="button" class="menu-item" :title="t('Screencast.ScreenOn', '亮屏')" @click="sendAndroidCommand('screenon')">
-          <Phone20Regular />
-        </button>
-        <button type="button" class="menu-item menu-item--danger" :title="t('Screencast.ScreenOff', '熄屏')" @click="sendAndroidCommand('screenoff')">
-          <Phone20Regular />
+      <div v-if="isMenuExpanded" class="menu-items">
+        <button
+          v-for="item in activeFloatingMenuItems"
+          :key="item.id"
+          type="button"
+          class="menu-item"
+          :class="{ 'menu-item--danger': item.danger, 'menu-item--disabled': item.disabled }"
+          :disabled="item.disabled"
+          :title="item.title"
+          @click="item.action"
+        >
+          <component :is="item.iconComponent" />
         </button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { defineComponent } from 'vue';
 import {
   ChevronLeft20Regular,
+  ArrowHookUpLeft20Regular,
   Home20Regular,
   List20Regular,
   AppRecent20Regular,
@@ -11,6 +12,13 @@ import {
   Speaker220Regular,
   ArrowExpand24Regular,
   Phone20Regular,
+  Clipboard20Regular,
+  CheckmarkCircle20Regular,
+  DismissCircle20Regular,
+  Edit20Regular,
+  Eye20Regular,
+  EyeOff20Regular,
+  Save20Regular,
   CursorClick24Regular,
   TapDouble24Regular,
   SwipeRight24Regular,
@@ -25,6 +33,7 @@ import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted,
 import { useI18n } from '../composables/useI18n';
 import { useAppSettings } from '../services/appSettings';
 import { getAccessToken, useAuth } from '../services/auth';
+import { useNotification } from '../services/notification';
 import { loadLocalWebRtcOverrideConfig, loadLocalWebRtcOverrideEnabled } from '../services/webrtcSettings';
 import { apiFetch } from '../utils/api';
 import WorkspaceTabs from '../components/WorkspaceTabs.vue';
@@ -87,8 +96,14 @@ import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
 import { useInputMappingRuntimeController } from '../features/inputMapping/useInputMappingRuntimeController';
+import { setInputMappingTabState } from '../features/inputMapping/inputMappingTabState';
 import { buildInputMappingStickers } from '../features/inputMapping/inputMappingStickers';
-import type { InputMappingBinding, NormalizedPoint } from '../features/inputMapping/inputMappingSchema';
+import {
+  createEmptyInputMappingProfile,
+  type InputMappingBinding,
+  type InputMappingProfile,
+  type NormalizedPoint
+} from '../features/inputMapping/inputMappingSchema';
 import type { InputMappingStickerItem } from '../features/inputMapping/inputMappingStickers';
 import type { CastTab, PersistedCastConnection } from '../types/screencast';
 import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
@@ -125,6 +140,7 @@ export default defineComponent({
   components: {
     WorkspaceTabs,
     ChevronLeft20Regular,
+    ArrowHookUpLeft20Regular,
     Home20Regular,
     List20Regular,
     AppRecent20Regular,
@@ -135,6 +151,13 @@ export default defineComponent({
     Speaker220Regular,
     ArrowExpand24Regular,
     Phone20Regular,
+    Clipboard20Regular,
+    CheckmarkCircle20Regular,
+    DismissCircle20Regular,
+    Edit20Regular,
+    Eye20Regular,
+    EyeOff20Regular,
+    Save20Regular,
     CursorClick24Regular,
     TapDouble24Regular,
     SwipeRight24Regular,
@@ -153,6 +176,29 @@ export default defineComponent({
         Username?: string | null;
         Credential?: string | null;
       }>;
+    }
+
+    type FloatingMenuPage =
+      | 'main'
+      | 'navigation'
+      | 'display'
+      | 'volume'
+      | 'power'
+      | 'inputMapping';
+
+    interface FloatingMenuActionItem {
+      id: string;
+      title: string;
+      iconComponent: unknown;
+      danger?: boolean;
+      disabled?: boolean;
+      action: () => void;
+    }
+
+    interface FloatingMenuGroupItem {
+      id: Exclude<FloatingMenuPage, 'main'>;
+      title: string;
+      iconComponent: unknown;
     }
 
     interface SignalErrorMessagePayload {
@@ -214,20 +260,12 @@ export default defineComponent({
 
     const MENU_BUTTON_SIZE = 48;
 
-    const MENU_ITEM_COUNT = 13;
-
-    const INPUT_MAPPING_EDIT_MENU_ITEM_COUNT = 3;
-
     const MENU_ITEM_SIZE = 38;
 
     const MENU_ITEM_GAP = 6;
 
     const getMenuExpandedLength = (itemCount: number) =>
       MENU_BUTTON_SIZE + 6 + (itemCount * MENU_ITEM_SIZE) + (Math.max(0, itemCount - 1) * MENU_ITEM_GAP) + 12;
-
-    const MENU_EXPANDED_LENGTH = getMenuExpandedLength(MENU_ITEM_COUNT);
-
-    const INPUT_MAPPING_EDIT_MENU_EXPANDED_LENGTH = getMenuExpandedLength(INPUT_MAPPING_EDIT_MENU_ITEM_COUNT);
 
     const MENU_COLLAPSED_VISIBLE_WIDTH = 18;
 
@@ -242,6 +280,7 @@ export default defineComponent({
     const CLIPBOARD_WINDOW_DEFAULT_HEIGHT = 220;
 
     const { t } = useI18n();
+    const notifications = useNotification();
 
     const {
       adaptivePointerSampling,
@@ -387,10 +426,12 @@ export default defineComponent({
       cancelClipboardDrag
     } = remoteClipboard;
 
+    const activeFloatingMenuPage = ref<FloatingMenuPage>('main');
+
     const floatingMenuLayout = reactive({
       margin: MENU_MARGIN,
       buttonSize: MENU_BUTTON_SIZE,
-      expandedLength: MENU_EXPANDED_LENGTH,
+      expandedLength: getMenuExpandedLength(6),
       expandDirectionSwitchRatio: MENU_EXPAND_DIRECTION_SWITCH_RATIO
     });
 
@@ -611,6 +652,17 @@ export default defineComponent({
 
     const selectedInputMappingStickerId = ref('');
 
+    const isInputMappingProfileDialogVisible = ref(false);
+
+    const inputMappingProfileDialogMode = ref<'new' | 'info'>('info');
+
+    const inputMappingProfileForm = ref({
+      name: '',
+      author: '',
+      description: '',
+      packageName: ''
+    });
+
     const inputMappingContextMenu = ref({
       visible: false,
       x: 0,
@@ -634,6 +686,15 @@ export default defineComponent({
       const profile = activeInputMappingProfile.value;
       return profile ? buildInputMappingStickers(profile) : [];
     });
+
+    const isNewInputMappingProfileDraft = computed(() =>
+      route.query.inputMappingNew === '1' && isInputMappingEditMode.value && !!activeInputMappingProfile.value
+    );
+
+    const getCurrentInputMappingPackageName = () => {
+      const routePackageName = typeof route.query.appPackage === 'string' ? route.query.appPackage : '';
+      return normalizePackageName(appPackageName.value || activeTab.value?.appPackageName || routePackageName);
+    };
 
     const selectedInputMappingSticker = computed(() => {
       return inputMappingStickers.value.find((sticker) => sticker.bindingId === selectedInputMappingStickerId.value) ?? null;
@@ -694,6 +755,10 @@ export default defineComponent({
         return '滑动键位';
       }
 
+      if (binding?.action.type === 'rapidTap') {
+        return '连击按键';
+      }
+
       if (binding?.trigger.type === 'mouseButton') {
         return label || '鼠标按键';
       }
@@ -703,7 +768,7 @@ export default defineComponent({
 
     const inputMappingStickerPaletteItems = [
       { type: 'click', title: '点击按键', iconComponent: CursorClick24Regular },
-      { type: 'hold', title: '连击按键', iconComponent: TapDouble24Regular },
+      { type: 'rapidTap', title: '连击按键', iconComponent: TapDouble24Regular },
       { type: 'swipe', title: '滑动键位', iconComponent: SwipeRight24Regular },
       { type: 'joystick', title: '方向按键', iconComponent: Apps24Regular },
       { type: 'aim', title: '准星键', iconComponent: Target24Regular },
@@ -787,6 +852,13 @@ export default defineComponent({
       consumeIncomingTab,
       loadPersistedTabs
     } = useCastTabs(getTabTitle);
+
+    const getCurrentInputMappingTabKey = () => {
+      const routeTabKey = typeof route.query.inputMappingTabKey === 'string'
+        ? route.query.inputMappingTabKey
+        : '';
+      return activeTabKey.value || routeTabKey;
+    };
 
     const {
       postScrcpySessionAction,
@@ -1996,7 +2068,7 @@ export default defineComponent({
 
     const inputMappingController = useInputMappingRuntimeController({
       getRouteQuery: () => route.query,
-      getActiveTabKey: () => activeTabKey.value,
+      getActiveTabKey: getCurrentInputMappingTabKey,
       refreshStickerLayout: () => refreshInputMappingStickerLayout(),
       sendTouchCommand: (command) => inputMappingTouchBridge.sendTouchCommand(command),
       sendHidKeyCommand: (phase, code) => sendInputMappingHidKeyCommand(phase, code),
@@ -2012,7 +2084,7 @@ export default defineComponent({
       activeInputMappingProfileName,
       activeInputMappingProfile,
       isInputMappingHintsVisible,
-      isInputMappingPaused,
+      isInputMappingEnabled,
       release: releaseInputMapping,
       saveActiveProfile: saveRuntimeInputMappingProfile,
       handleKeyboard: handleInputMappingKeyboard,
@@ -2022,12 +2094,18 @@ export default defineComponent({
       hasMouseLook: hasInputMappingMouseLook,
       isMouseCaptureToggleKey,
       isHintsToggleKey: isInputMappingHintsToggleKey,
-      isPauseToggleKey: isInputMappingPauseToggleKey,
+      isEnabledToggleKey: isInputMappingEnabledToggleKey,
       toggleHints: toggleInputMappingHints,
-      togglePaused: toggleInputMappingPaused,
+      toggleEnabled: toggleInputMappingEnabled,
       loadActiveProfile: loadRuntimeInputMappingProfile,
       clearPointerKeys: clearInputMappingPointerKeys
     } = inputMappingController;
+
+    const applyInputMappingProfileToRuntime = (profile: InputMappingProfile) => {
+      inputMappingController.executeCommands(inputMappingController.runtime.setProfile(profile));
+      activeInputMappingProfileName.value = profile.name;
+      refreshInputMappingStickerLayout();
+    };
 
     const syncPointerLockState = () => {
       isMouseLocked.value = document.pointerLockElement === videoElement.value;
@@ -2619,6 +2697,7 @@ export default defineComponent({
       showLastFrameOverlayForTab(tab.key);
       persistTabs();
       await syncRouteToActiveTab();
+      await loadActiveInputMappingProfile();
       await refreshDeviceContext();
       if (restorePersistedConnection(tab.key)) {
         return;
@@ -2661,6 +2740,7 @@ export default defineComponent({
       syncRefsFromActiveTab();
       persistTabs();
       await syncRouteToActiveTab();
+      await loadActiveInputMappingProfile();
       if (nextTab) {
         await refreshDeviceContext();
         scheduleStartConnection();
@@ -2763,12 +2843,18 @@ export default defineComponent({
       };
 
       switch (type) {
-        case 'hold':
+        case 'rapidTap':
           return [{
             id,
             label: '连击',
             trigger: { type: 'keyboard', code: 'Digit1' },
-            action: { type: 'tap', point },
+            action: {
+              type: 'rapidTap',
+              point,
+              mode: 'whileHeld',
+              tapsPerSecond: 20,
+              tapCount: 20
+            },
             sticker: { ...sticker, label: '连击' }
           }];
         case 'swipe':
@@ -2876,7 +2962,14 @@ export default defineComponent({
     };
 
     const saveActiveInputMappingProfile = async () => {
-      if (!activeInputMappingProfile.value) {
+      const profile = activeInputMappingProfile.value;
+      if (!profile) {
+        return;
+      }
+
+      if (isNewInputMappingProfileDraft.value) {
+        activeInputMappingProfileName.value = profile.name;
+        refreshInputMappingStickerLayout();
         return;
       }
 
@@ -3042,7 +3135,7 @@ export default defineComponent({
         if (!binding) {
           return;
         }
-        if (binding.action.type === 'tap' || binding.action.type === 'hold') {
+        if (binding.action.type === 'tap' || binding.action.type === 'rapidTap' || binding.action.type === 'hold') {
           binding.action.point = point;
         } else if (binding.action.type === 'swipe') {
           const center = {
@@ -3069,15 +3162,167 @@ export default defineComponent({
       await saveActiveInputMappingProfile();
     };
 
+    const selectedInputMappingRapidTapAction = computed(() => {
+      const action = selectedInputMappingBinding.value?.action;
+      return action?.type === 'rapidTap' ? action : null;
+    });
+
+    const updateSelectedInputMappingRapidTapMode = (event: Event) => {
+      const action = selectedInputMappingRapidTapAction.value;
+      if (!action) {
+        return;
+      }
+
+      const value = (event.target as HTMLSelectElement | null)?.value;
+      action.mode = value === 'burst' ? 'burst' : 'whileHeld';
+      void saveActiveInputMappingProfile();
+    };
+
+    const updateSelectedInputMappingRapidTapCount = (event: Event) => {
+      const action = selectedInputMappingRapidTapAction.value;
+      if (!action) {
+        return;
+      }
+
+      const value = Number((event.target as HTMLInputElement | null)?.value || 20);
+      const normalized = Math.min(200, Math.max(1, Math.round(Number.isFinite(value) ? value : 20)));
+      if (action.mode === 'burst') {
+        action.tapCount = normalized;
+      } else {
+        action.tapsPerSecond = Math.min(60, normalized);
+      }
+      void saveActiveInputMappingProfile();
+    };
+
     const closeInputMappingContextMenu = () => {
       inputMappingContextMenu.value.visible = false;
     };
 
+    const openInputMappingProfileDialog = (mode: 'new' | 'info') => {
+      const profile = activeInputMappingProfile.value;
+      if (!profile) {
+        notifications.show({
+          type: 'warning',
+          title: t('InputMapping.NoActiveProfile', '没有可编辑的方案'),
+          message: t('InputMapping.NoActiveProfileMessage', '请先新建或选择一个按键映射方案。')
+        });
+        return;
+      }
+
+      inputMappingProfileDialogMode.value = mode;
+      inputMappingProfileForm.value = {
+        name: profile.name || '',
+        author: profile.author || '',
+        description: profile.description || '',
+        packageName: profile.target.packageName || getCurrentInputMappingPackageName()
+      };
+      isInputMappingProfileDialogVisible.value = true;
+    };
+
+    const closeInputMappingProfileDialog = () => {
+      isInputMappingProfileDialogVisible.value = false;
+    };
+
+    const submitInputMappingProfileDialog = async () => {
+      const profile = activeInputMappingProfile.value;
+      if (!profile) {
+        return;
+      }
+
+      const name = inputMappingProfileForm.value.name.trim();
+      if (!name) {
+        notifications.show({
+          type: 'warning',
+          title: t('InputMapping.ProfileNameRequired', '请填写方案名称'),
+          message: t('InputMapping.ProfileNameRequiredMessage', '保存按键映射方案前需要填写名称。')
+        });
+        return;
+      }
+
+      profile.name = name;
+      profile.author = inputMappingProfileForm.value.author.trim();
+      profile.description = inputMappingProfileForm.value.description.trim();
+      profile.target = {
+        ...profile.target,
+        packageName: normalizePackageName(inputMappingProfileForm.value.packageName)
+      };
+
+      try {
+        await inputMappingController.profileStore.save(profile);
+        setInputMappingTabState(getCurrentInputMappingTabKey(), {
+          activeProfileId: profile.id,
+          enabled: true
+        });
+        isInputMappingEnabled.value = true;
+        applyInputMappingProfileToRuntime(profile);
+        closeInputMappingProfileDialog();
+        notifications.show({
+          type: 'success',
+          title: t('InputMapping.SaveSuccess', '保存成功'),
+          message: profile.name
+        });
+        if (isNewInputMappingProfileDraft.value) {
+          isInputMappingEditMode.value = false;
+          selectedInputMappingStickerId.value = '';
+          closeInputMappingContextMenu();
+          inputMappingCaptureBindingId.value = '';
+          inputMappingCaptureIgnoreMouseUntil.value = 0;
+          void router.replace({
+            name: 'screencast',
+            query: {
+              ...route.query,
+              inputMappingEdit: undefined,
+              inputMappingNew: undefined,
+              inputMappingProfileId: undefined
+            }
+          });
+        }
+      } catch (error) {
+        notifications.show({
+          type: 'error',
+          title: t('InputMapping.SaveFailed', '保存失败'),
+          message: error instanceof Error ? error.message : t('InputMapping.SaveFailed', '保存失败')
+        });
+      }
+    };
+
+    const confirmDiscardNewInputMappingProfile = () => {
+      if (!isNewInputMappingProfileDraft.value) {
+        return true;
+      }
+
+      return window.confirm(t(
+        'InputMapping.DiscardNewProfileConfirm',
+        '当前新增方案尚未保存，退出编辑将放弃该方案。是否继续？'
+      ));
+    };
+
     const saveInputMappingProfileFromEditMenu = async () => {
-      await saveActiveInputMappingProfile();
+      if (isNewInputMappingProfileDraft.value) {
+        openInputMappingProfileDialog('new');
+        return;
+      }
+
+      try {
+        await saveActiveInputMappingProfile();
+        notifications.show({
+          type: 'success',
+          title: t('InputMapping.SaveSuccess', '保存成功'),
+          message: activeInputMappingProfile.value?.name || t('InputMapping.ProfileSaved', '按键映射方案已保存')
+        });
+      } catch (error) {
+        notifications.show({
+          type: 'error',
+          title: t('InputMapping.SaveFailed', '保存失败'),
+          message: error instanceof Error ? error.message : t('InputMapping.SaveFailed', '保存失败')
+        });
+      }
     };
 
     const exitInputMappingEditMode = () => {
+      if (!confirmDiscardNewInputMappingProfile()) {
+        return;
+      }
       isInputMappingEditMode.value = false;
       selectedInputMappingStickerId.value = '';
       closeInputMappingContextMenu();
@@ -3093,8 +3338,180 @@ export default defineComponent({
     };
 
     const backToInputMappingProfiles = () => {
-      void router.push({ name: 'input-mapping-profiles' });
+      if (!confirmDiscardNewInputMappingProfile()) {
+        return;
+      }
+      const packageName = getCurrentInputMappingPackageName();
+      void router.push({
+        name: 'input-mapping-profiles',
+        query: {
+          ...(packageName ? { appPackage: packageName } : {}),
+          ...(getCurrentInputMappingTabKey() ? { inputMappingTabKey: getCurrentInputMappingTabKey() } : {})
+        }
+      });
     };
+
+    const enterInputMappingEditMode = () => {
+      const profileId = activeInputMappingProfile.value?.id;
+      if (!profileId) {
+        backToInputMappingProfiles();
+        return;
+      }
+
+      void router.replace({
+        name: 'screencast',
+        query: {
+          ...route.query,
+          inputMappingProfileId: profileId,
+          inputMappingEdit: '1'
+        }
+      });
+    };
+
+    const toggleInputMappingHintsWithNotification = () => {
+      toggleInputMappingHints();
+      notifications.show({
+        type: 'info',
+        title: isInputMappingHintsVisible.value
+          ? t('InputMapping.HintsEnabled', '按键提示已开启')
+          : t('InputMapping.HintsDisabled', '按键提示已关闭'),
+        message: activeInputMappingProfile.value?.name || t('InputMapping.InputMapping', '按键映射')
+      });
+    };
+
+    const toggleInputMappingEnabledWithNotification = async () => {
+      await toggleInputMappingEnabled();
+      notifications.show({
+        type: 'info',
+        title: isInputMappingEnabled.value
+          ? t('InputMapping.Enabled', '按键映射已开启')
+          : t('InputMapping.Disabled', '按键映射已关闭'),
+        message: activeInputMappingProfile.value?.name || t('InputMapping.InputMapping', '按键映射')
+      });
+    };
+
+    const openFloatingMenuPage = (page: Exclude<FloatingMenuPage, 'main'>) => {
+      activeFloatingMenuPage.value = page;
+      isMenuExpanded.value = false;
+      void nextTick(() => {
+        isMenuExpanded.value = true;
+        ensureMenuInsideStage();
+      });
+    };
+
+    const returnToFloatingMenuMain = () => {
+      activeFloatingMenuPage.value = 'main';
+      isMenuExpanded.value = false;
+      void nextTick(() => {
+        isMenuExpanded.value = true;
+        ensureMenuInsideStage();
+      });
+    };
+
+    const floatingMenuGroups: FloatingMenuGroupItem[] = [
+      { id: 'navigation', title: '导航', iconComponent: Home20Regular },
+      { id: 'display', title: '显示', iconComponent: FullScreenMaximize20Regular },
+      { id: 'volume', title: '音量', iconComponent: Speaker220Regular },
+      { id: 'power', title: '电源 / 屏幕', iconComponent: Power20Regular },
+      { id: 'inputMapping', title: '按键映射', iconComponent: Apps24Regular }
+    ];
+
+    const createBackToMainMenuItem = (): FloatingMenuActionItem => ({
+      id: 'back-to-main',
+      title: '返回主分组',
+      iconComponent: ArrowHookUpLeft20Regular,
+      action: returnToFloatingMenuMain
+    });
+
+    const getFloatingMenuGroupItems = (page: FloatingMenuPage): FloatingMenuActionItem[] => {
+      switch (page) {
+        case 'navigation':
+          return [
+            createBackToMainMenuItem(),
+            { id: 'back', title: t('Screencast.Back', '返回'), iconComponent: ChevronLeft20Regular, action: () => sendAndroidCommand('back') },
+            { id: 'home', title: t('Screencast.Home', '主页'), iconComponent: Home20Regular, action: () => sendAndroidCommand('home') },
+            { id: 'menu', title: t('Screencast.Menu', '菜单'), iconComponent: List20Regular, action: () => sendAndroidCommand('menu') },
+            { id: 'recent', title: t('Screencast.RecentApps', '最近任务'), iconComponent: AppRecent20Regular, action: () => sendAndroidCommand('recent') }
+          ];
+        case 'display':
+          return [
+            createBackToMainMenuItem(),
+            {
+              id: 'fill-mode',
+              title: effectiveFillMode.value ? t('Screencast.FitDisplay', '适应显示') : t('Screencast.FillDisplay', '拉伸填充'),
+              iconComponent: ArrowExpand24Regular,
+              action: toggleFillMode
+            },
+            { id: 'fullscreen', title: t('Screencast.Fullscreen', '全屏'), iconComponent: FullScreenMaximize20Regular, action: toggleFullscreen }
+          ];
+        case 'volume':
+          return [
+            createBackToMainMenuItem(),
+            { id: 'volume-up', title: t('Screencast.VolumeUp', '音量加'), iconComponent: Speaker220Regular, action: () => sendAndroidCommand('volumeup') },
+            { id: 'volume-down', title: t('Screencast.VolumeDown', '音量减'), iconComponent: Speaker020Regular, action: () => sendAndroidCommand('volumedown') },
+            { id: 'mute', title: t('Screencast.Mute', '静音'), iconComponent: SpeakerMute20Regular, action: () => sendAndroidCommand('mute') }
+          ];
+        case 'power':
+          return [
+            createBackToMainMenuItem(),
+            { id: 'power', title: t('Screencast.Power', '电源'), iconComponent: Power20Regular, action: () => sendAndroidCommand('power') },
+            { id: 'screen-on', title: t('Screencast.ScreenOn', '亮屏'), iconComponent: Phone20Regular, action: () => sendAndroidCommand('screenon') },
+            { id: 'screen-off', title: t('Screencast.ScreenOff', '熄屏'), iconComponent: Phone20Regular, danger: true, action: () => sendAndroidCommand('screenoff') }
+          ];
+        case 'inputMapping':
+          return isInputMappingEditMode.value
+            ? [
+              createBackToMainMenuItem(),
+              { id: 'save-input-mapping', title: t('InputMapping.SaveProfile', '保存方案'), iconComponent: Save20Regular, disabled: !activeInputMappingProfile.value, action: () => void saveInputMappingProfileFromEditMenu() },
+              { id: 'edit-input-mapping-info', title: t('InputMapping.EditProfileInfo', '编辑信息'), iconComponent: Edit20Regular, disabled: !activeInputMappingProfile.value, action: () => openInputMappingProfileDialog(isNewInputMappingProfileDraft.value ? 'new' : 'info') },
+              { id: 'exit-input-mapping-edit', title: t('InputMapping.ExitEdit', '退出编辑'), iconComponent: DismissCircle20Regular, action: exitInputMappingEditMode },
+              { id: 'input-mapping-profiles', title: t('InputMapping.BackToProfiles', '返回管理'), iconComponent: Apps24Regular, action: backToInputMappingProfiles }
+            ]
+            : [
+              createBackToMainMenuItem(),
+              { id: 'input-mapping-profiles', title: t('InputMapping.ManageProfiles', '管理方案'), iconComponent: Apps24Regular, action: backToInputMappingProfiles },
+              { id: 'edit-input-mapping', title: t('InputMapping.EditBindings', '编辑按键'), iconComponent: Edit20Regular, disabled: !activeInputMappingProfile.value, action: enterInputMappingEditMode },
+              {
+                id: 'toggle-input-mapping-hints',
+                title: isInputMappingHintsVisible.value ? t('InputMapping.HideHints', '隐藏提示') : t('InputMapping.ShowHints', '显示提示'),
+                iconComponent: isInputMappingHintsVisible.value ? EyeOff20Regular : Eye20Regular,
+                disabled: !activeInputMappingProfile.value,
+                action: toggleInputMappingHintsWithNotification
+              },
+              {
+                id: 'toggle-input-mapping-enabled',
+                title: isInputMappingEnabled.value ? t('InputMapping.Disable', '关闭映射') : t('InputMapping.Enable', '开启映射'),
+                iconComponent: isInputMappingEnabled.value ? DismissCircle20Regular : CheckmarkCircle20Regular,
+                disabled: !activeInputMappingProfile.value,
+                action: () => void toggleInputMappingEnabledWithNotification()
+              }
+            ];
+        case 'main':
+        default:
+          return [];
+      }
+    };
+
+    const activeFloatingMenuItems = computed<FloatingMenuActionItem[]>(() => {
+      if (activeFloatingMenuPage.value === 'main') {
+        const mainGroupItems: FloatingMenuActionItem[] = floatingMenuGroups.map((group) => ({
+          id: group.id,
+          title: group.title,
+          iconComponent: group.iconComponent,
+          action: () => openFloatingMenuPage(group.id)
+        }));
+        return mainGroupItems.concat({
+          id: 'remote-clipboard',
+          title: t('Screencast.RemoteClipboard', '远端剪贴板'),
+          iconComponent: Clipboard20Regular,
+          action: toggleClipboardWindow
+        });
+      }
+
+      return getFloatingMenuGroupItems(activeFloatingMenuPage.value);
+    });
+
+    const activeFloatingMenuItemCount = computed(() => activeFloatingMenuItems.value.length);
 
     const blockInputMappingEditPointer = (event: Event) => {
       if (!isInputMappingEditMode.value) {
@@ -3196,6 +3613,15 @@ export default defineComponent({
 
     const loadActiveInputMappingProfile = async () => {
       isInputMappingEditMode.value = route.query.inputMappingEdit === '1';
+      if (route.query.inputMappingNew === '1') {
+        const profile = createEmptyInputMappingProfile('');
+        profile.target.packageName = getCurrentInputMappingPackageName();
+        activeInputMappingProfile.value = profile;
+        activeInputMappingProfileName.value = profile.name;
+        refreshInputMappingStickerLayout();
+        return true;
+      }
+
       return loadRuntimeInputMappingProfile();
     };
 
@@ -3408,13 +3834,13 @@ export default defineComponent({
 
       if (!event.repeat && isInputMappingHintsToggleKey(event)) {
         event.preventDefault();
-        toggleInputMappingHints();
+        toggleInputMappingHintsWithNotification();
         return;
       }
 
-      if (!event.repeat && isInputMappingPauseToggleKey(event)) {
+      if (!event.repeat && isInputMappingEnabledToggleKey(event)) {
         event.preventDefault();
-        toggleInputMappingPaused();
+        void toggleInputMappingEnabledWithNotification();
         return;
       }
 
@@ -3449,7 +3875,7 @@ export default defineComponent({
 
       if (
         isInputMappingHintsToggleKey(event)
-        || isInputMappingPauseToggleKey(event)
+        || isInputMappingEnabledToggleKey(event)
         || (isMouseCaptureToggleKey(event) && canUseMouseLock())
       ) {
         event.preventDefault();
@@ -3485,7 +3911,7 @@ export default defineComponent({
 
     const handlePointerLockChange = () => {
       syncPointerLockState();
-      if (isInputMappingPaused.value) {
+      if (!isInputMappingEnabled.value) {
         return;
       }
 
@@ -3641,12 +4067,23 @@ export default defineComponent({
     watch(
       isInputMappingEditMode,
       async (enabled) => {
-        floatingMenuLayout.expandedLength = enabled
-          ? INPUT_MAPPING_EDIT_MENU_EXPANDED_LENGTH
-          : MENU_EXPANDED_LENGTH;
         if (enabled) {
+          activeFloatingMenuPage.value = 'inputMapping';
           isMenuExpanded.value = true;
         }
+        if (!hasInitializedFloatingMenuPlacement) {
+          return;
+        }
+        await nextTick();
+        ensureMenuInsideStage();
+      },
+      { immediate: true }
+    );
+
+    watch(
+      activeFloatingMenuItemCount,
+      async (itemCount) => {
+        floatingMenuLayout.expandedLength = getMenuExpandedLength(itemCount);
         if (!hasInitializedFloatingMenuPlacement) {
           return;
         }
@@ -3797,10 +4234,8 @@ export default defineComponent({
       MAX_NEW_DISPLAY_LONG_EDGE,
       MENU_MARGIN,
       MENU_BUTTON_SIZE,
-      MENU_ITEM_COUNT,
       MENU_ITEM_SIZE,
       MENU_ITEM_GAP,
-      MENU_EXPANDED_LENGTH,
       MENU_COLLAPSED_VISIBLE_WIDTH,
       CLIPBOARD_WINDOW_MARGIN,
       CLIPBOARD_WINDOW_DEFAULT_WIDTH,
@@ -3863,17 +4298,22 @@ export default defineComponent({
       activeInputMappingProfileName,
       inputMappingStickers,
       isInputMappingEditMode,
+      isInputMappingProfileDialogVisible,
+      inputMappingProfileDialogMode,
+      inputMappingProfileForm,
       selectedInputMappingStickerId,
       selectedInputMappingSticker,
       selectedInputMappingBinding,
+      selectedInputMappingRapidTapAction,
       selectedInputMappingStickerLabelText,
       selectedInputMappingConfigTitle,
       isInputMappingHintsVisible,
-      isInputMappingPaused,
+      isInputMappingEnabled,
       inputMappingContextMenu,
       inputMappingCaptureBindingId,
       captureSelectedInputMappingMouseButton,
       inputMappingStickerPaletteItems,
+      activeFloatingMenuItems,
       isMenuExpanded,
       isDocked,
       isMenuDragActive,
@@ -4099,12 +4539,16 @@ export default defineComponent({
       getInputMappingConfigPanelStyle,
       handleInputMappingStageContextMenu,
       closeInputMappingContextMenu,
+      closeInputMappingProfileDialog,
+      submitInputMappingProfileDialog,
       saveInputMappingProfileFromEditMenu,
       exitInputMappingEditMode,
       backToInputMappingProfiles,
       blockInputMappingEditPointer,
       addInputMappingStickerFromPalette,
       updateSelectedInputMappingLabel,
+      updateSelectedInputMappingRapidTapMode,
+      updateSelectedInputMappingRapidTapCount,
       toggleSelectedInputMappingStickerEnabled,
       startInputMappingTriggerCapture,
       deleteSelectedInputMappingBinding,

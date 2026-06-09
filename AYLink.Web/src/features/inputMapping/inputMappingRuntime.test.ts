@@ -88,6 +88,49 @@ describe('inputMappingRuntime', () => {
     ]);
   });
 
+  it('turns rapid tap bindings into repeat or burst touch commands', () => {
+    const profile = createEmptyInputMappingProfile('rapid tap');
+    profile.bindings.push(
+      {
+        id: 'rapid-hold',
+        label: 'rapid hold',
+        trigger: { type: 'keyboard', code: 'KeyR' },
+        action: { type: 'rapidTap', point: { x: 0.3, y: 0.4 }, mode: 'whileHeld', tapsPerSecond: 20 }
+      },
+      {
+        id: 'rapid-burst',
+        label: 'rapid burst',
+        trigger: { type: 'keyboard', code: 'KeyT' },
+        action: { type: 'rapidTap', point: { x: 0.5, y: 0.6 }, mode: 'burst', tapsPerSecond: 20, tapCount: 3 }
+      }
+    );
+    const runtime = createInputMappingRuntime(profile);
+
+    expect(runtime.handleKeyboardEvent('down', { code: 'KeyR' }).commands).toEqual([
+      {
+        type: 'touchRepeat',
+        pointerKey: 'binding:rapid-hold',
+        point: { x: 0.3, y: 0.4 },
+        intervalMs: 50,
+        downMs: 25
+      }
+    ]);
+    expect(runtime.handleKeyboardEvent('up', { code: 'KeyR' }).commands).toEqual([
+      {
+        type: 'stopTouchRepeat',
+        pointerKey: 'binding:rapid-hold'
+      }
+    ]);
+    expect(runtime.handleKeyboardEvent('down', { code: 'KeyT' }).commands).toEqual([
+      expect.objectContaining({ type: 'touch', phase: 'down', delayMs: 0 }),
+      expect.objectContaining({ type: 'touch', phase: 'up', delayMs: 25 }),
+      expect.objectContaining({ type: 'touch', phase: 'down', delayMs: 50 }),
+      expect.objectContaining({ type: 'touch', phase: 'up', delayMs: 75 }),
+      expect.objectContaining({ type: 'touch', phase: 'down', delayMs: 100 }),
+      expect.objectContaining({ type: 'touch', phase: 'up', delayMs: 125 })
+    ]);
+  });
+
   it('requires configured keyboard modifiers before a binding matches', () => {
     const profile = createEmptyInputMappingProfile('modifiers');
     profile.bindings.push({

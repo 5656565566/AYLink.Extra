@@ -49,6 +49,7 @@ function getDefaultStickerShape(trigger: InputMappingTrigger, action: InputMappi
 function getActionPoint(action: InputMappingAction): NormalizedPoint | null {
   switch (action.type) {
     case 'tap':
+    case 'rapidTap':
     case 'hold':
       return action.point;
     case 'virtualJoystick':

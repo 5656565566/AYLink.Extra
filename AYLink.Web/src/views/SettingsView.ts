@@ -1,5 +1,5 @@
 import { defineComponent } from 'vue';
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import SettingSection from '../components/SettingSection.vue';
 import SettingItem from '../components/SettingItem.vue';
@@ -111,7 +111,8 @@ export default defineComponent({
     const inputMappingMouseCaptureKey = ref(localStorage.getItem(storageKeys.inputMapping.mouseCaptureKey) || 'Alt');
     const inputMappingMouseSensitivity = ref(localStorage.getItem(storageKeys.inputMapping.mouseSensitivity) || '1');
     const inputMappingToggleHintsKey = ref(localStorage.getItem(storageKeys.inputMapping.toggleHintsKey) || '~');
-    const inputMappingPauseKey = ref(localStorage.getItem(storageKeys.inputMapping.pauseKey) || '-');
+    const inputMappingEnabledToggleKey = ref(localStorage.getItem(storageKeys.inputMapping.enabledToggleKey) || '-');
+    const capturingInputMappingKey = ref<'' | 'mouseCapture' | 'toggleHints' | 'toggleEnabled'>('');
 
     const canManageAccounts = computed(() => hasPermission('accounts.manage'));
     const canManageDevices = computed(() => hasPermission('devices.manage'));
@@ -391,10 +392,51 @@ export default defineComponent({
       setWeakNetworkMode((event.target as HTMLInputElement).checked);
     }
 
-    function onInputMappingMouseCaptureKeyChange(event: Event) {
-      const value = ((event.target as HTMLInputElement).value || 'Alt').trim();
-      inputMappingMouseCaptureKey.value = value || 'Alt';
-      localStorage.setItem(storageKeys.inputMapping.mouseCaptureKey, inputMappingMouseCaptureKey.value);
+    function formatCapturedInputMappingKey(event: KeyboardEvent) {
+      if (event.code === 'AltLeft' || event.code === 'AltRight') return 'Alt';
+      if (event.code === 'ControlLeft' || event.code === 'ControlRight') return 'Ctrl';
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') return 'Shift';
+      if (event.code === 'MetaLeft' || event.code === 'MetaRight') return 'Meta';
+      if (event.code === 'Backquote') return event.shiftKey ? '~' : '`';
+      if (event.code === 'Minus') return '-';
+      if (event.code.startsWith('Key') || event.code.startsWith('Digit') || event.code.startsWith('Numpad')) {
+        return event.code;
+      }
+      return event.key && event.key !== 'Unidentified' ? event.key : event.code;
+    }
+
+    function saveInputMappingKeySetting(kind: typeof capturingInputMappingKey.value, value: string) {
+      if (kind === 'mouseCapture') {
+        inputMappingMouseCaptureKey.value = value || 'Alt';
+        localStorage.setItem(storageKeys.inputMapping.mouseCaptureKey, inputMappingMouseCaptureKey.value);
+      } else if (kind === 'toggleHints') {
+        inputMappingToggleHintsKey.value = value || '~';
+        localStorage.setItem(storageKeys.inputMapping.toggleHintsKey, inputMappingToggleHintsKey.value);
+      } else if (kind === 'toggleEnabled') {
+        inputMappingEnabledToggleKey.value = value || '-';
+        localStorage.setItem(storageKeys.inputMapping.enabledToggleKey, inputMappingEnabledToggleKey.value);
+      }
+    }
+
+    function startInputMappingKeyCapture(kind: typeof capturingInputMappingKey.value) {
+      capturingInputMappingKey.value = kind;
+    }
+
+    function handleInputMappingKeyCapture(event: KeyboardEvent) {
+      if (!capturingInputMappingKey.value) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.code === 'Escape') {
+        capturingInputMappingKey.value = '';
+        return;
+      }
+
+      const captured = formatCapturedInputMappingKey(event).trim();
+      saveInputMappingKeySetting(capturingInputMappingKey.value, captured);
+      capturingInputMappingKey.value = '';
     }
 
     function onInputMappingMouseSensitivityChange(event: Event) {
@@ -403,18 +445,6 @@ export default defineComponent({
       const normalized = Number.isFinite(numeric) ? String(Math.min(5, Math.max(0.1, numeric))) : '1';
       inputMappingMouseSensitivity.value = normalized;
       localStorage.setItem(storageKeys.inputMapping.mouseSensitivity, normalized);
-    }
-
-    function onInputMappingToggleHintsKeyChange(event: Event) {
-      const value = ((event.target as HTMLInputElement).value || '~').trim();
-      inputMappingToggleHintsKey.value = value || '~';
-      localStorage.setItem(storageKeys.inputMapping.toggleHintsKey, inputMappingToggleHintsKey.value);
-    }
-
-    function onInputMappingPauseKeyChange(event: Event) {
-      const value = ((event.target as HTMLInputElement).value || '-').trim();
-      inputMappingPauseKey.value = value || '-';
-      localStorage.setItem(storageKeys.inputMapping.pauseKey, inputMappingPauseKey.value);
     }
 
     function normalizeVersion(value: string) {
@@ -721,7 +751,7 @@ export default defineComponent({
     }
 
     function openInputMappingProfiles() {
-      router.push({ name: 'input-mapping-profiles' });
+      router.push({ name: 'input-mapping-profiles', query: { mode: 'manage' } });
     }
 
     function resetGroupForm() {
@@ -1319,7 +1349,12 @@ export default defineComponent({
     }
 
     onMounted(() => {
+      window.addEventListener('keydown', handleInputMappingKeyCapture, true);
       void initializeSettingsData();
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener('keydown', handleInputMappingKeyCapture, true);
     });
 
     return {
@@ -1344,7 +1379,8 @@ export default defineComponent({
       inputMappingMouseCaptureKey,
       inputMappingMouseSensitivity,
       inputMappingToggleHintsKey,
-      inputMappingPauseKey,
+      inputMappingEnabledToggleKey,
+      capturingInputMappingKey,
       setAdaptivePointerSampling,
       setBackgroundMute,
       setNewDisplayDpiMode,
@@ -1433,10 +1469,9 @@ export default defineComponent({
       onPointerSamplingRateChange,
       onPreviewRefreshIntervalChange,
       onWeakNetworkModeChange,
-      onInputMappingMouseCaptureKeyChange,
       onInputMappingMouseSensitivityChange,
-      onInputMappingToggleHintsKeyChange,
-      onInputMappingPauseKeyChange,
+      startInputMappingKeyCapture,
+      handleInputMappingKeyCapture,
       normalizeVersion,
       compareVersions,
       openExternalUrl,

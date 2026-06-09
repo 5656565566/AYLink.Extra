@@ -164,7 +164,9 @@
           :title="t('Settings.InputMappingMouseCaptureKey', '鼠标捕获按键')"
           :description="t('Settings.InputMappingMouseCaptureKeyDescription', '用于进入或退出鼠标捕获，默认 Alt')"
         >
-          <input class="fluent-input key-input" :value="inputMappingMouseCaptureKey" @change="onInputMappingMouseCaptureKeyChange" />
+          <button type="button" class="key-capture-btn" @click="startInputMappingKeyCapture('mouseCapture')">
+            {{ capturingInputMappingKey === 'mouseCapture' ? t('Settings.KeyCaptureWaiting', '按下按键...') : inputMappingMouseCaptureKey }}
+          </button>
         </SettingItem>
         <SettingItem
           :title="t('Settings.InputMappingMouseSensitivity', '鼠标灵敏度')"
@@ -184,13 +186,17 @@
           :title="t('Settings.InputMappingToggleHintsKey', '关闭按键提示')"
           :description="t('Settings.InputMappingToggleHintsKeyDescription', '显示或隐藏投屏上的按键提示，默认 ~')"
         >
-          <input class="fluent-input key-input" :value="inputMappingToggleHintsKey" @change="onInputMappingToggleHintsKeyChange" />
+          <button type="button" class="key-capture-btn" @click="startInputMappingKeyCapture('toggleHints')">
+            {{ capturingInputMappingKey === 'toggleHints' ? t('Settings.KeyCaptureWaiting', '按下按键...') : inputMappingToggleHintsKey }}
+          </button>
         </SettingItem>
         <SettingItem
-          :title="t('Settings.InputMappingPauseKey', '暂停按键映射')"
-          :description="t('Settings.InputMappingPauseKeyDescription', '临时暂停或恢复按键映射，默认 -')"
+          :title="t('Settings.InputMappingEnabledToggleKey', '关闭 / 开启映射')"
+          :description="t('Settings.InputMappingEnabledToggleKeyDescription', '关闭或重新开启当前按键映射，默认 -')"
         >
-          <input class="fluent-input key-input" :value="inputMappingPauseKey" @change="onInputMappingPauseKeyChange" />
+          <button type="button" class="key-capture-btn" @click="startInputMappingKeyCapture('toggleEnabled')">
+            {{ capturingInputMappingKey === 'toggleEnabled' ? t('Settings.KeyCaptureWaiting', '按下按键...') : inputMappingEnabledToggleKey }}
+          </button>
         </SettingItem>
       </SettingSection>
 

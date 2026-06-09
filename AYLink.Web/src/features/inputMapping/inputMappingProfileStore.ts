@@ -75,11 +75,19 @@ function readStoredProfiles(storage: Storage): StoredInputMappingProfiles {
     };
   }
 
+  const profilesById = new Map<string, InputMappingProfile>();
+  for (const profile of parsed.profiles
+    .map(tryNormalizeProfile)
+    .filter((profile): profile is InputMappingProfile => profile !== null)) {
+    const existing = profilesById.get(profile.id);
+    if (!existing || String(profile.updatedAt ?? '').localeCompare(String(existing.updatedAt ?? '')) >= 0) {
+      profilesById.set(profile.id, profile);
+    }
+  }
+
   return {
     schemaVersion: INPUT_MAPPING_SCHEMA_VERSION,
-    profiles: parsed.profiles
-      .map(tryNormalizeProfile)
-      .filter((profile): profile is InputMappingProfile => profile !== null)
+    profiles: [...profilesById.values()]
   };
 }
 

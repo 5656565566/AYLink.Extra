@@ -126,6 +126,24 @@ function validateAction(action: InputMappingAction | unknown, path: string, issu
         }
       }
       break;
+    case 'rapidTap':
+      validateNormalizedPoint(action.point, `${path}.point`, issues);
+      if (action.mode !== 'whileHeld' && action.mode !== 'burst') {
+        issues.push({ path: `${path}.mode`, message: '连击模式无效' });
+      }
+      {
+        const tapsPerSecond = action.tapsPerSecond;
+        if (!isFiniteNumber(tapsPerSecond) || tapsPerSecond <= 0 || tapsPerSecond > 60) {
+          issues.push({ path: `${path}.tapsPerSecond`, message: '每秒连击次数必须是 1..60 之间的数字' });
+        }
+      }
+      {
+        const tapCount = action.tapCount;
+        if (action.mode === 'burst' && (!Number.isInteger(tapCount) || typeof tapCount !== 'number' || tapCount <= 0 || tapCount > 200)) {
+          issues.push({ path: `${path}.tapCount`, message: '连击次数必须是 1..200 之间的整数' });
+        }
+      }
+      break;
     case 'hold':
       validateNormalizedPoint(action.point, `${path}.point`, issues);
       break;

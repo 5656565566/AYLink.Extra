@@ -65,6 +65,21 @@
   width: 132px;
 }
 
+.key-capture-btn {
+  width: 132px;
+  min-height: 38px;
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: var(--fluent-control-fill-default, rgba(255, 255, 255, 0.05));
+  color: var(--fluent-text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.key-capture-btn:hover {
+  background: var(--fluent-control-fill-secondary, rgba(255, 255, 255, 0.08));
+}
+
 .fluent-color-picker {
   appearance: none;
   -webkit-appearance: none;

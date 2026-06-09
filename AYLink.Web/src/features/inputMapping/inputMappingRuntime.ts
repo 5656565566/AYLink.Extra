@@ -115,6 +115,43 @@ function createTapCommands(binding: InputMappingBinding, point: NormalizedPoint,
   ];
 }
 
+function clampRapidTapRate(tapsPerSecond: number) {
+  return Math.min(60, Math.max(1, Number.isFinite(tapsPerSecond) ? tapsPerSecond : 20));
+}
+
+function createRapidTapBurstCommands(binding: InputMappingBinding): InputMappingCommand[] {
+  if (binding.action.type !== 'rapidTap') {
+    return [];
+  }
+
+  const tapsPerSecond = clampRapidTapRate(binding.action.tapsPerSecond);
+  const tapCount = Math.min(200, Math.max(1, Math.round(binding.action.tapCount ?? tapsPerSecond)));
+  const intervalMs = Math.round(1000 / tapsPerSecond);
+  const downMs = Math.max(16, Math.min(40, Math.round(intervalMs / 2)));
+  const pointerKey = getBindingPointerKey(binding);
+  const commands: InputMappingCommand[] = [];
+  for (let index = 0; index < tapCount; index += 1) {
+    const delayMs = index * intervalMs;
+    commands.push({
+      type: 'touch',
+      phase: 'down',
+      pointerKey,
+      point: binding.action.point,
+      pressure: 1,
+      delayMs
+    });
+    commands.push({
+      type: 'touch',
+      phase: 'up',
+      pointerKey,
+      point: binding.action.point,
+      pressure: 0,
+      delayMs: delayMs + downMs
+    });
+  }
+  return commands;
+}
+
 function hasKeyboardModifier(input: InputMappingKeyboardInput, modifier: string) {
   switch (modifier.toLowerCase()) {
     case 'alt':
@@ -146,6 +183,7 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
   let compiledProfile: CompiledInputMappingProfile | null = profile ? compileInputMappingProfile(profile) : null;
   const activeTouches = new Map<string, ActiveTouchState>();
   const activeJoystickGroups = new Map<string, JoystickGroupState>();
+  const activeRapidTapBindings = new Set<string>();
   const mouseLookState: MouseLookState = {
     isDown: false,
     point: { x: 0.5, y: 0.5 }
@@ -158,6 +196,24 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
     switch (action.type) {
       case 'tap':
         return createTapCommands(binding, action.point);
+      case 'rapidTap': {
+        if (action.mode === 'burst') {
+          return createRapidTapBurstCommands(binding);
+        }
+        if (activeRapidTapBindings.has(binding.id)) {
+          return [];
+        }
+        activeRapidTapBindings.add(binding.id);
+        const tapsPerSecond = clampRapidTapRate(action.tapsPerSecond);
+        const intervalMs = Math.round(1000 / tapsPerSecond);
+        return [{
+          type: 'touchRepeat',
+          pointerKey,
+          point: action.point,
+          intervalMs,
+          downMs: Math.max(16, Math.min(40, Math.round(intervalMs / 2)))
+        }];
+      }
       case 'hold': {
         if (activeTouches.has(binding.id)) return [];
         activeTouches.set(binding.id, {
@@ -195,6 +251,12 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
         activeTouches.delete(binding.id);
         return [{ type: 'touch', phase: 'up', pointerKey: active.pointerKey, point: active.point, pressure: 0 }];
       }
+      case 'rapidTap':
+        if (action.mode !== 'whileHeld') {
+          return [];
+        }
+        activeRapidTapBindings.delete(binding.id);
+        return [{ type: 'stopTouchRepeat', pointerKey: getBindingPointerKey(binding) }];
       case 'virtualJoystick':
         return updateJoystickBinding(binding, false);
       case 'hidKey':
@@ -368,6 +430,11 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
       }
     }
     activeJoystickGroups.clear();
+
+    for (const bindingId of activeRapidTapBindings) {
+      commands.push({ type: 'stopTouchRepeat', pointerKey: `binding:${bindingId}` });
+    }
+    activeRapidTapBindings.clear();
 
     commands.push(...releaseMouseLook('cancel'));
     return commands;

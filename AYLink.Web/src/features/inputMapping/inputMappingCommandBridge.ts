@@ -37,6 +37,12 @@ export function createInputMappingCommandBridge(options: InputMappingCommandBrid
   const pointerIds = new Map<string, number>();
   const pointerGenerations = new Map<string, number>();
   const pendingCommandHandles = new Set<number>();
+  const repeatStates = new Map<string, {
+    intervalHandle: number;
+    upHandle: number | null;
+    point: NormalizedPoint;
+    isDown: boolean;
+  }>();
   let nextPointerId = options.firstPointerId ?? 10_000;
 
   const getPointerGeneration = (pointerKey: string) => pointerGenerations.get(pointerKey) ?? 0;
@@ -66,6 +72,74 @@ export function createInputMappingCommandBridge(options: InputMappingCommandBrid
     pointerIds.delete(pointerKey);
   };
 
+  const stopTouchRepeat = (pointerKey: string) => {
+    const state = repeatStates.get(pointerKey);
+    if (!state) {
+      bumpPointerGeneration(pointerKey);
+      releasePointerKeyInternal(pointerKey);
+      return true;
+    }
+
+    window.clearInterval(state.intervalHandle);
+    if (state.upHandle !== null) {
+      window.clearTimeout(state.upHandle);
+    }
+    repeatStates.delete(pointerKey);
+    bumpPointerGeneration(pointerKey);
+    if (state.isDown) {
+      executeNow({
+        type: 'touch',
+        phase: 'cancel',
+        pointerKey,
+        point: state.point,
+        pressure: 0
+      });
+    } else {
+      releasePointerKeyInternal(pointerKey);
+    }
+    return true;
+  };
+
+  const startTouchRepeat = (command: Extract<InputMappingCommand, { type: 'touchRepeat' }>) => {
+    stopTouchRepeat(command.pointerKey);
+    const state = {
+      intervalHandle: 0,
+      upHandle: null as number | null,
+      point: command.point,
+      isDown: false
+    };
+
+    const tapOnce = () => {
+      if (state.isDown) {
+        return;
+      }
+      state.isDown = true;
+      executeNow({
+        type: 'touch',
+        phase: 'down',
+        pointerKey: command.pointerKey,
+        point: command.point,
+        pressure: 1
+      });
+      state.upHandle = window.setTimeout(() => {
+        state.upHandle = null;
+        state.isDown = false;
+        executeNow({
+          type: 'touch',
+          phase: 'up',
+          pointerKey: command.pointerKey,
+          point: command.point,
+          pressure: 0
+        });
+      }, command.downMs);
+    };
+
+    tapOnce();
+    state.intervalHandle = window.setInterval(tapOnce, command.intervalMs);
+    repeatStates.set(command.pointerKey, state);
+    return true;
+  };
+
   const executeNow = (command: InputMappingCommand) => {
     switch (command.type) {
       case 'touch': {
@@ -88,6 +162,10 @@ export function createInputMappingCommandBridge(options: InputMappingCommandBrid
         return options.sendHidMouseButtonCommand(command.phase, command.button);
       case 'hidMouseWheel':
         return options.sendHidMouseWheelCommand(command.deltaY);
+      case 'touchRepeat':
+        return startTouchRepeat(command);
+      case 'stopTouchRepeat':
+        return stopTouchRepeat(command.pointerKey);
       default:
         return false;
     }
@@ -118,6 +196,9 @@ export function createInputMappingCommandBridge(options: InputMappingCommandBrid
       window.clearTimeout(handle);
     }
     pendingCommandHandles.clear();
+    for (const pointerKey of [...repeatStates.keys()]) {
+      stopTouchRepeat(pointerKey);
+    }
   };
 
   return {

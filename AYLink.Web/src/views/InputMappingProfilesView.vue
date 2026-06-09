@@ -18,7 +18,6 @@
         <div class="input-mapping-actions">
           <button class="fluent-btn" @click="triggerImport">{{ t('InputMapping.ImportProfile', '导入方案') }}</button>
           <button class="fluent-btn primary" @click="createSampleProfile">{{ t('InputMapping.CreateProfile', '新增方案') }}</button>
-          <button class="fluent-btn" :disabled="!isInputMappingEnabled" @click="disableInputMapping">{{ t('InputMapping.DisableMapping', '关闭映射') }}</button>
           <input ref="fileInput" class="hidden-file-input" type="file" accept="application/json,.json,.aylink-input-map.json" @change="handleImportFile" />
         </div>
       </div>
@@ -28,7 +27,7 @@
       <div class="input-mapping-table-header">
         <div>{{ t('InputMapping.ProfileName', '名称') }}</div>
         <div>{{ t('InputMapping.PackageName', '包名') }}</div>
-        <div>{{ t('InputMapping.BindingCountHeader', '绑定') }}</div>
+        <div>{{ t('InputMapping.Author', '作者') }}</div>
         <div>{{ t('InputMapping.UpdatedAt', '更新时间') }}</div>
         <div>{{ t('HomeView.Actions', '操作') }}</div>
       </div>
@@ -44,15 +43,28 @@
             <span v-if="profile.description" class="profile-description">{{ profile.description }}</span>
           </div>
           <div class="profile-muted">{{ profile.packageName || '-' }}</div>
-          <div class="profile-muted">{{ t('InputMapping.BindingCount', '{0} 个绑定', profile.bindingCount) }}</div>
+          <div class="profile-muted">{{ profile.author || '-' }}</div>
           <div class="profile-muted">{{ formatUpdatedAt(profile) }}</div>
           <div class="row-actions">
-            <button class="fluent-btn compact" @click="setActiveProfile(profile.id)">
-              {{ isInputMappingEnabled && profile.id === activeProfileId ? t('InputMapping.Selected', '已选择') : t('InputMapping.Select', '选择') }}
+            <button
+              v-if="isSelectionControlsVisible"
+              class="icon-action-btn"
+              :class="{ 'is-active': isInputMappingEnabled && profile.id === activeProfileId }"
+              :disabled="isInputMappingEnabled && profile.id === activeProfileId"
+              :title="isInputMappingEnabled && profile.id === activeProfileId ? t('InputMapping.Selected', '已选择') : t('InputMapping.Select', '选择')"
+              @click="setActiveProfile(profile.id)"
+            >
+              <CheckmarkCircle20Regular />
             </button>
-            <button class="fluent-btn compact" @click="editProfileInScreencast(profile)">{{ t('Common.Edit', '编辑') }}</button>
-            <button class="fluent-btn compact" @click="exportProfile(profile)">{{ t('InputMapping.ExportJson', '导出') }}</button>
-            <button class="fluent-btn compact danger" @click="deleteProfile(profile)">{{ t('Common.Delete', '删除') }}</button>
+            <button class="icon-action-btn" :title="t('InputMapping.EditProfileInfo', '编辑信息')" @click="openProfileInfoDialog(profile)">
+              <Edit20Regular />
+            </button>
+            <button class="icon-action-btn" :title="t('InputMapping.ExportJson', '导出')" @click="exportProfile(profile)">
+              <ArrowDownload20Regular />
+            </button>
+            <button class="icon-action-btn danger" :title="t('Common.Delete', '删除')" @click="deleteProfile(profile)">
+              <Delete20Regular />
+            </button>
           </div>
         </div>
       </div>
@@ -68,6 +80,39 @@
         <button class="fluent-btn compact" :disabled="pageIndex <= 1" @click="previousPage">{{ t('Common.Previous', '上一页') }}</button>
         <span>{{ pageIndex }} / {{ totalPages }}</span>
         <button class="fluent-btn compact" :disabled="pageIndex >= totalPages" @click="nextPage">{{ t('Common.Next', '下一页') }}</button>
+      </div>
+    </div>
+
+    <div v-if="isProfileInfoDialogVisible" class="profile-info-dialog-backdrop" @click.self="closeProfileInfoDialog">
+      <div class="profile-info-dialog">
+        <div class="profile-info-dialog__header">
+          <div class="profile-info-dialog__title">{{ t('InputMapping.EditProfileInfo', '编辑信息') }}</div>
+          <button type="button" class="profile-info-dialog__close" @click="closeProfileInfoDialog">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="profile-info-dialog__body">
+          <label>
+            <span>{{ t('InputMapping.ProfileName', '名称') }}</span>
+            <input v-model="profileInfoForm.name" type="text" maxlength="40" />
+          </label>
+          <label>
+            <span>{{ t('InputMapping.Author', '作者') }}</span>
+            <input v-model="profileInfoForm.author" type="text" maxlength="32" />
+          </label>
+          <label>
+            <span>{{ t('InputMapping.PackageName', '包名') }}</span>
+            <input v-model="profileInfoForm.packageName" type="text" maxlength="120" />
+          </label>
+          <label>
+            <span>{{ t('Common.Description', '说明') }}</span>
+            <textarea v-model="profileInfoForm.description" maxlength="160" rows="3" />
+          </label>
+        </div>
+        <div class="profile-info-dialog__footer">
+          <button type="button" class="fluent-btn" @click="closeProfileInfoDialog">{{ t('Common.Cancel', '取消') }}</button>
+          <button type="button" class="fluent-btn primary" @click="saveProfileInfo">{{ t('Common.Save', '保存') }}</button>
+        </div>
       </div>
     </div>
   </div>

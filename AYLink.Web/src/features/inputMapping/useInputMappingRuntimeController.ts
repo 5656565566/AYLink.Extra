@@ -3,6 +3,7 @@ import { storageKeys } from '../../core/storage/keys';
 import { createInputMappingCommandBridge } from './inputMappingCommandBridge';
 import { createInputMappingRuntime, type InputMappingMouseMoveInput } from './inputMappingRuntime';
 import { createLocalInputMappingProfileStore } from './inputMappingProfileStore';
+import { getInputMappingTabState, setInputMappingTabState } from './inputMappingTabState';
 import type { InputMappingProfile } from './inputMappingSchema';
 import type { ResolvedInputMappingTouchCommand } from './inputMappingCommandBridge';
 
@@ -68,7 +69,7 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
   const activeInputMappingProfileName = ref('');
   const activeInputMappingProfile = ref<InputMappingProfile | null>(null);
   const isInputMappingHintsVisible = ref(true);
-  const isInputMappingPaused = ref(false);
+  const isInputMappingEnabled = ref(false);
 
   const executeCommands = (commands: ReturnType<typeof runtime.releaseAll>) => {
     if (commands.length === 0) {
@@ -105,16 +106,30 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
       const queryProfileId = typeof query.inputMappingProfileId === 'string'
         ? query.inputMappingProfileId
         : '';
-      const isEnabled = localStorage.getItem(storageKeys.inputMapping.enabled) === 'true' || !!queryProfileId;
-      const profileId = queryProfileId || localStorage.getItem(storageKeys.inputMapping.activeProfileId) || '';
+      const tabState = getInputMappingTabState(options.getActiveTabKey());
+      const isEnabled = tabState.enabled || !!queryProfileId;
+      isInputMappingEnabled.value = isEnabled;
+      const profileId = queryProfileId || tabState.activeProfileId;
 
       if (!isEnabled || !profileId) {
+        if (isEnabled && !profileId) {
+          isInputMappingEnabled.value = false;
+          setInputMappingTabState(options.getActiveTabKey(), {
+            activeProfileId: '',
+            enabled: false
+          });
+        }
         clearProfile();
         return false;
       }
 
       const profile = await profileStore.get(profileId);
       if (!profile) {
+        isInputMappingEnabled.value = false;
+        setInputMappingTabState(options.getActiveTabKey(), {
+          activeProfileId: '',
+          enabled: false
+        });
         clearProfile();
         return false;
       }
@@ -147,7 +162,7 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
   };
 
   const handleKeyboard = (phase: 'down' | 'up', event: KeyboardEvent) => {
-    if (isInputMappingPaused.value) {
+    if (!isInputMappingEnabled.value) {
       return false;
     }
 
@@ -163,7 +178,7 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
   };
 
   const handleMouseButton = (phase: 'down' | 'up', event: MouseEvent) => {
-    if (isInputMappingPaused.value) {
+    if (!isInputMappingEnabled.value) {
       return false;
     }
 
@@ -174,7 +189,7 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
   };
 
   const handleMouseMove = (event: MouseEvent) => {
-    if (isInputMappingPaused.value) {
+    if (!isInputMappingEnabled.value) {
       return false;
     }
 
@@ -190,7 +205,7 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
   };
 
   const handleMouseWheel = (event: WheelEvent) => {
-    if (isInputMappingPaused.value) {
+    if (!isInputMappingEnabled.value) {
       return false;
     }
 
@@ -212,20 +227,44 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
     readInputMappingSetting(storageKeys.inputMapping.toggleHintsKey, '~')
   );
 
-  const isPauseToggleKey = (event: KeyboardEvent) => matchesConfiguredInputKey(
+  const isEnabledToggleKey = (event: KeyboardEvent) => matchesConfiguredInputKey(
     event,
-    readInputMappingSetting(storageKeys.inputMapping.pauseKey, '-')
+    readInputMappingSetting(storageKeys.inputMapping.enabledToggleKey, '-')
   );
 
   const toggleHints = () => {
     isInputMappingHintsVisible.value = !isInputMappingHintsVisible.value;
   };
 
-  const togglePaused = () => {
-    isInputMappingPaused.value = !isInputMappingPaused.value;
-    if (isInputMappingPaused.value) {
-      release('blur');
+  const toggleEnabled = async () => {
+    const nextEnabled = !isInputMappingEnabled.value;
+    if (nextEnabled) {
+      const tabState = getInputMappingTabState(options.getActiveTabKey());
+      const profileId = activeInputMappingProfile.value?.id || tabState.activeProfileId;
+      if (!profileId) {
+        isInputMappingEnabled.value = false;
+        setInputMappingTabState(options.getActiveTabKey(), {
+          activeProfileId: '',
+          enabled: false
+        });
+        clearProfile();
+        return;
+      }
     }
+
+    isInputMappingEnabled.value = nextEnabled;
+    setInputMappingTabState(options.getActiveTabKey(), {
+      activeProfileId: nextEnabled
+        ? (activeInputMappingProfile.value?.id || getInputMappingTabState(options.getActiveTabKey()).activeProfileId)
+        : '',
+      enabled: nextEnabled
+    });
+    if (!nextEnabled) {
+      clearProfile();
+      return;
+    }
+
+    await loadActiveProfile();
   };
 
   const clearPointerKeys = () => {
@@ -239,7 +278,7 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
     activeInputMappingProfileName,
     activeInputMappingProfile,
     isInputMappingHintsVisible,
-    isInputMappingPaused,
+    isInputMappingEnabled,
     executeCommands,
     release,
     loadActiveProfile,
@@ -251,9 +290,9 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
     hasMouseLook,
     isMouseCaptureToggleKey,
     isHintsToggleKey,
-    isPauseToggleKey,
+    isEnabledToggleKey,
     toggleHints,
-    togglePaused,
+    toggleEnabled,
     clearPointerKeys
   };
 }

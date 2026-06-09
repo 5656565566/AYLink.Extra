@@ -71,7 +71,7 @@
 .input-mapping-table-header,
 .input-mapping-table-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(120px, 0.9fr) 120px 180px 360px;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(120px, 0.9fr) 120px 180px 180px;
   align-items: center;
   gap: 16px;
   padding: 12px 24px;
@@ -204,10 +204,161 @@
   color: #ff8a8a;
 }
 
+.icon-action-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  cursor: pointer;
+}
+
+.icon-action-btn:hover:not(:disabled) {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.icon-action-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.icon-action-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon-action-btn.is-active {
+  color: var(--fluent-accent-default);
+  border-color: color-mix(in srgb, var(--fluent-accent-default) 56%, var(--fluent-stroke-default));
+}
+
+.icon-action-btn.is-active:disabled {
+  opacity: 1;
+  color: var(--fluent-accent-default);
+  border-color: color-mix(in srgb, var(--fluent-accent-default) 56%, var(--fluent-stroke-default));
+  background: color-mix(in srgb, var(--fluent-accent-default) 10%, var(--fluent-control-fill-default));
+}
+
+.icon-action-btn.danger {
+  color: #ff8a8a;
+}
+
+.profile-info-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.profile-info-dialog {
+  width: min(420px, calc(100vw - 40px));
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 8px;
+  background: var(--fluent-bg-layer);
+  color: var(--fluent-text-primary);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+}
+
+.profile-info-dialog__header,
+.profile-info-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.profile-info-dialog__header {
+  border-bottom: 1px solid var(--fluent-stroke-default);
+}
+
+.profile-info-dialog__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.profile-info-dialog__close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fluent-text-secondary);
+  cursor: pointer;
+}
+
+.profile-info-dialog__close:hover {
+  background: var(--fluent-control-fill-secondary);
+  color: var(--fluent-text-primary);
+}
+
+.profile-info-dialog__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.profile-info-dialog__body {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.profile-info-dialog__body label {
+  display: grid;
+  gap: 6px;
+  color: var(--fluent-text-secondary);
+  font-size: 12px;
+}
+
+.profile-info-dialog__body input,
+.profile-info-dialog__body textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  font: inherit;
+}
+
+.profile-info-dialog__body textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.profile-info-dialog__body input:focus,
+.profile-info-dialog__body textarea:focus {
+  outline: none;
+  border-color: var(--fluent-accent-default);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fluent-accent-default) 18%, transparent);
+}
+
+.profile-info-dialog__footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--fluent-stroke-default);
+}
+
 @media (max-width: 1120px) {
   .input-mapping-table-header,
   .input-mapping-table-row {
-    grid-template-columns: minmax(220px, 1fr) 110px 110px 150px 260px;
+    grid-template-columns: minmax(220px, 1fr) 110px 110px 150px 180px;
   }
 
   .row-actions {

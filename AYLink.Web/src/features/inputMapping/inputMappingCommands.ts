@@ -10,6 +10,17 @@ export type InputMappingCommand =
     delayMs?: number;
   }
   | {
+    type: 'touchRepeat';
+    pointerKey: string;
+    point: NormalizedPoint;
+    intervalMs: number;
+    downMs: number;
+  }
+  | {
+    type: 'stopTouchRepeat';
+    pointerKey: string;
+  }
+  | {
     type: 'hidKey';
     phase: 'down' | 'up';
     code: string;

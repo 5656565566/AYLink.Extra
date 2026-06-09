@@ -29,6 +29,7 @@ export type InputMappingTrigger =
 
 export type InputMappingAction =
   | { type: 'tap'; point: NormalizedPoint; durationMs?: number }
+  | { type: 'rapidTap'; point: NormalizedPoint; mode: 'whileHeld' | 'burst'; tapsPerSecond: number; tapCount?: number }
   | { type: 'hold'; point: NormalizedPoint }
   | { type: 'virtualJoystick'; center: NormalizedPoint; radius: number; direction: NormalizedPoint; group?: string }
   | { type: 'swipe'; from: NormalizedPoint; to: NormalizedPoint; durationMs: number }
@@ -70,6 +71,7 @@ export interface InputMappingProfile {
 export interface InputMappingProfileSummary {
   id: string;
   name: string;
+  author?: string;
   description?: string;
   bindingCount: number;
   packageName?: string;
@@ -180,6 +182,7 @@ export function summarizeInputMappingProfile(profile: InputMappingProfile): Inpu
   return {
     id: profile.id,
     name: profile.name,
+    author: profile.author,
     description: profile.description,
     bindingCount: profile.bindings.length,
     packageName: profile.target.packageName,

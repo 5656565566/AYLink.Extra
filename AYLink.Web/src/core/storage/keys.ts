@@ -30,10 +30,11 @@ export const storageKeys = {
   inputMapping: {
     activeProfileId: 'aylink.inputMapping.activeProfileId',
     enabled: 'aylink.inputMapping.enabled',
+    enabledToggleKey: 'aylink.inputMapping.enabledToggleKey',
     mouseCaptureKey: 'aylink.inputMapping.mouseCaptureKey',
     mouseSensitivity: 'aylink.inputMapping.mouseSensitivity',
-    pauseKey: 'aylink.inputMapping.pauseKey',
     profiles: 'aylink.inputMapping.profiles.v1',
+    tabStates: 'aylink.inputMapping.tabStates.v1',
     toggleHintsKey: 'aylink.inputMapping.toggleHintsKey',
   },
   workspace: {

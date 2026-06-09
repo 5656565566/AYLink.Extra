@@ -230,10 +230,10 @@
     </div>
 
     <!-- 编码器列表弹窗 -->
-    <div v-if="showEncodersDialog" class="dialog-overlay" @click.self="showEncodersDialog = false">
+    <div v-if="showEncodersDialog" class="dialog-overlay" @click.self="closeEncodersDialog">
       <div class="dialog encoders-dialog">
         <div class="dialog-header">
-          <h3 class="dialog-title">{{ t('HomeView.EncoderList', '编码器列表') }}</h3>
+          <h3 class="dialog-title">{{ t('HomeView.EncoderList', '编码器列表') }} - {{ encodersDeviceName }}</h3>
         </div>
         <div class="dialog-content">
           <div v-if="fetchingEncoders" class="empty-state-dialog">
@@ -241,12 +241,46 @@
             <p>{{ t('HomeView.LoadingEncoders', '正在获取编码器...') }}</p>
           </div>
           <div v-else class="encoders-list">
+            <input
+              v-if="deviceEncoders.length > 0"
+              type="search"
+              class="fluent-input encoder-search"
+              v-model="encoderSearchKeyword"
+              :placeholder="t('HomeView.SearchEncoders', '搜索编码器')"
+            />
             <div v-if="deviceEncoders.length === 0" class="no-encoders">{{ t('HomeView.NoEncoders', '未找到可用的编码器') }}</div>
-            <div v-else class="encoder-item" v-for="(encoder, index) in deviceEncoders" :key="index">{{ encoder }}</div>
+            <div v-else-if="filteredDeviceEncoders.length === 0" class="no-encoders">{{ t('HomeView.NoMatchedEncoders', '没有匹配的编码器') }}</div>
+            <div v-else class="encoder-results">
+              <button
+                type="button"
+                class="encoder-item"
+                v-for="(encoder, index) in filteredDeviceEncoders"
+                :key="`${encoder}-${index}`"
+                @click="selectEncoder(encoder)"
+              >
+                {{ encoder }}
+              </button>
+            </div>
           </div>
         </div>
         <div class="dialog-footer-grid" style="grid-template-columns: 1fr;">
-          <button class="primary" @click="showEncodersDialog = false">{{ t('Common.Close', '关闭') }}</button>
+          <button class="primary" @click="closeEncodersDialog">{{ t('Common.Close', '关闭') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showEncoderTargetDialog" class="dialog-overlay encoder-target-overlay" @click.self="closeEncoderTargetDialog">
+      <div class="dialog encoder-target-dialog">
+        <div class="dialog-header">
+          <h3 class="dialog-title">{{ t('HomeView.ApplyEncoder', '应用编码器') }}</h3>
+        </div>
+        <div class="dialog-content">
+          <div class="encoder-target-name">{{ selectedEncoder }}</div>
+        </div>
+        <div class="dialog-footer-grid encoder-target-actions">
+          <button class="secondary" :disabled="applyingEncoder" @click="closeEncoderTargetDialog">{{ t('Common.Cancel', '取消') }}</button>
+          <button class="secondary" :disabled="applyingEncoder" @click="applySelectedEncoder('audio')">{{ t('HomeView.ApplyAudioEncoder', '应用到音频') }}</button>
+          <button class="primary" :disabled="applyingEncoder" @click="applySelectedEncoder('video')">{{ t('HomeView.ApplyVideoEncoder', '应用到视频') }}</button>
         </div>
       </div>
     </div>

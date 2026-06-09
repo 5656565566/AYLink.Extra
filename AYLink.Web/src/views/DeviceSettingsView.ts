@@ -114,29 +114,8 @@ export default defineComponent({
       return normalized;    
     };
 
-    const normalizeVideoCodec = (codec: string) => {    
-      const value = String(codec || '').trim().toLowerCase();    
-      if (value === 'h265' || value === 'hevc') return 'h265';    
-      if (value === 'h264' || value === 'avc') return 'h264';    
-      if (value === 'av1') return 'av1';    
-      return '';    
-    };
-
-    const detectVideoEncoderCodec = (encoder: string) => {    
-      const value = String(encoder || '').trim().toLowerCase();    
-      if (!value) return '';    
-      if (value.includes('hevc') || value.includes('h265')) return 'h265';    
-      if (value.includes('avc') || value.includes('h264')) return 'h264';    
-      if (value.includes('av1')) return 'av1';    
-      return '';    
-    };
-
-    const sanitizeVideoEncoder = () => {    
-      const codec = normalizeVideoCodec(settings.VideoCodec) || 'h264';    
-      const encoderCodec = detectVideoEncoderCodec(settings.VideoEncoder);    
-      if (encoderCodec && encoderCodec !== codec) {    
-        settings.VideoEncoder = '';    
-      }    
+    const sanitizeVideoEncoder = () => {
+      settings.VideoEncoder = normalizeOptionalText(settings.VideoEncoder);
     };
 
     const navigateAway = async () => {    
@@ -314,8 +293,6 @@ export default defineComponent({
       normalizeOptionalText,
       normalizeScreenOffTimeout,
       normalizeSettingsPayload,
-      normalizeVideoCodec,
-      detectVideoEncoderCodec,
       sanitizeVideoEncoder,
       navigateAway,
       goBack,

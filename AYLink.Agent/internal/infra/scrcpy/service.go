@@ -594,48 +594,7 @@ func sanitizeVideoEncoder(config *domainscrcpy.SessionConfig) {
 		return
 	}
 
-	codec := normalizeVideoCodecName(config.VideoCodec)
-	if codec == "" {
-		codec = "h264"
-	}
-
-	encoderCodec := detectVideoEncoderCodec(config.VideoEncoder)
-	if encoderCodec == "" || encoderCodec == codec {
-		return
-	}
-
-	config.VideoEncoder = ""
-}
-
-func normalizeVideoCodecName(codec string) string {
-	switch strings.ToLower(strings.TrimSpace(codec)) {
-	case "h265", "hevc":
-		return "h265"
-	case "h264", "avc":
-		return "h264"
-	case "av1":
-		return "av1"
-	default:
-		return ""
-	}
-}
-
-func detectVideoEncoderCodec(encoder string) string {
-	name := strings.ToLower(strings.TrimSpace(encoder))
-	if name == "" {
-		return ""
-	}
-
-	switch {
-	case strings.Contains(name, "hevc"), strings.Contains(name, "h265"):
-		return "h265"
-	case strings.Contains(name, "avc"), strings.Contains(name, "h264"):
-		return "h264"
-	case strings.Contains(name, "av1"):
-		return "av1"
-	default:
-		return ""
-	}
+	config.VideoEncoder = strings.TrimSpace(config.VideoEncoder)
 }
 
 func appendIfValue(args *[]string, key, value string) {

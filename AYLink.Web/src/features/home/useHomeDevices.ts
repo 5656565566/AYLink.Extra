@@ -29,6 +29,7 @@ interface DevicePreviewState {
 }
 
 type HomeDeviceViewMode = 'list' | 'preview';
+type EncoderApplyTarget = 'video' | 'audio';
 
 const DEVICE_VIEW_MODE_KEY = storageKeys.app.homeDeviceViewMode;
 const PREVIEW_WIDTH = 240;
@@ -64,9 +65,14 @@ export function useHomeDevices() {
   const renameDeviceId = ref<number | null>(null);
   const renameDeviceName = ref('');
   const showEncodersDialog = ref(false);
+  const showEncoderTargetDialog = ref(false);
   const fetchingEncoders = ref(false);
+  const applyingEncoder = ref(false);
   const deviceEncoders = ref<string[]>([]);
+  const encoderSearchKeyword = ref('');
+  const encodersDeviceId = ref<number | null>(null);
   const encodersDeviceName = ref('');
+  const selectedEncoder = ref('');
   const activeMenuDeviceId = ref<number | null>(null);
   const selectedGroupId = ref<number>(0);
   const groupKeyword = ref('');
@@ -91,6 +97,14 @@ export function useHomeDevices() {
   });
 
   const hasGroupKeyword = computed(() => groupKeyword.value.trim().length > 0);
+  const filteredDeviceEncoders = computed(() => {
+    const keyword = encoderSearchKeyword.value.trim().toLowerCase();
+    if (!keyword) {
+      return deviceEncoders.value;
+    }
+
+    return deviceEncoders.value.filter((encoder) => encoder.toLowerCase().includes(keyword));
+  });
 
   const selectedGroup = computed(() => {
     if (selectedGroupId.value === 0) {
@@ -738,8 +752,11 @@ export function useHomeDevices() {
     activeMenuDeviceId.value = null;
     fetchingEncoders.value = true;
     showEncodersDialog.value = true;
+    encodersDeviceId.value = Number(device.Id);
     encodersDeviceName.value = buildWorkspaceDeviceName(device, t('Devices.UnknownDevice', '未知设备'));
     deviceEncoders.value = [];
+    encoderSearchKeyword.value = '';
+    selectedEncoder.value = '';
 
     try {
       const response = await apiFetch(`/api/devices/${device.Id}/encoders`, {
@@ -762,6 +779,81 @@ export function useHomeDevices() {
         fetchingEncoders.value = false;
       }
       encodersRequest.finalize(requestId);
+    }
+  };
+
+  const closeEncodersDialog = () => {
+    showEncodersDialog.value = false;
+    showEncoderTargetDialog.value = false;
+    selectedEncoder.value = '';
+    encoderSearchKeyword.value = '';
+  };
+
+  const selectEncoder = (encoder: string) => {
+    if (applyingEncoder.value) {
+      return;
+    }
+
+    selectedEncoder.value = encoder;
+    showEncoderTargetDialog.value = true;
+  };
+
+  const closeEncoderTargetDialog = () => {
+    showEncoderTargetDialog.value = false;
+    selectedEncoder.value = '';
+  };
+
+  const applySelectedEncoder = async (target: EncoderApplyTarget) => {
+    const deviceId = encodersDeviceId.value;
+    const encoder = selectedEncoder.value.trim();
+    if (!deviceId || !encoder || applyingEncoder.value) {
+      return;
+    }
+
+    applyingEncoder.value = true;
+    try {
+      const settingsResponse = await apiFetch(`/api/devices/${deviceId}/settings`, {
+        timeoutMs: 15000,
+      });
+      if (!settingsResponse.ok) {
+        throw new Error(await readApiErrorMessage(settingsResponse, t('DeviceSettings.LoadFailed', '加载设置失败')));
+      }
+
+      const settings = await settingsResponse.json();
+      const nextSettings = {
+        ...settings,
+        [target === 'video' ? 'VideoEncoder' : 'AudioEncoder']: encoder,
+      };
+
+      const saveResponse = await apiFetch(`/api/devices/${deviceId}/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(nextSettings),
+        timeoutMs: 15000,
+      });
+      if (!saveResponse.ok) {
+        throw new Error(await readApiErrorMessage(saveResponse, t('Common.SaveFailed', '保存失败')));
+      }
+
+      selectedEncoder.value = '';
+      showEncoderTargetDialog.value = false;
+      notificationService.show({
+        type: 'success',
+        title: t('HomeView.EncoderApplied', '编码器已应用'),
+        message: target === 'video'
+          ? t('HomeView.VideoEncoderApplied', '已应用为视频编码器')
+          : t('HomeView.AudioEncoderApplied', '已应用为音频编码器'),
+      });
+    } catch (error) {
+      notificationService.show({
+        type: 'error',
+        title: t('HomeView.EncoderApplyFailed', '应用编码器失败'),
+        message: resolveApiErrorMessage(error, t('Common.SaveFailed', '保存失败')),
+      });
+    } finally {
+      applyingEncoder.value = false;
     }
   };
 
@@ -840,9 +932,15 @@ export function useHomeDevices() {
     renameDeviceId,
     renameDeviceName,
     showEncodersDialog,
+    showEncoderTargetDialog,
     fetchingEncoders,
+    applyingEncoder,
     deviceEncoders,
+    filteredDeviceEncoders,
+    encoderSearchKeyword,
+    encodersDeviceId,
     encodersDeviceName,
+    selectedEncoder,
     activeMenuDeviceId,
     selectedGroupId,
     selectedGroup,
@@ -882,6 +980,10 @@ export function useHomeDevices() {
     openFileManager,
     openAppManager,
     showEncoderList,
+    closeEncodersDialog,
+    selectEncoder,
+    closeEncoderTargetDialog,
+    applySelectedEncoder,
     openDeviceSettings
   };
 }

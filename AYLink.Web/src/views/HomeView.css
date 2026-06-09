@@ -580,6 +580,103 @@
   justify-content: center;
 }
 
+.encoders-dialog {
+  width: 420px;
+}
+
+.encoders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.encoder-search {
+  width: 100%;
+  height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 4px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  font-size: 14px;
+  outline: none;
+}
+
+.encoder-search:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.encoder-search:focus {
+  border-color: var(--fluent-accent-default);
+  background: var(--fluent-control-fill-input-active);
+}
+
+.encoder-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.encoder-item {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fluent-text-primary);
+  font-family: var(--font-mono, Consolas, monospace);
+  font-size: 15px;
+  line-height: 1.35;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.encoder-item:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.encoder-target-overlay {
+  z-index: 1100;
+}
+
+.encoder-target-dialog {
+  width: 380px;
+}
+
+.encoder-target-name {
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  font-family: var(--font-mono, Consolas, monospace);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.encoder-target-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.encoder-target-actions button {
+  justify-content: center;
+  min-width: 0;
+}
+
+.no-encoders {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-secondary);
+  text-align: center;
+  font-size: 13px;
+}
+
 .group-picker-list {
   display: flex;
   flex-direction: column;
@@ -639,5 +736,16 @@
   .title-bar {
     flex-wrap: wrap;
     justify-content: space-between;
+  }
+}
+
+@media (max-width: 520px) {
+  .encoders-dialog,
+  .encoder-target-dialog {
+    width: min(420px, 90vw);
+  }
+
+  .encoder-target-actions {
+    grid-template-columns: 1fr;
   }
 }

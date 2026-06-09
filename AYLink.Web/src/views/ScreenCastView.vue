@@ -107,7 +107,7 @@
           </template>
           <template v-else>
             <div class="input-mapping-sticker__key">{{ sticker.keyText }}</div>
-            <div v-if="sticker.label" class="input-mapping-sticker__label">{{ sticker.label }}</div>
+            <div v-if="sticker.label" class="input-mapping-sticker__label" :class="{ 'input-mapping-sticker__label--hidden': !sticker.labelEnabled }">{{ sticker.label }}</div>
           </template>
         </div>
       </div>
@@ -183,7 +183,7 @@
           </label>
           <label>
             <span>备注</span>
-            <input type="text" maxlength="5" :value="selectedInputMappingStickerLabelText" placeholder="建议 5 字以内" @change="updateSelectedInputMappingLabel" />
+            <input type="text" maxlength="5" :value="selectedInputMappingStickerLabelText" placeholder="建议 5 字以内" @input="updateSelectedInputMappingLabel" />
           </label>
           <label v-if="selectedInputMappingJoystickBindings.length > 0">
             <span>操作方式</span>

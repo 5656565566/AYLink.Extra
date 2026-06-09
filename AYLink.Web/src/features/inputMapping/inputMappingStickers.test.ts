@@ -67,9 +67,39 @@ describe('inputMappingStickers', () => {
       expect.objectContaining({
         bindingId: 'attack',
         keyText: '左键',
-        label: '',
+        label: '攻击',
         labelEnabled: false
       })
+    ]);
+  });
+
+  it('shortens long modifier key names without shortening normal key names', () => {
+    const profile = createEmptyInputMappingProfile('key-text');
+    profile.bindings.push(
+      {
+        id: 'ctrl',
+        label: 'ctrl',
+        trigger: { type: 'keyboard', code: 'ControlLeft' },
+        action: { type: 'tap', point: { x: 0.1, y: 0.2 } }
+      },
+      {
+        id: 'shift',
+        label: 'shift',
+        trigger: { type: 'keyboard', code: 'ShiftLeft' },
+        action: { type: 'tap', point: { x: 0.2, y: 0.3 } }
+      },
+      {
+        id: 'space',
+        label: 'space',
+        trigger: { type: 'keyboard', code: 'Space' },
+        action: { type: 'tap', point: { x: 0.3, y: 0.4 } }
+      }
+    );
+
+    expect(buildInputMappingStickers(profile).map((sticker) => sticker.keyText)).toEqual([
+      'CtrlL',
+      'ShiftL',
+      'Space'
     ]);
   });
 

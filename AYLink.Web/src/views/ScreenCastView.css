@@ -256,6 +256,7 @@ video.fill-mode {
 }
 
 .input-mapping-sticker__label {
+  min-height: 14px;
   max-width: 70px;
   color: rgba(255, 255, 255, 0.9);
   font-size: 11px;
@@ -265,6 +266,10 @@ video.fill-mode {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.input-mapping-sticker__label--hidden {
+  visibility: hidden;
 }
 
 .input-mapping-sticker--mouse .input-mapping-sticker__key {

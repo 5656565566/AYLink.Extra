@@ -96,7 +96,7 @@ import { useTouchPointerInput } from '../features/screencast/useTouchPointerInpu
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
 import { useInputMappingRuntimeController } from '../features/inputMapping/useInputMappingRuntimeController';
 import { setInputMappingTabState } from '../features/inputMapping/inputMappingTabState';
-import { buildInputMappingStickers } from '../features/inputMapping/inputMappingStickers';
+import { buildInputMappingStickers, formatInputMappingKeyboardCode } from '../features/inputMapping/inputMappingStickers';
 import {
   createEmptyInputMappingProfile,
   type InputMappingBinding,
@@ -2917,21 +2917,6 @@ export default defineComponent({
 
     const createInputMappingBindingId = (prefix: string) => {
       return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    };
-
-    const formatInputMappingKeyboardCode = (code: string) => {
-      switch (code) {
-        case 'ArrowUp':
-          return '↑';
-        case 'ArrowLeft':
-          return '←';
-        case 'ArrowDown':
-          return '↓';
-        case 'ArrowRight':
-          return '→';
-        default:
-          return code.replace(/^Key/, '').replace(/^Digit/, '');
-      }
     };
 
     const getInputMappingTriggerText = (binding: InputMappingBinding) => {

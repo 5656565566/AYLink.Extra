@@ -27,10 +27,41 @@ export interface InputMappingStickerItem {
   };
 }
 
+export function formatInputMappingKeyboardCode(code: string) {
+  switch (code) {
+    case 'ArrowUp':
+      return '↑';
+    case 'ArrowLeft':
+      return '←';
+    case 'ArrowDown':
+      return '↓';
+    case 'ArrowRight':
+      return '→';
+    case 'ControlLeft':
+      return 'CtrlL';
+    case 'ControlRight':
+      return 'CtrlR';
+    case 'ShiftLeft':
+      return 'ShiftL';
+    case 'ShiftRight':
+      return 'ShiftR';
+    case 'AltLeft':
+      return 'AltL';
+    case 'AltRight':
+      return 'AltR';
+    case 'MetaLeft':
+      return 'MetaL';
+    case 'MetaRight':
+      return 'MetaR';
+    default:
+      return code.replace(/^Key/, '').replace(/^Digit/, '');
+  }
+}
+
 function getTriggerText(trigger: InputMappingTrigger) {
   switch (trigger.type) {
     case 'keyboard':
-      return trigger.code.replace(/^Key/, '').replace(/^Digit/, '');
+      return formatInputMappingKeyboardCode(trigger.code);
     case 'mouseButton':
       if (trigger.button === 0) return '左键';
       if (trigger.button === 1) return '中键';
@@ -176,7 +207,7 @@ export function buildInputMappingStickers(profile: InputMappingProfile): InputMa
       bindingId: binding.id,
       point,
       keyText: sticker?.keyText ?? getTriggerText(binding.trigger),
-      label: sticker?.labelEnabled === false ? '' : (sticker?.label ?? binding.label),
+      label: sticker?.label ?? binding.label,
       labelEnabled: sticker?.labelEnabled !== false,
       shape: sticker?.shape ?? getDefaultStickerShape(binding.trigger, binding.action),
       opacity: sticker?.opacity ?? 0.9

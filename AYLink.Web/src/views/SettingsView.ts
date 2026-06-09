@@ -111,8 +111,8 @@ export default defineComponent({
     const inputMappingMouseCaptureKey = ref(localStorage.getItem(storageKeys.inputMapping.mouseCaptureKey) || 'Alt');
     const inputMappingMouseSensitivity = ref(localStorage.getItem(storageKeys.inputMapping.mouseSensitivity) || '1');
     const inputMappingToggleHintsKey = ref(localStorage.getItem(storageKeys.inputMapping.toggleHintsKey) || '~');
-    const inputMappingEnabledToggleKey = ref(localStorage.getItem(storageKeys.inputMapping.enabledToggleKey) || '-');
-    const capturingInputMappingKey = ref<'' | 'mouseCapture' | 'toggleHints' | 'toggleEnabled'>('');
+    const inputMappingPauseToggleKey = ref(localStorage.getItem(storageKeys.inputMapping.pauseToggleKey) || '-');
+    const capturingInputMappingKey = ref<'' | 'mouseCapture' | 'toggleHints' | 'pauseToggle'>('');
 
     const canManageAccounts = computed(() => hasPermission('accounts.manage'));
     const canManageDevices = computed(() => hasPermission('devices.manage'));
@@ -412,9 +412,9 @@ export default defineComponent({
       } else if (kind === 'toggleHints') {
         inputMappingToggleHintsKey.value = value || '~';
         localStorage.setItem(storageKeys.inputMapping.toggleHintsKey, inputMappingToggleHintsKey.value);
-      } else if (kind === 'toggleEnabled') {
-        inputMappingEnabledToggleKey.value = value || '-';
-        localStorage.setItem(storageKeys.inputMapping.enabledToggleKey, inputMappingEnabledToggleKey.value);
+      } else if (kind === 'pauseToggle') {
+        inputMappingPauseToggleKey.value = value || '-';
+        localStorage.setItem(storageKeys.inputMapping.pauseToggleKey, inputMappingPauseToggleKey.value);
       }
     }
 
@@ -1379,7 +1379,7 @@ export default defineComponent({
       inputMappingMouseCaptureKey,
       inputMappingMouseSensitivity,
       inputMappingToggleHintsKey,
-      inputMappingEnabledToggleKey,
+      inputMappingPauseToggleKey,
       capturingInputMappingKey,
       setAdaptivePointerSampling,
       setBackgroundMute,

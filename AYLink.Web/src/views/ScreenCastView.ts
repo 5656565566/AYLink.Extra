@@ -25,13 +25,13 @@ import {
   Apps24Regular,
   Target24Regular,
   EyeTracking24Regular,
-  Flash24Regular,
-  Sparkle24Regular
+  Flash24Regular
 } from '@vicons/fluent';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useI18n } from '../composables/useI18n';
 import { useAppSettings } from '../services/appSettings';
 import { getAccessToken, useAuth } from '../services/auth';
+import { useDialog } from '../services/dialog';
 import { useNotification } from '../services/notification';
 import { loadLocalWebRtcOverrideConfig, loadLocalWebRtcOverrideEnabled } from '../services/webrtcSettings';
 import { apiFetch } from '../utils/api';
@@ -96,10 +96,15 @@ import { useTouchPointerInput } from '../features/screencast/useTouchPointerInpu
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
 import { useInputMappingRuntimeController } from '../features/inputMapping/useInputMappingRuntimeController';
 import { setInputMappingTabState } from '../features/inputMapping/inputMappingTabState';
-import { buildInputMappingStickers, formatInputMappingKeyboardCode } from '../features/inputMapping/inputMappingStickers';
+import { useInputMappingEditorState } from '../features/inputMapping/useInputMappingEditorState';
+import {
+  createInputMappingBindingAtPoint,
+  getInputMappingTriggerText
+} from '../features/inputMapping/inputMappingEditorBindings';
+import { useInputMappingStickerLayout } from '../features/inputMapping/useInputMappingStickerLayout';
+import { formatInputMappingKeyboardCode } from '../features/inputMapping/inputMappingStickers';
 import {
   createEmptyInputMappingProfile,
-  type InputMappingBinding,
   type InputMappingProfile,
   type NormalizedPoint
 } from '../features/inputMapping/inputMappingSchema';
@@ -163,8 +168,7 @@ export default defineComponent({
     Apps24Regular,
     Target24Regular,
     EyeTracking24Regular,
-    Flash24Regular,
-    Sparkle24Regular
+    Flash24Regular
   },
   setup() {
     interface WebRtcNetworkSettingsPayload {
@@ -278,6 +282,7 @@ export default defineComponent({
     const CLIPBOARD_WINDOW_DEFAULT_HEIGHT = 220;
 
     const { t } = useI18n();
+    const dialogService = useDialog();
     const notifications = useNotification();
 
     const {
@@ -648,213 +653,10 @@ export default defineComponent({
 
     const isInputMappingEditMode = ref(false);
 
-    const selectedInputMappingStickerId = ref('');
-
-    const isInputMappingProfileDialogVisible = ref(false);
-
-    const inputMappingProfileDialogMode = ref<'new' | 'info'>('info');
-
-    const inputMappingProfileForm = ref({
-      name: '',
-      author: '',
-      description: '',
-      packageName: ''
-    });
-
-    const inputMappingContextMenu = ref({
-      visible: false,
-      x: 0,
-      y: 0,
-      point: { x: 0.5, y: 0.5 } as NormalizedPoint
-    });
-
-    const inputMappingCaptureBindingId = ref('');
-
-    const inputMappingCaptureIgnoreMouseUntil = ref(0);
-
-    const inputMappingCaptureSuppressClickUntil = ref(0);
-
-    const inputMappingStickerDrag = ref<{
-      bindingId: string;
-      offsetX: number;
-      offsetY: number;
-    } | null>(null);
-
-    const inputMappingAimAreaResize = ref<{
-      bindingId: string;
-      signX: -1 | 1;
-      signY: -1 | 1;
-    } | null>(null);
-
-    const inputMappingStickerLayoutRevision = ref(0);
-
-    const inputMappingSwipeRecordingBindingId = ref('');
-
-    const inputMappingSwipeRecordingPath = ref<NormalizedPoint[]>([]);
-
-    const inputMappingSwipeRecordingStartedAt = ref(0);
-
-    const inputMappingSwipeDrawingBindingId = ref('');
-
-    const inputMappingSwipeDrawingRestoreMenu = ref(false);
-
-    const inputMappingStickers = computed(() => {
-      const profile = activeInputMappingProfile.value;
-      return profile ? buildInputMappingStickers(profile) : [];
-    });
-
-    const isNewInputMappingProfileDraft = computed(() =>
-      route.query.inputMappingNew === '1' && isInputMappingEditMode.value && !!activeInputMappingProfile.value
-    );
-
     const getCurrentInputMappingPackageName = () => {
       const routePackageName = typeof route.query.appPackage === 'string' ? route.query.appPackage : '';
       return normalizePackageName(appPackageName.value || activeTab.value?.appPackageName || routePackageName);
     };
-
-    const selectedInputMappingSticker = computed(() => {
-      return inputMappingStickers.value.find((sticker) => sticker.bindingId === selectedInputMappingStickerId.value) ?? null;
-    });
-
-    const getJoystickStickerBindingIds = (bindingId: string) => {
-      if (!bindingId.startsWith('joystick:')) {
-        return [];
-      }
-
-      const separatorIndex = bindingId.lastIndexOf(':');
-      if (separatorIndex < 'joystick:'.length) {
-        return [];
-      }
-
-      return bindingId
-        .slice(separatorIndex + 1)
-        .split('+')
-        .filter(Boolean);
-    };
-
-    const findExistingJoystickSticker = () => {
-      return inputMappingStickers.value.find((sticker) => sticker.bindingId.startsWith('joystick:')) ?? null;
-    };
-
-    const selectedInputMappingBinding = computed(() => {
-      const profile = activeInputMappingProfile.value;
-      const sticker = selectedInputMappingSticker.value;
-      if (!profile || !sticker || sticker.bindingId.startsWith('joystick:')) {
-        return null;
-      }
-
-      return profile.bindings.find((binding) => binding.id === sticker.bindingId) ?? null;
-    });
-
-    const selectedInputMappingJoystickBindings = computed(() => {
-      const profile = activeInputMappingProfile.value;
-      const sticker = selectedInputMappingSticker.value;
-      if (!profile || !sticker || !sticker.bindingId.startsWith('joystick:')) {
-        return [];
-      }
-
-      const bindingIds = getJoystickStickerBindingIds(sticker.bindingId);
-      return profile.bindings.filter((binding) => bindingIds.includes(binding.id) && binding.action.type === 'virtualJoystick');
-    });
-
-    const selectedInputMappingJoystickControlMode = computed(() => {
-      const action = selectedInputMappingJoystickBindings.value[0]?.action;
-      return action?.type === 'virtualJoystick' ? (action.controlMode ?? 'slide') : 'slide';
-    });
-
-    const selectedInputMappingJoystickSizePercent = computed(() => {
-      const action = selectedInputMappingJoystickBindings.value[0]?.action;
-      return action?.type === 'virtualJoystick' ? Math.round((action.radius / 0.08) * 100) : 100;
-    });
-
-    const selectedInputMappingJoystickDirectionBindings = computed(() => {
-      const directionOrder = [
-        ['up', '上'] as const,
-        ['left', '左'] as const,
-        ['down', '下'] as const,
-        ['right', '右'] as const
-      ];
-      const items: Array<{ directionKey: string; title: string; binding: InputMappingBinding }> = [];
-
-      for (const [directionKey, title] of directionOrder) {
-        const binding = selectedInputMappingJoystickBindings.value.find((item) => {
-          if (item.action.type !== 'virtualJoystick') {
-            return false;
-          }
-          if (directionKey === 'up') return item.action.direction.y < 0;
-          if (directionKey === 'down') return item.action.direction.y > 0;
-          if (directionKey === 'left') return item.action.direction.x < 0;
-          return item.action.direction.x > 0;
-        });
-
-        if (binding) {
-          items.push({ directionKey, title, binding });
-        }
-      }
-
-      return items;
-    });
-
-    const selectedInputMappingIsAttackBinding = computed(() => {
-      const binding = selectedInputMappingBinding.value;
-      return binding?.sticker?.role === 'attack' || binding?.id.startsWith('fire-') === true;
-    });
-
-    const selectedInputMappingCanEditTrigger = computed(() => {
-      const binding = selectedInputMappingBinding.value;
-      return !!binding && binding.action.type !== 'mouseLook' && !selectedInputMappingIsAttackBinding.value;
-    });
-
-    const selectedInputMappingStickerLabelText = computed(() => {
-      const binding = selectedInputMappingBinding.value;
-      return binding?.sticker?.label ?? binding?.label ?? selectedInputMappingSticker.value?.label ?? '';
-    });
-
-    const selectedInputMappingConfigTitle = computed(() => {
-      const sticker = selectedInputMappingSticker.value;
-      const binding = selectedInputMappingBinding.value;
-      const label = selectedInputMappingStickerLabelText.value;
-      if (!sticker) {
-        return '';
-      }
-
-      if (sticker.shape === 'joystick') {
-        return '方向按键';
-      }
-
-      if (sticker.shape === 'look') {
-        return '视角移动';
-      }
-
-      if (binding?.action.type === 'mouseLook') {
-        return '准星键';
-      }
-
-      if (binding?.action.type === 'swipe') {
-        return '滑动键位';
-      }
-
-      if (binding?.action.type === 'rapidTap') {
-        return '连击按键';
-      }
-
-      if (binding?.trigger.type === 'mouseButton') {
-        return label || '鼠标按键';
-      }
-
-      return label || '按键配置';
-    });
-
-    const inputMappingStickerPaletteItems = [
-      { type: 'click', title: '点击按键', iconComponent: CursorClick24Regular },
-      { type: 'rapidTap', title: '连点按键', iconComponent: TapDouble24Regular },
-      { type: 'swipe', title: '滑动键位', iconComponent: SwipeRight24Regular },
-      { type: 'joystick', title: '方向按键', iconComponent: Apps24Regular },
-      { type: 'aim', title: '准星键', iconComponent: Target24Regular },
-      { type: 'look', title: '视角移动', iconComponent: EyeTracking24Regular },
-      { type: 'fire', title: '攻击键', iconComponent: Flash24Regular }
-      // { type: 'skill', title: '技能施法', iconComponent: Sparkle24Regular }
-    ];
 
     const inputMappingTouchBridge = createInputMappingTouchBridge({
       getVideoViewport: () => getVideoViewport(),
@@ -864,6 +666,8 @@ export default defineComponent({
     let pendingResumePlaybackTimer: number | null = null;
 
     let pendingDisplayResizeTimer: number | null = null;
+
+    let pendingInputMappingAimAreaSaveTimer: number | null = null;
 
     let flexDisplayHeartbeatTimer: number | null = null;
 
@@ -2163,6 +1967,7 @@ export default defineComponent({
       activeInputMappingProfile,
       isInputMappingHintsVisible,
       isInputMappingEnabled,
+      isInputMappingPaused,
       release: releaseInputMapping,
       saveActiveProfile: saveRuntimeInputMappingProfile,
       handleKeyboard: handleInputMappingKeyboard,
@@ -2172,16 +1977,70 @@ export default defineComponent({
       hasMouseLook: hasInputMappingMouseLook,
       isMouseCaptureToggleKey,
       isHintsToggleKey: isInputMappingHintsToggleKey,
-      isEnabledToggleKey: isInputMappingEnabledToggleKey,
+      isPauseToggleKey: isInputMappingPauseToggleKey,
       toggleHints: toggleInputMappingHints,
-      toggleEnabled: toggleInputMappingEnabled,
+      togglePaused: toggleInputMappingPaused,
       loadActiveProfile: loadRuntimeInputMappingProfile,
       clearPointerKeys: clearInputMappingPointerKeys
     } = inputMappingController;
 
+    const {
+      selectedInputMappingStickerId,
+      isInputMappingProfileDialogVisible,
+      inputMappingProfileDialogMode,
+      inputMappingProfileForm,
+      inputMappingContextMenu,
+      inputMappingCaptureBindingId,
+      inputMappingCaptureIgnoreMouseUntil,
+      inputMappingCaptureSuppressClickUntil,
+      inputMappingStickerDrag,
+      inputMappingAimAreaResize,
+      inputMappingStickerLayoutRevision,
+      inputMappingSwipeRecordingBindingId,
+      inputMappingSwipeRecordingPath,
+      inputMappingSwipeRecordingStartedAt,
+      inputMappingSwipeDrawingBindingId,
+      inputMappingSwipeDrawingRestoreMenu,
+      inputMappingStickers,
+      isNewInputMappingProfileDraft,
+      selectedInputMappingSticker,
+      selectedInputMappingBinding,
+      selectedInputMappingJoystickBindings,
+      selectedInputMappingJoystickControlMode,
+      selectedInputMappingJoystickSizePercent,
+      selectedInputMappingJoystickDirectionBindings,
+      selectedInputMappingIsAttackBinding,
+      selectedInputMappingCanEditTrigger,
+      selectedInputMappingStickerLabelText,
+      selectedInputMappingConfigTitle,
+      selectedInputMappingRapidTapAction,
+      selectedInputMappingPressMode,
+      selectedInputMappingSwipeAction,
+      selectedInputMappingMouseLookAction,
+      selectedInputMappingMouseLookRangePercent,
+      isSelectedInputMappingSwipeDrawing,
+      inputMappingStickerPaletteItems,
+      getJoystickStickerBindingIds,
+      findExistingJoystickSticker
+    } = useInputMappingEditorState({
+      activeProfile: activeInputMappingProfile,
+      isEditMode: isInputMappingEditMode,
+      isNewDraft: () => route.query.inputMappingNew === '1' && isInputMappingEditMode.value && !!activeInputMappingProfile.value,
+      icons: {
+        click: CursorClick24Regular,
+        rapidTap: TapDouble24Regular,
+        swipe: SwipeRight24Regular,
+        joystick: Apps24Regular,
+        aim: Target24Regular,
+        look: EyeTracking24Regular,
+        fire: Flash24Regular
+      }
+    });
+
     const applyInputMappingProfileToRuntime = (profile: InputMappingProfile) => {
       inputMappingController.executeCommands(inputMappingController.runtime.setProfile(profile));
       activeInputMappingProfileName.value = profile.name;
+      isInputMappingPaused.value = false;
       refreshInputMappingStickerLayout();
     };
 
@@ -2833,257 +2692,23 @@ export default defineComponent({
       return resolveVideoViewport(videoElement.value, effectiveFillMode.value);
     };
 
-    const refreshInputMappingStickerLayout = () => {
-      inputMappingStickerLayoutRevision.value += 1;
-    };
-
-    const getInputMappingStickerStyle = (sticker: InputMappingStickerItem) => {
-      void inputMappingStickerLayoutRevision.value;
-
-      const viewport = getVideoViewport();
-      if (!viewport || viewport.displayWidth <= 0 || viewport.displayHeight <= 0) {
-        return {
-          display: 'none'
-        };
-      }
-      const stageRect = videoContainer.value?.getBoundingClientRect();
-      const originX = stageRect?.left ?? 0;
-      const originY = stageRect?.top ?? 0;
-
-      return {
-        left: `${viewport.offsetX - originX + viewport.displayWidth * sticker.point.x}px`,
-        top: `${viewport.offsetY - originY + viewport.displayHeight * sticker.point.y}px`,
-        opacity: `${sticker.opacity}`,
-        '--joystick-size': sticker.radius ? `${Math.round((sticker.radius / 0.08) * 76)}px` : undefined,
-        '--aim-area-width': sticker.width ? `${Math.round(viewport.displayWidth * sticker.width)}px` : undefined,
-        '--aim-area-height': sticker.height ? `${Math.round(viewport.displayHeight * sticker.height)}px` : undefined
-      };
-    };
-
-    const getInputMappingConfigPanelStyle = () => {
-      void inputMappingStickerLayoutRevision.value;
-
-      const sticker = selectedInputMappingSticker.value;
-      const viewport = getVideoViewport();
-      const stageRect = videoContainer.value?.getBoundingClientRect();
-      if (!sticker || !viewport || !stageRect) {
-        return {
-          display: 'none'
-        };
-      }
-
-      const left = viewport.offsetX - stageRect.left + viewport.displayWidth * sticker.point.x;
-      const top = viewport.offsetY - stageRect.top + viewport.displayHeight * sticker.point.y;
-      const panelOffsetX = left > stageRect.width - 320 ? -286 : 48;
-      const panelOffsetY = top > stageRect.height - 240 ? -172 : -42;
-      return {
-        left: `${left + panelOffsetX}px`,
-        top: `${top + panelOffsetY}px`
-      };
-    };
-
-    const getInputMappingPaletteStyle = () => {
-      void inputMappingStickerLayoutRevision.value;
-
-      const stageRect = videoContainer.value?.getBoundingClientRect();
-      if (!stageRect) {
-        return {
-          display: 'none'
-        };
-      }
-
-      const paletteWidth = 246;
-      const paletteHeight = Math.min(360, Math.max(0, stageRect.height - 32));
-      const margin = 8;
-      const maxX = Math.max(margin, stageRect.width - paletteWidth - margin);
-      const maxY = Math.max(margin, stageRect.height - paletteHeight - margin);
-      return {
-        left: `${Math.min(maxX, Math.max(margin, inputMappingContextMenu.value.x))}px`,
-        top: `${Math.min(maxY, Math.max(margin, inputMappingContextMenu.value.y))}px`
-      };
-    };
-
-    const getInputMappingPointFromClient = (clientX: number, clientY: number) => {
-      const viewport = getVideoViewport();
-      if (!viewport || viewport.displayWidth <= 0 || viewport.displayHeight <= 0) {
-        return null;
-      }
-
-      return {
-        x: Math.min(1, Math.max(0, (clientX - viewport.offsetX) / viewport.displayWidth)),
-        y: Math.min(1, Math.max(0, (clientY - viewport.offsetY) / viewport.displayHeight))
-      };
-    };
-
-    const createInputMappingBindingId = (prefix: string) => {
-      return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    };
-
-    const getInputMappingTriggerText = (binding: InputMappingBinding) => {
-      if (binding.trigger.type === 'keyboard') {
-        return formatInputMappingKeyboardCode(binding.trigger.code);
-      }
-      if (binding.trigger.type === 'mouseButton') {
-        if (binding.trigger.button === 0) return '左键';
-        if (binding.trigger.button === 1) return '中键';
-        if (binding.trigger.button === 2) return '右键';
-        return `M${binding.trigger.button}`;
-      }
-      if (binding.trigger.type === 'mouseWheel') {
-        return binding.trigger.direction === 'up' ? '滚上' : '滚下';
-      }
-      return '鼠标';
-    };
-
-    const createInputMappingBindingAtPoint = (type: string, point: NormalizedPoint): InputMappingBinding[] => {
-      const id = createInputMappingBindingId(type);
-      const sticker = {
-        keyText: '1',
-        label: '',
-        shape: 'key' as const,
-        opacity: 0.9
-      };
-
-      switch (type) {
-        case 'rapidTap':
-          return [{
-            id,
-            label: '连击',
-            trigger: { type: 'keyboard', code: 'Digit1' },
-            action: {
-              type: 'rapidTap',
-              point,
-              mode: 'whileHeld',
-              tapsPerSecond: 20,
-              tapCount: 20
-            },
-            sticker: { ...sticker, label: '连击' }
-          }];
-        case 'swipe':
-          {
-            const to = { x: Math.min(1, point.x + 0.08), y: point.y };
-            return [{
-              id,
-              label: '滑动',
-              trigger: { type: 'keyboard', code: 'Digit1' },
-              action: {
-                type: 'swipe',
-                from: point,
-                to,
-                durationMs: 120,
-                straight: false,
-                startHoldMs: 0
-              },
-              sticker: { ...sticker, label: '滑动' }
-            }];
-          }
-        case 'joystick': {
-          const group = createInputMappingBindingId('movement');
-          const directions = [
-            ['move-forward', 'W', 'KeyW', { x: 0, y: -1 }],
-            ['move-left', 'A', 'KeyA', { x: -1, y: 0 }],
-            ['move-back', 'S', 'KeyS', { x: 0, y: 1 }],
-            ['move-right', 'D', 'KeyD', { x: 1, y: 0 }]
-          ] as const;
-          return directions.map(([suffix, keyText, code, direction]) => ({
-            id: `${group}-${suffix}`,
-            label: keyText,
-            trigger: { type: 'keyboard', code },
-            action: {
-              type: 'virtualJoystick',
-              center: point,
-              radius: 0.08,
-              direction,
-              group,
-              controlMode: 'slide'
-            },
-            sticker: {
-              keyText,
-              label: '',
-              shape: 'key' as const,
-              opacity: 0.9
-            }
-          }));
-        }
-        case 'look':
-          {
-            const group = createInputMappingBindingId('look');
-            const directions = [
-              ['look-up', '↑', 'ArrowUp', { x: 0, y: -1 }],
-              ['look-left', '←', 'ArrowLeft', { x: -1, y: 0 }],
-              ['look-down', '↓', 'ArrowDown', { x: 0, y: 1 }],
-              ['look-right', '→', 'ArrowRight', { x: 1, y: 0 }]
-            ] as const;
-            return directions.map(([suffix, keyText, code, direction]) => ({
-              id: `${group}-${suffix}`,
-              label: '视角移动',
-              trigger: { type: 'keyboard', code },
-              action: {
-                type: 'virtualJoystick',
-                center: point,
-                radius: 0.08,
-                direction,
-                group,
-                controlMode: 'slide'
-              },
-              sticker: {
-                keyText,
-                label: '',
-                shape: 'look' as const,
-                opacity: 0.86
-              }
-            }));
-          }
-        case 'fire':
-          return [{
-            id,
-            label: '攻击',
-            trigger: { type: 'mouseButton', button: 0 },
-            action: { type: 'hold', point },
-            sticker: { ...sticker, keyText: '左键', label: '攻击', shape: 'mouse', role: 'attack' }
-          }];
-        case 'skill':
-          return [{
-            id,
-            label: '技能',
-            trigger: { type: 'keyboard', code: 'KeyE' },
-            action: { type: 'tap', point },
-            sticker: { ...sticker, keyText: 'E', label: '技能' }
-          }];
-        case 'aim':
-          return [{
-            id,
-            label: '准星',
-            trigger: { type: 'mouseMove', activation: 'pointerLock' },
-            action: {
-              type: 'mouseLook',
-              touchStart: point,
-              sensitivityX: 1,
-              sensitivityY: 1,
-              invertY: false,
-              maxStep: 0.08,
-              rangeX: 0.08,
-              rangeY: 0.08
-            },
-            sticker: {
-              keyText: '',
-              label: '',
-              labelEnabled: false,
-              shape: 'aimArea',
-              opacity: 0.72
-            }
-          }];
-        case 'click':
-        default:
-          return [{
-            id,
-            label: '点击',
-            trigger: { type: 'keyboard', code: 'Digit1' },
-            action: { type: 'tap', point },
-            sticker: { ...sticker, label: '点击' }
-          }];
-      }
-    };
+    const {
+      refreshInputMappingStickerLayout,
+      getInputMappingStickerStyle,
+      getInputMappingConfigPanelStyle,
+      getInputMappingPaletteStyle,
+      getInputMappingPointFromClient,
+      getInputMappingSwipePathPolyline
+    } = useInputMappingStickerLayout({
+      layoutRevision: inputMappingStickerLayoutRevision,
+      selectedSticker: selectedInputMappingSticker,
+      contextMenu: inputMappingContextMenu,
+      videoContainer,
+      selectedSwipeAction: selectedInputMappingSwipeAction,
+      isSelectedSwipeDrawing: isSelectedInputMappingSwipeDrawing,
+      swipeRecordingPath: inputMappingSwipeRecordingPath,
+      getVideoViewport
+    });
 
     const saveActiveInputMappingProfile = async () => {
       const profile = activeInputMappingProfile.value;
@@ -3319,7 +2944,32 @@ export default defineComponent({
       await saveActiveInputMappingProfile();
     };
 
-    const updateInputMappingAimAreaRange = async (bindingId: string, clientX: number, clientY: number) => {
+    const clearPendingInputMappingAimAreaSave = () => {
+      if (pendingInputMappingAimAreaSaveTimer === null) {
+        return;
+      }
+
+      window.clearTimeout(pendingInputMappingAimAreaSaveTimer);
+      pendingInputMappingAimAreaSaveTimer = null;
+    };
+
+    const flushInputMappingAimAreaSave = async () => {
+      clearPendingInputMappingAimAreaSave();
+      await saveActiveInputMappingProfile();
+    };
+
+    const scheduleInputMappingAimAreaSave = () => {
+      if (pendingInputMappingAimAreaSaveTimer !== null) {
+        return;
+      }
+
+      pendingInputMappingAimAreaSaveTimer = window.setTimeout(() => {
+        pendingInputMappingAimAreaSaveTimer = null;
+        void saveActiveInputMappingProfile();
+      }, 120);
+    };
+
+    const updateInputMappingAimAreaRange = (bindingId: string, clientX: number, clientY: number) => {
       const point = getInputMappingPointFromClient(clientX, clientY);
       const profile = activeInputMappingProfile.value;
       const binding = profile?.bindings.find((item) => item.id === bindingId);
@@ -3331,74 +2981,7 @@ export default defineComponent({
       binding.action.rangeY = Math.min(0.2, Math.max(0.004, Math.abs(point.y - binding.action.touchStart.y)));
       binding.action.maxStep = Math.max(binding.action.rangeX, binding.action.rangeY);
       refreshInputMappingStickerLayout();
-      await saveActiveInputMappingProfile();
-    };
-
-    const selectedInputMappingRapidTapAction = computed(() => {
-      const action = selectedInputMappingBinding.value?.action;
-      return action?.type === 'rapidTap' ? action : null;
-    });
-
-    const selectedInputMappingPressMode = computed(() => {
-      const binding = selectedInputMappingBinding.value;
-      if (!binding || selectedInputMappingIsAttackBinding.value) {
-        return '';
-      }
-
-      return binding.action.type === 'tap' || binding.action.type === 'hold' ? binding.action.type : '';
-    });
-
-    const selectedInputMappingSwipeAction = computed(() => {
-      const action = selectedInputMappingBinding.value?.action;
-      return action?.type === 'swipe' ? action : null;
-    });
-
-    const selectedInputMappingMouseLookAction = computed(() => {
-      const action = selectedInputMappingBinding.value?.action;
-      return action?.type === 'mouseLook' ? action : null;
-    });
-
-    const selectedInputMappingMouseLookRangePercent = computed(() => {
-      const action = selectedInputMappingMouseLookAction.value;
-      return {
-        x: action ? Math.round(((action.rangeX ?? action.maxStep ?? 0.08) / 0.08) * 100) : 100,
-        y: action ? Math.round(((action.rangeY ?? action.maxStep ?? 0.08) / 0.08) * 100) : 100
-      };
-    });
-
-    const isSelectedInputMappingSwipeDrawing = computed(() =>
-      !!selectedInputMappingBinding.value
-      && inputMappingSwipeDrawingBindingId.value === selectedInputMappingBinding.value.id
-    );
-
-    const getInputMappingSwipePathPoints = () => {
-      const action = selectedInputMappingSwipeAction.value;
-      if (!action) {
-        return [];
-      }
-
-      if (isSelectedInputMappingSwipeDrawing.value && inputMappingSwipeRecordingPath.value.length > 0) {
-        return inputMappingSwipeRecordingPath.value;
-      }
-
-      return action.path && action.path.length >= 2 ? action.path : [];
-    };
-
-    const getInputMappingSwipePathPolyline = () => {
-      void inputMappingStickerLayoutRevision.value;
-
-      const viewport = getVideoViewport();
-      const stageRect = videoContainer.value?.getBoundingClientRect();
-      const points = getInputMappingSwipePathPoints();
-      if (!viewport || !stageRect || points.length < 2) {
-        return '';
-      }
-
-      return points.map((point) => {
-        const x = viewport.offsetX - stageRect.left + viewport.displayWidth * point.x;
-        const y = viewport.offsetY - stageRect.top + viewport.displayHeight * point.y;
-        return `${x},${y}`;
-      }).join(' ');
+      scheduleInputMappingAimAreaSave();
     };
 
     const saveInputMappingSwipeRecordingPath = async () => {
@@ -3649,15 +3232,20 @@ export default defineComponent({
       }
     };
 
-    const confirmDiscardNewInputMappingProfile = () => {
+    const confirmDiscardNewInputMappingProfile = async () => {
       if (!isNewInputMappingProfileDraft.value) {
         return true;
       }
 
-      return window.confirm(t(
-        'InputMapping.DiscardNewProfileConfirm',
-        '当前新增方案尚未保存，退出编辑将放弃该方案。是否继续？'
-      ));
+      return dialogService.confirm(
+        t('InputMapping.DiscardNewProfile', '放弃新增方案'),
+        t(
+          'InputMapping.DiscardNewProfileConfirm',
+          '当前新增方案尚未保存，退出编辑将放弃该方案。是否继续？'
+        ),
+        t('Common.Continue', '继续'),
+        t('Common.Cancel', '取消')
+      );
     };
 
     const saveInputMappingProfileFromEditMenu = async () => {
@@ -3683,8 +3271,8 @@ export default defineComponent({
       }
     };
 
-    const exitInputMappingEditMode = () => {
-      if (!confirmDiscardNewInputMappingProfile()) {
+    const exitInputMappingEditMode = async () => {
+      if (!await confirmDiscardNewInputMappingProfile()) {
         return;
       }
       isInputMappingEditMode.value = false;
@@ -3701,8 +3289,8 @@ export default defineComponent({
       });
     };
 
-    const backToInputMappingProfiles = () => {
-      if (!confirmDiscardNewInputMappingProfile()) {
+    const backToInputMappingProfiles = async () => {
+      if (!await confirmDiscardNewInputMappingProfile()) {
         return;
       }
       const packageName = getCurrentInputMappingPackageName();
@@ -3718,7 +3306,7 @@ export default defineComponent({
     const enterInputMappingEditMode = () => {
       const profileId = activeInputMappingProfile.value?.id;
       if (!profileId) {
-        backToInputMappingProfiles();
+        void backToInputMappingProfiles();
         return;
       }
 
@@ -3743,13 +3331,13 @@ export default defineComponent({
       });
     };
 
-    const toggleInputMappingEnabledWithNotification = async () => {
-      await toggleInputMappingEnabled();
+    const toggleInputMappingPausedWithNotification = () => {
+      toggleInputMappingPaused();
       notifications.show({
         type: 'info',
-        title: isInputMappingEnabled.value
-          ? t('InputMapping.Enabled', '按键映射已开启')
-          : t('InputMapping.Disabled', '按键映射已关闭'),
+        title: isInputMappingPaused.value
+          ? t('InputMapping.Paused', '按键映射已暂停')
+          : t('InputMapping.Resumed', '按键映射已恢复'),
         message: activeInputMappingProfile.value?.name || t('InputMapping.InputMapping', '按键映射')
       });
     };
@@ -3828,12 +3416,12 @@ export default defineComponent({
               createBackToMainMenuItem(),
               { id: 'save-input-mapping', title: t('InputMapping.SaveProfile', '保存方案'), iconComponent: Save20Regular, disabled: !activeInputMappingProfile.value, action: () => void saveInputMappingProfileFromEditMenu() },
               { id: 'edit-input-mapping-info', title: t('InputMapping.EditProfileInfo', '编辑信息'), iconComponent: Edit20Regular, disabled: !activeInputMappingProfile.value, action: () => openInputMappingProfileDialog(isNewInputMappingProfileDraft.value ? 'new' : 'info') },
-              { id: 'exit-input-mapping-edit', title: t('InputMapping.ExitEdit', '退出编辑'), iconComponent: DismissCircle20Regular, action: exitInputMappingEditMode },
-              { id: 'input-mapping-profiles', title: t('InputMapping.BackToProfiles', '返回管理'), iconComponent: Apps24Regular, action: backToInputMappingProfiles }
+              { id: 'exit-input-mapping-edit', title: t('InputMapping.ExitEdit', '退出编辑'), iconComponent: DismissCircle20Regular, action: () => void exitInputMappingEditMode() },
+              { id: 'input-mapping-profiles', title: t('InputMapping.BackToProfiles', '返回管理'), iconComponent: Apps24Regular, action: () => void backToInputMappingProfiles() }
             ]
             : [
               createBackToMainMenuItem(),
-              { id: 'input-mapping-profiles', title: t('InputMapping.ManageProfiles', '管理方案'), iconComponent: Apps24Regular, action: backToInputMappingProfiles },
+              { id: 'input-mapping-profiles', title: t('InputMapping.ManageProfiles', '管理方案'), iconComponent: Apps24Regular, action: () => void backToInputMappingProfiles() },
               { id: 'edit-input-mapping', title: t('InputMapping.EditBindings', '编辑按键'), iconComponent: Edit20Regular, disabled: !activeInputMappingProfile.value, action: enterInputMappingEditMode },
               {
                 id: 'toggle-input-mapping-hints',
@@ -3843,11 +3431,11 @@ export default defineComponent({
                 action: toggleInputMappingHintsWithNotification
               },
               {
-                id: 'toggle-input-mapping-enabled',
-                title: isInputMappingEnabled.value ? t('InputMapping.Disable', '关闭映射') : t('InputMapping.Enable', '开启映射'),
-                iconComponent: isInputMappingEnabled.value ? DismissCircle20Regular : CheckmarkCircle20Regular,
-                disabled: !activeInputMappingProfile.value,
-                action: () => void toggleInputMappingEnabledWithNotification()
+                id: 'toggle-input-mapping-paused',
+                title: isInputMappingPaused.value ? t('InputMapping.Resume', '恢复映射') : t('InputMapping.Pause', '暂停映射'),
+                iconComponent: isInputMappingPaused.value ? CheckmarkCircle20Regular : DismissCircle20Regular,
+                disabled: !isInputMappingEnabled.value || !activeInputMappingProfile.value,
+                action: toggleInputMappingPausedWithNotification
               }
             ];
         case 'main':
@@ -4032,14 +3620,14 @@ export default defineComponent({
         signX,
         signY
       };
-      void updateInputMappingAimAreaRange(sticker.bindingId, event.clientX, event.clientY);
+      updateInputMappingAimAreaRange(sticker.bindingId, event.clientX, event.clientY);
       (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
     };
 
     const moveInputMappingStickerDrag = (event: PointerEvent) => {
       if (inputMappingAimAreaResize.value) {
         event.preventDefault();
-        void updateInputMappingAimAreaRange(inputMappingAimAreaResize.value.bindingId, event.clientX, event.clientY);
+        updateInputMappingAimAreaRange(inputMappingAimAreaResize.value.bindingId, event.clientX, event.clientY);
         return;
       }
 
@@ -4064,6 +3652,7 @@ export default defineComponent({
           // Ignore capture release failures while leaving edit mode or changing tabs.
         }
         inputMappingAimAreaResize.value = null;
+        void flushInputMappingAimAreaSave();
         return;
       }
 
@@ -4327,9 +3916,9 @@ export default defineComponent({
         return;
       }
 
-      if (!event.repeat && isInputMappingEnabledToggleKey(event)) {
+      if (!event.repeat && isInputMappingPauseToggleKey(event)) {
         event.preventDefault();
-        void toggleInputMappingEnabledWithNotification();
+        toggleInputMappingPausedWithNotification();
         return;
       }
 
@@ -4364,7 +3953,7 @@ export default defineComponent({
 
       if (
         isInputMappingHintsToggleKey(event)
-        || isInputMappingEnabledToggleKey(event)
+        || isInputMappingPauseToggleKey(event)
         || (isMouseCaptureToggleKey(event) && canUseMouseLock())
       ) {
         event.preventDefault();
@@ -4400,7 +3989,7 @@ export default defineComponent({
 
     const handlePointerLockChange = () => {
       syncPointerLockState();
-      if (!isInputMappingEnabled.value) {
+      if (!isInputMappingEnabled.value || isInputMappingPaused.value) {
         return;
       }
 
@@ -4614,6 +4203,7 @@ export default defineComponent({
       stopPointerReleaseFlushLoop();
       teardownVideoContainerResizeObserver();
       stopFlexDisplayHeartbeat();
+      clearPendingInputMappingAimAreaSave();
       void releaseMouseLock();
       releaseInputMapping('disconnect');
       releaseAllPointers('cancel');
@@ -4808,6 +4398,7 @@ export default defineComponent({
       selectedInputMappingConfigTitle,
       isInputMappingHintsVisible,
       isInputMappingEnabled,
+      isInputMappingPaused,
       inputMappingContextMenu,
       inputMappingCaptureBindingId,
       captureSelectedInputMappingMouseButton,

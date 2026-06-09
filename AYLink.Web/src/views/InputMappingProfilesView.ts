@@ -7,6 +7,7 @@ import {
 } from '@vicons/fluent';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from '../composables/useI18n';
+import { useDialog } from '../services/dialog';
 import { useNotification } from '../services/notification';
 import {
   type InputMappingProfile,
@@ -14,7 +15,7 @@ import {
 } from '../features/inputMapping/inputMappingSchema';
 import { createLocalInputMappingProfileStore } from '../features/inputMapping/inputMappingProfileStore';
 import { getInputMappingTabState, setInputMappingTabState } from '../features/inputMapping/inputMappingTabState';
-import { sanitizeDownloadFileName } from '../lib/input/normalize';
+import { normalizePackageName, sanitizeDownloadFileName } from '../lib/input/normalize';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -30,6 +31,7 @@ export default defineComponent({
     const route = useRoute();
     const router = useRouter();
     const { t } = useI18n();
+    const dialogService = useDialog();
     const notifications = useNotification();
     const store = createLocalInputMappingProfileStore();
 
@@ -178,7 +180,7 @@ export default defineComponent({
         description: profileInfoForm.value.description.trim(),
         target: {
           ...profile.target,
-          packageName: profileInfoForm.value.packageName.trim()
+          packageName: normalizePackageName(profileInfoForm.value.packageName)
         }
       };
 
@@ -193,11 +195,16 @@ export default defineComponent({
     };
 
     const deleteProfile = async (profile: InputMappingProfileSummary) => {
-      const confirmed = window.confirm(t(
-        'InputMapping.DeleteProfileConfirm',
-        '确定删除按键映射方案“{0}”吗？此操作不可恢复。',
-        profile.name
-      ));
+      const confirmed = await dialogService.confirm(
+        t('InputMapping.DeleteProfile', '删除方案'),
+        t(
+          'InputMapping.DeleteProfileConfirm',
+          '确定删除按键映射方案“{0}”吗？此操作不可恢复。',
+          profile.name
+        ),
+        t('Common.Delete', '删除'),
+        t('Common.Cancel', '取消')
+      );
       if (!confirmed) {
         return;
       }

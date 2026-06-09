@@ -191,11 +191,11 @@
           </button>
         </SettingItem>
         <SettingItem
-          :title="t('Settings.InputMappingEnabledToggleKey', '关闭 / 开启映射')"
-          :description="t('Settings.InputMappingEnabledToggleKeyDescription', '关闭或重新开启当前按键映射，默认 -')"
+          :title="t('Settings.InputMappingPauseToggleKey', '暂停 / 恢复映射')"
+          :description="t('Settings.InputMappingPauseToggleKeyDescription', '临时暂停或恢复当前按键映射，默认 -')"
         >
-          <button type="button" class="key-capture-btn" @click="startInputMappingKeyCapture('toggleEnabled')">
-            {{ capturingInputMappingKey === 'toggleEnabled' ? t('Settings.KeyCaptureWaiting', '按下按键...') : inputMappingEnabledToggleKey }}
+          <button type="button" class="key-capture-btn" @click="startInputMappingKeyCapture('pauseToggle')">
+            {{ capturingInputMappingKey === 'pauseToggle' ? t('Settings.KeyCaptureWaiting', '按下按键...') : inputMappingPauseToggleKey }}
           </button>
         </SettingItem>
       </SettingSection>

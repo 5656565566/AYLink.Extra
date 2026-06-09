@@ -21,6 +21,7 @@
 ## ✨ Features
 
 - **Low-latency casting and control**: built on scrcpy + WebRTC, with touch, keyboard, mouse, and HID input support
+- **Casting key mapping**: map keyboard and mouse input to touch actions with key mapping profiles
 - **Device management**: view online devices, connection states, wireless ADB pairing, and common actions
 - **File management**: browse, download, delete, and rename files on the device
 - **App management**: list installed apps, launch them, and start app-level casting

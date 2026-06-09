@@ -16,6 +16,48 @@ env:
   ANDROID_VERSION_CODE: '1'
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      mobile: ${{ steps.filter.outputs.mobile }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Check AYLink.Mobile changes
+      id: filter
+      run: |
+        set -euo pipefail
+
+        mobile_changed=false
+
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          changed_files="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+        elif [ "${{ github.ref_type }}" = "tag" ]; then
+          previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+
+          if [ -n "${previous_tag}" ]; then
+            changed_files="$(git diff --name-only "${previous_tag}..${GITHUB_SHA}")"
+          else
+            changed_files="$(git ls-tree -r --name-only "${GITHUB_SHA}")"
+          fi
+        elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+          changed_files="$(git diff --name-only "${{ github.event.before }}..${GITHUB_SHA}")"
+        else
+          changed_files="$(git ls-tree -r --name-only "${GITHUB_SHA}")"
+        fi
+
+        if printf '%s\n' "${changed_files}" | grep -Eq '^(AYLink\.Mobile/|\.github/workflows/build\.yml$)'; then
+          mobile_changed=true
+        fi
+
+        echo "mobile=${mobile_changed}" >> "${GITHUB_OUTPUT}"
+      shell: bash
+
   build:
     runs-on: ubuntu-latest
 
@@ -100,6 +142,8 @@ jobs:
           bin/*.tar.gz
 
   android-build:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -228,7 +272,12 @@ jobs:
 
   release:
     needs: [build, android-build, docker-build]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      always() &&
+      startsWith(github.ref, 'refs/tags/') &&
+      needs.build.result == 'success' &&
+      needs.docker-build.result == 'success' &&
+      (needs.android-build.result == 'success' || needs.android-build.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write

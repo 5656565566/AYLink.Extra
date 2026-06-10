@@ -14,6 +14,8 @@ env:
   APP_RELEASE_TAG: 'v1.0.0'
   ANDROID_VERSION_NAME: '0.1.0'
   ANDROID_VERSION_CODE: '1'
+  ALPINE_VERSION: '3.24'
+  DOCKER_PLATFORMS: 'linux/amd64,linux/amd64/v2,linux/amd64/v3,linux/arm64,linux/riscv64,linux/386,linux/arm/v7,linux/arm/v6'
 
 jobs:
   changes:
@@ -127,7 +129,16 @@ jobs:
         package_release "windows-amd64" "AYLink-Agent-windows-amd64.exe" "zip"
         package_release "windows-arm64" "AYLink-Agent-windows-arm64.exe" "zip"
         package_release "linux-amd64" "AYLink-Agent-linux-amd64" "tar.gz"
+        package_release "linux-amd64-v2" "AYLink-Agent-linux-amd64-v2" "tar.gz"
+        package_release "linux-amd64-v3" "AYLink-Agent-linux-amd64-v3" "tar.gz"
         package_release "linux-arm64" "AYLink-Agent-linux-arm64" "tar.gz"
+        package_release "linux-riscv64" "AYLink-Agent-linux-riscv64" "tar.gz"
+        package_release "linux-ppc64le" "AYLink-Agent-linux-ppc64le" "tar.gz"
+        package_release "linux-s390x" "AYLink-Agent-linux-s390x" "tar.gz"
+        package_release "linux-arm-v7" "AYLink-Agent-linux-arm-v7" "tar.gz"
+        package_release "linux-arm-v6" "AYLink-Agent-linux-arm-v6" "tar.gz"
+        package_release "linux-386" "AYLink-Agent-linux-386" "tar.gz"
+        package_release "linux-loong64" "AYLink-Agent-linux-loong64" "tar.gz"
         package_release "macos-amd64" "AYLink-Agent-darwin-amd64" "tar.gz"
         package_release "macos-arm64" "AYLink-Agent-darwin-arm64" "tar.gz"
       shell: bash
@@ -140,6 +151,22 @@ jobs:
         path: |
           bin/*.zip
           bin/*.tar.gz
+
+    - name: Prepare Docker build context
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        rm -rf docker-context
+        mkdir -p docker-context/bin docker-context/AYLink.Agent/Scrcpy
+        cp bin/AYLink-Agent-linux-* docker-context/bin/
+        cp -R AYLink.Agent/Scrcpy/. docker-context/AYLink.Agent/Scrcpy/
+      shell: bash
+
+    - name: Upload Docker build context
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-artifact@v6
+      with:
+        name: aylink-docker-context
+        path: docker-context
 
   android-build:
     needs: changes
@@ -228,11 +255,61 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v5
 
+    - name: Download Docker build context
+      uses: actions/download-artifact@v6
+      with:
+        name: aylink-docker-context
+        path: docker-context
+
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+
+    - name: Verify Docker runtime packages
+      run: |
+        set -euo pipefail
+
+        map_platform_arch() {
+          case "$1" in
+            linux/amd64|linux/amd64/v*) echo "x86_64" ;;
+            linux/386) echo "x86" ;;
+            linux/arm64|linux/arm64/v*) echo "aarch64" ;;
+            linux/arm/v7) echo "armv7" ;;
+            linux/arm/v6) echo "armhf" ;;
+            linux/riscv64) echo "riscv64" ;;
+            *) echo "unsupported:$1" ;;
+          esac
+        }
+
+        checked_arches=""
+        IFS=',' read -ra platforms <<< "${DOCKER_PLATFORMS}"
+        for platform in "${platforms[@]}"; do
+          arch="$(map_platform_arch "${platform}")"
+          if [[ "${arch}" == unsupported:* ]]; then
+            echo "Unsupported Docker platform mapping: ${platform}" >&2
+            exit 1
+          fi
+
+          if [[ " ${checked_arches} " == *" ${arch} "* ]]; then
+            continue
+          fi
+          checked_arches="${checked_arches} ${arch}"
+
+          index_url="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/community/${arch}/APKINDEX.tar.gz"
+          index_file="$(mktemp)"
+          curl -fsSL "${index_url}" | tar -xzO APKINDEX > "${index_file}"
+
+          if ! grep -qx 'P:android-tools' "${index_file}"; then
+            echo "android-tools is not available for Alpine ${ALPINE_VERSION} ${arch} (${platform})" >&2
+            rm -f "${index_file}"
+            exit 1
+          fi
+
+          rm -f "${index_file}"
+        done
+      shell: bash
 
     - name: Login to Docker Hub
       uses: docker/login-action@v3
@@ -245,20 +322,22 @@ jobs:
         export VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
       
         docker buildx build \
-        --platform linux/amd64,linux/arm64 \
-        --build-arg SCRCPY_SERVER_VERSION=${SCRCPY_SERVER_VERSION} \
+        --file Dockerfile.release \
+        --platform ${DOCKER_PLATFORMS} \
+        --build-arg ALPINE_VERSION=${ALPINE_VERSION} \
         --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:$VERSION \
         --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest \
         --push \
-        .
+        docker-context
 
         docker buildx build \
-        --platform linux/amd64,linux/arm64 \
-        --build-arg SCRCPY_SERVER_VERSION=${SCRCPY_SERVER_VERSION} \
+        --file Dockerfile.release \
+        --platform ${DOCKER_PLATFORMS} \
+        --build-arg ALPINE_VERSION=${ALPINE_VERSION} \
         --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:$VERSION \
         --tag ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest \
         --output type=oci \
-        . > AYLink.Agent-docker.tar
+        docker-context > AYLink.Agent-docker.tar
       
         mkdir -p docker-release
         mv AYLink.Agent-docker.tar docker-release/AYLink.Agent-docker-oci-$VERSION.tar
@@ -283,6 +362,23 @@ jobs:
       contents: write
 
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Resolve previous release tag
+      id: previous_tag
+      run: |
+        previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+
+        if [ -z "${previous_tag}" ]; then
+          previous_tag="$(git rev-list --max-parents=0 HEAD)"
+        fi
+
+        echo "value=${previous_tag}" >> "${GITHUB_OUTPUT}"
+      shell: bash
+
     - name: Download all artifacts
       uses: actions/download-artifact@v6
       with:
@@ -293,16 +389,22 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.ref_name }}
-        name: AYLink ${{ github.ref_name }}
+        name: ${{ github.ref_name }}
         body: |
-          Built for multiple platforms including Linux, macOS and Windows.
-          
-          - Multi-platform support (amd64, arm64)
-          - Docker images available on Docker Hub
+          ${{ github.ref_name }}
 
-          - Docker 离线镜像为 OCI 标准 无法在老版本的 docker (20.10 之前) 中使用
-          - 推荐直接使用 \`docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest\` 获取最新镜像
-          - 也可以 直接使用 docker-compose.yml 快速部署
+          Full Changelog: [${{ steps.previous_tag.outputs.value }}...${{ github.ref_name }}](https://github.com/${{ github.repository }}/compare/${{ steps.previous_tag.outputs.value }}...${{ github.ref_name }})
+
+          [AYLink.apk](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/AYLink.apk)
+
+          Docker 离线镜像为 OCI 标准，无法在老版本的 Docker（20.10 之前）中使用。
+          The offline Docker image uses the OCI format and cannot be used with older Docker versions before 20.10.
+
+          推荐直接使用 \`docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest\` 获取最新镜像。
+          It is recommended to use \`docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest\` to get the latest image.
+
+          也可以直接使用 \`docker-compose.yml\` 快速部署。
+          You can also use \`docker-compose.yml\` for quick deployment.
         files: |
           artifacts/AYLink.Agent-${{ github.ref_name }}-*.tar.gz
           artifacts/AYLink.Agent-${{ github.ref_name }}-*.zip

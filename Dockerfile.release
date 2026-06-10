@@ -1,0 +1,42 @@
+# =============================================================================
+# Runtime Environment
+# =============================================================================
+ARG ALPINE_VERSION=3.24
+
+FROM alpine:${ALPINE_VERSION}
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+
+# 设置时区和安装基础依赖 包括 adb (android-tools)
+RUN apk add --no-cache tzdata ca-certificates android-tools
+
+WORKDIR /app
+
+# 拷贝交叉编译产物 由 Buildx 注入目标平台后选择对应二进制
+COPY bin/ /tmp/aylink-bin/
+RUN set -eux; \
+    variant="${TARGETVARIANT}"; \
+    binary="/tmp/aylink-bin/AYLink-Agent-${TARGETOS}-${TARGETARCH}"; \
+    if [ -n "${variant}" ]; then \
+        binary="${binary}-${variant}"; \
+    fi; \
+    cp "${binary}" ./aylink-agent; \
+    chmod +x ./aylink-agent; \
+    rm -rf /tmp/aylink-bin
+
+# 拷贝 scrcpy-server 运行时文件
+COPY AYLink.Agent/Scrcpy ./Scrcpy
+
+# 创建数据挂载目录
+RUN mkdir -p /app/data /app/Scrcpy
+
+# 暴露 HTTP 端口 (默认 5501)
+EXPOSE 5501
+
+# 持久化数据目录
+VOLUME ["/app/data"]
+
+# 启动命令
+ENTRYPOINT ["./aylink-agent"]

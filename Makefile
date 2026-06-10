@@ -53,7 +53,7 @@ LDFLAGS := -ldflags="$(LDFLAGS_VALUES) $(LDFLAGS_VERSION)"
 #  平台定义
 # =============================================================================
 # 目标编译平台
-PLATFORMS_EXE := windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+PLATFORMS_EXE := windows/amd64 windows/arm64 linux/amd64 linux/amd64/v2 linux/amd64/v3 linux/arm64 linux/riscv64 linux/ppc64le linux/s390x linux/386 linux/loong64 linux/arm/v7 linux/arm/v6 darwin/amd64 darwin/arm64
 
 
 .PHONY: all build web agent clean run help
@@ -121,16 +121,22 @@ help:
 # =============================================================================
 
 # 编译可执行文件的宏
-# $(1): 平台 (e.g. windows/amd64)
+# $(1): 平台 (e.g. windows/amd64, linux/amd64/v3, linux/arm/v7)
 # $(2): 源文件路径 (未使用, 统一在内层 cd 进去处理)
 # $(3): 输出二进制文件名 (e.g. AYLink-Agent)
 define build_exe_platform
 	$(eval GOOS := $(word 1, $(subst /, ,$1)))
 	$(eval GOARCH := $(word 2, $(subst /, ,$1)))
+	$(eval GOVARIANT := $(word 3, $(subst /, ,$1)))
+	$(eval GOARM := $(if $(filter arm,$(GOARCH)),$(patsubst v%,%,$(GOVARIANT)),))
+	$(eval GOAMD64 := $(if $(filter amd64,$(GOARCH)),$(GOVARIANT),))
 	$(eval BIN_NAME := $3)
 	$(eval SUFFIX := $(if $(filter windows,$(GOOS)),.exe,))
-	$(eval OUTPUT_NAME := $(CURDIR)/$(BUILD_PATH)/$(BIN_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX))
+	$(eval VARIANT_SUFFIX := $(if $(GOVARIANT),-$(GOVARIANT),))
+	$(eval GOARM_ENV := $(if $(GOARM),GOARM=$(GOARM),))
+	$(eval GOAMD64_ENV := $(if $(GOAMD64),GOAMD64=$(GOAMD64),))
+	$(eval OUTPUT_NAME := $(CURDIR)/$(BUILD_PATH)/$(BIN_NAME)-$(GOOS)-$(GOARCH)$(VARIANT_SUFFIX)$(SUFFIX))
 
-	@echo "--> Building $(BIN_NAME) for $(GOOS)/$(GOARCH)..."
-	@cd $(AGENT_PATH) && env CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(LDFLAGS) -o "$(OUTPUT_NAME)" ./cmd/agent
+	@echo "--> Building $(BIN_NAME) for $(GOOS)/$(GOARCH)$(if $(GOVARIANT),/$(GOVARIANT),)..."
+	@cd $(AGENT_PATH) && env CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GOARM_ENV) $(GOAMD64_ENV) $(GO) build $(LDFLAGS) -o "$(OUTPUT_NAME)" ./cmd/agent
 endef

@@ -253,6 +253,15 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
     }
   };
 
+  const disableActiveProfile = () => {
+    setInputMappingTabState(options.getActiveTabKey(), {
+      activeProfileId: '',
+      enabled: false
+    });
+    isInputMappingEnabled.value = false;
+    clearProfile();
+  };
+
   const clearPointerKeys = () => {
     commandBridge.clearPointerKeys();
   };
@@ -280,6 +289,7 @@ export function useInputMappingRuntimeController(options: InputMappingRuntimeCon
     isPauseToggleKey,
     toggleHints,
     togglePaused,
+    disableActiveProfile,
     clearPointerKeys
   };
 }

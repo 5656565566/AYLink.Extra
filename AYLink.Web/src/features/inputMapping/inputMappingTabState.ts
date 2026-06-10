@@ -36,7 +36,11 @@ function writeStoredTabStates(storage: Storage, states: StoredInputMappingTabSta
   storage.setItem(storageKeys.inputMapping.tabStates, JSON.stringify(states));
 }
 
-export function getInputMappingTabState(tabKey: string, storage: Storage = localStorage): InputMappingTabState {
+function getDefaultInputMappingTabStateStorage() {
+  return sessionStorage;
+}
+
+export function getInputMappingTabState(tabKey: string, storage: Storage = getDefaultInputMappingTabStateStorage()): InputMappingTabState {
   const key = normalizeInputMappingTabKey(tabKey);
   const stored = readStoredTabStates(storage)[key];
   if (!stored) {
@@ -49,7 +53,7 @@ export function getInputMappingTabState(tabKey: string, storage: Storage = local
   };
 }
 
-export function setInputMappingTabState(tabKey: string, state: InputMappingTabState, storage: Storage = localStorage) {
+export function setInputMappingTabState(tabKey: string, state: InputMappingTabState, storage: Storage = getDefaultInputMappingTabStateStorage()) {
   const key = normalizeInputMappingTabKey(tabKey);
   const states = readStoredTabStates(storage);
   states[key] = {
@@ -59,7 +63,7 @@ export function setInputMappingTabState(tabKey: string, state: InputMappingTabSt
   writeStoredTabStates(storage, states);
 }
 
-export function clearInputMappingTabState(tabKey: string, storage: Storage = localStorage) {
+export function clearInputMappingTabState(tabKey: string, storage: Storage = getDefaultInputMappingTabStateStorage()) {
   const key = normalizeInputMappingTabKey(tabKey);
   const states = readStoredTabStates(storage);
   delete states[key];

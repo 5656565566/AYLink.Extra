@@ -13,11 +13,12 @@ import {
   ArrowExpand24Regular,
   Phone20Regular,
   Clipboard20Regular,
-  CheckmarkCircle20Regular,
   DismissCircle20Regular,
   Edit20Regular,
   Eye20Regular,
   EyeOff20Regular,
+  Pause20Regular,
+  Play20Regular,
   Save20Regular,
   CursorClick24Regular,
   TapDouble24Regular,
@@ -91,6 +92,7 @@ import {
   getVideoViewport as resolveVideoViewport
 } from '../features/screencast/videoViewport';
 import { useFloatingMenu } from '../features/screencast/useFloatingMenu';
+import { useScreencastFloatingActions } from '../features/screencast/useScreencastFloatingActions';
 import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
@@ -156,11 +158,12 @@ export default defineComponent({
     ArrowExpand24Regular,
     Phone20Regular,
     Clipboard20Regular,
-    CheckmarkCircle20Regular,
     DismissCircle20Regular,
     Edit20Regular,
     Eye20Regular,
     EyeOff20Regular,
+    Pause20Regular,
+    Play20Regular,
     Save20Regular,
     CursorClick24Regular,
     TapDouble24Regular,
@@ -178,29 +181,6 @@ export default defineComponent({
         Username?: string | null;
         Credential?: string | null;
       }>;
-    }
-
-    type FloatingMenuPage =
-      | 'main'
-      | 'navigation'
-      | 'display'
-      | 'volume'
-      | 'power'
-      | 'inputMapping';
-
-    interface FloatingMenuActionItem {
-      id: string;
-      title: string;
-      iconComponent: unknown;
-      danger?: boolean;
-      disabled?: boolean;
-      action: () => void;
-    }
-
-    interface FloatingMenuGroupItem {
-      id: Exclude<FloatingMenuPage, 'main'>;
-      title: string;
-      iconComponent: unknown;
     }
 
     interface SignalErrorMessagePayload {
@@ -428,8 +408,6 @@ export default defineComponent({
       finishClipboardDrag,
       cancelClipboardDrag
     } = remoteClipboard;
-
-    const activeFloatingMenuPage = ref<FloatingMenuPage>('main');
 
     const floatingMenuLayout = reactive({
       margin: MENU_MARGIN,
@@ -1980,6 +1958,7 @@ export default defineComponent({
       isPauseToggleKey: isInputMappingPauseToggleKey,
       toggleHints: toggleInputMappingHints,
       togglePaused: toggleInputMappingPaused,
+      disableActiveProfile: disableActiveInputMappingProfile,
       loadActiveProfile: loadRuntimeInputMappingProfile,
       clearPointerKeys: clearInputMappingPointerKeys
     } = inputMappingController;
@@ -3342,128 +3321,77 @@ export default defineComponent({
       });
     };
 
-    const openFloatingMenuPage = (page: Exclude<FloatingMenuPage, 'main'>) => {
-      activeFloatingMenuPage.value = page;
-      isMenuExpanded.value = false;
-      void nextTick(() => {
-        isMenuExpanded.value = true;
-        ensureMenuInsideStage();
+    const closeInputMappingWithNotification = () => {
+      const profileName = activeInputMappingProfile.value?.name || t('InputMapping.InputMapping', '按键映射');
+      disableActiveInputMappingProfile();
+      void router.replace({
+        name: 'screencast',
+        query: {
+          ...route.query,
+          inputMappingProfileId: undefined,
+          inputMappingEdit: undefined,
+          inputMappingNew: undefined
+        }
+      });
+      notifications.show({
+        type: 'info',
+        title: t('InputMapping.MappingClosed', '按键映射已关闭'),
+        message: profileName
       });
     };
 
-    const returnToFloatingMenuMain = () => {
-      activeFloatingMenuPage.value = 'main';
-      isMenuExpanded.value = false;
-      void nextTick(() => {
-        isMenuExpanded.value = true;
-        ensureMenuInsideStage();
-      });
-    };
-
-    const floatingMenuGroups: FloatingMenuGroupItem[] = [
-      { id: 'navigation', title: '导航', iconComponent: Home20Regular },
-      { id: 'display', title: '显示', iconComponent: FullScreenMaximize20Regular },
-      { id: 'volume', title: '音量', iconComponent: Speaker220Regular },
-      { id: 'power', title: '电源 / 屏幕', iconComponent: Power20Regular },
-      { id: 'inputMapping', title: '按键映射', iconComponent: Apps24Regular }
-    ];
-
-    const createBackToMainMenuItem = (): FloatingMenuActionItem => ({
-      id: 'back-to-main',
-      title: '返回主分组',
-      iconComponent: ArrowHookUpLeft20Regular,
-      action: returnToFloatingMenuMain
+    const {
+      activeFloatingMenuPage,
+      activeFloatingMenuItems,
+      activeFloatingMenuItemCount
+    } = useScreencastFloatingActions({
+      t,
+      icons: {
+        arrowBack: ArrowHookUpLeft20Regular,
+        back: ChevronLeft20Regular,
+        home: Home20Regular,
+        menu: List20Regular,
+        recent: AppRecent20Regular,
+        fullscreen: FullScreenMaximize20Regular,
+        fillDisplay: ArrowExpand24Regular,
+        volumeUp: Speaker220Regular,
+        volumeDown: Speaker020Regular,
+        mute: SpeakerMute20Regular,
+        power: Power20Regular,
+        phone: Phone20Regular,
+        inputMapping: Apps24Regular,
+        clipboard: Clipboard20Regular,
+        save: Save20Regular,
+        edit: Edit20Regular,
+        dismiss: DismissCircle20Regular,
+        eye: Eye20Regular,
+        eyeOff: EyeOff20Regular,
+        pause: Pause20Regular,
+        play: Play20Regular,
+        closeMapping: DismissCircle20Regular
+      },
+      isMenuExpanded,
+      effectiveFillMode,
+      isInputMappingEditMode,
+      hasActiveInputMappingProfile: computed(() => !!activeInputMappingProfile.value),
+      isNewInputMappingProfileDraft,
+      isInputMappingHintsVisible,
+      isInputMappingEnabled,
+      isInputMappingPaused,
+      ensureMenuInsideStage,
+      sendAndroidCommand,
+      toggleFillMode,
+      toggleFullscreen,
+      toggleClipboardWindow,
+      saveInputMappingProfileFromEditMenu,
+      openInputMappingProfileDialog,
+      exitInputMappingEditMode,
+      backToInputMappingProfiles,
+      enterInputMappingEditMode,
+      toggleInputMappingHintsWithNotification,
+      toggleInputMappingPausedWithNotification,
+      closeInputMappingWithNotification
     });
-
-    const getFloatingMenuGroupItems = (page: FloatingMenuPage): FloatingMenuActionItem[] => {
-      switch (page) {
-        case 'navigation':
-          return [
-            createBackToMainMenuItem(),
-            { id: 'back', title: t('Screencast.Back', '返回'), iconComponent: ChevronLeft20Regular, action: () => sendAndroidCommand('back') },
-            { id: 'home', title: t('Screencast.Home', '主页'), iconComponent: Home20Regular, action: () => sendAndroidCommand('home') },
-            { id: 'menu', title: t('Screencast.Menu', '菜单'), iconComponent: List20Regular, action: () => sendAndroidCommand('menu') },
-            { id: 'recent', title: t('Screencast.RecentApps', '最近任务'), iconComponent: AppRecent20Regular, action: () => sendAndroidCommand('recent') }
-          ];
-        case 'display':
-          return [
-            createBackToMainMenuItem(),
-            {
-              id: 'fill-mode',
-              title: effectiveFillMode.value ? t('Screencast.FitDisplay', '适应显示') : t('Screencast.FillDisplay', '拉伸填充'),
-              iconComponent: ArrowExpand24Regular,
-              action: toggleFillMode
-            },
-            { id: 'fullscreen', title: t('Screencast.Fullscreen', '全屏'), iconComponent: FullScreenMaximize20Regular, action: toggleFullscreen }
-          ];
-        case 'volume':
-          return [
-            createBackToMainMenuItem(),
-            { id: 'volume-up', title: t('Screencast.VolumeUp', '音量加'), iconComponent: Speaker220Regular, action: () => sendAndroidCommand('volumeup') },
-            { id: 'volume-down', title: t('Screencast.VolumeDown', '音量减'), iconComponent: Speaker020Regular, action: () => sendAndroidCommand('volumedown') },
-            { id: 'mute', title: t('Screencast.Mute', '静音'), iconComponent: SpeakerMute20Regular, action: () => sendAndroidCommand('mute') }
-          ];
-        case 'power':
-          return [
-            createBackToMainMenuItem(),
-            { id: 'power', title: t('Screencast.Power', '电源'), iconComponent: Power20Regular, action: () => sendAndroidCommand('power') },
-            { id: 'screen-on', title: t('Screencast.ScreenOn', '亮屏'), iconComponent: Phone20Regular, action: () => sendAndroidCommand('screenon') },
-            { id: 'screen-off', title: t('Screencast.ScreenOff', '熄屏'), iconComponent: Phone20Regular, danger: true, action: () => sendAndroidCommand('screenoff') }
-          ];
-        case 'inputMapping':
-          return isInputMappingEditMode.value
-            ? [
-              createBackToMainMenuItem(),
-              { id: 'save-input-mapping', title: t('InputMapping.SaveProfile', '保存方案'), iconComponent: Save20Regular, disabled: !activeInputMappingProfile.value, action: () => void saveInputMappingProfileFromEditMenu() },
-              { id: 'edit-input-mapping-info', title: t('InputMapping.EditProfileInfo', '编辑信息'), iconComponent: Edit20Regular, disabled: !activeInputMappingProfile.value, action: () => openInputMappingProfileDialog(isNewInputMappingProfileDraft.value ? 'new' : 'info') },
-              { id: 'exit-input-mapping-edit', title: t('InputMapping.ExitEdit', '退出编辑'), iconComponent: DismissCircle20Regular, action: () => void exitInputMappingEditMode() },
-              { id: 'input-mapping-profiles', title: t('InputMapping.BackToProfiles', '返回管理'), iconComponent: Apps24Regular, action: () => void backToInputMappingProfiles() }
-            ]
-            : [
-              createBackToMainMenuItem(),
-              { id: 'input-mapping-profiles', title: t('InputMapping.ManageProfiles', '管理方案'), iconComponent: Apps24Regular, action: () => void backToInputMappingProfiles() },
-              { id: 'edit-input-mapping', title: t('InputMapping.EditBindings', '编辑按键'), iconComponent: Edit20Regular, disabled: !activeInputMappingProfile.value, action: enterInputMappingEditMode },
-              {
-                id: 'toggle-input-mapping-hints',
-                title: isInputMappingHintsVisible.value ? t('InputMapping.HideHints', '隐藏提示') : t('InputMapping.ShowHints', '显示提示'),
-                iconComponent: isInputMappingHintsVisible.value ? EyeOff20Regular : Eye20Regular,
-                disabled: !activeInputMappingProfile.value,
-                action: toggleInputMappingHintsWithNotification
-              },
-              {
-                id: 'toggle-input-mapping-paused',
-                title: isInputMappingPaused.value ? t('InputMapping.Resume', '恢复映射') : t('InputMapping.Pause', '暂停映射'),
-                iconComponent: isInputMappingPaused.value ? CheckmarkCircle20Regular : DismissCircle20Regular,
-                disabled: !isInputMappingEnabled.value || !activeInputMappingProfile.value,
-                action: toggleInputMappingPausedWithNotification
-              }
-            ];
-        case 'main':
-        default:
-          return [];
-      }
-    };
-
-    const activeFloatingMenuItems = computed<FloatingMenuActionItem[]>(() => {
-      if (activeFloatingMenuPage.value === 'main') {
-        const mainGroupItems: FloatingMenuActionItem[] = floatingMenuGroups.map((group) => ({
-          id: group.id,
-          title: group.title,
-          iconComponent: group.iconComponent,
-          action: () => openFloatingMenuPage(group.id)
-        }));
-        return mainGroupItems.concat({
-          id: 'remote-clipboard',
-          title: t('Screencast.RemoteClipboard', '远端剪贴板'),
-          iconComponent: Clipboard20Regular,
-          action: toggleClipboardWindow
-        });
-      }
-
-      return getFloatingMenuGroupItems(activeFloatingMenuPage.value);
-    });
-
-    const activeFloatingMenuItemCount = computed(() => activeFloatingMenuItems.value.length);
 
     const pushInputMappingSwipeRecordingPoint = (point: NormalizedPoint) => {
       const path = inputMappingSwipeRecordingPath.value;

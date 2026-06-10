@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { storageKeys } from '../../core/storage/keys';
 import { getInputMappingTabState, setInputMappingTabState } from './inputMappingTabState';
 
 function createMemoryStorage(): Storage {
@@ -27,6 +28,11 @@ function createMemoryStorage(): Storage {
 }
 
 describe('inputMappingTabState', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
   it('stores input mapping state independently for each cast tab', () => {
     const storage = createMemoryStorage();
 
@@ -47,5 +53,31 @@ describe('inputMappingTabState', () => {
       activeProfileId: 'profile-b',
       enabled: false
     });
+  });
+
+  it('uses session storage by default instead of persistent local storage', () => {
+    localStorage.setItem(storageKeys.inputMapping.tabStates, JSON.stringify({
+      'device-a::screen': {
+        activeProfileId: 'local-profile',
+        enabled: true
+      }
+    }));
+
+    expect(getInputMappingTabState('device-a::screen')).toEqual({
+      activeProfileId: '',
+      enabled: false
+    });
+
+    setInputMappingTabState('device-a::screen', {
+      activeProfileId: 'session-profile',
+      enabled: true
+    });
+
+    expect(getInputMappingTabState('device-a::screen')).toEqual({
+      activeProfileId: 'session-profile',
+      enabled: true
+    });
+    expect(localStorage.getItem(storageKeys.inputMapping.tabStates)).toContain('local-profile');
+    expect(sessionStorage.getItem(storageKeys.inputMapping.tabStates)).toContain('session-profile');
   });
 });

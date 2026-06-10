@@ -17,7 +17,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aylink.mobile.data.repo.AppContainer
 import com.aylink.mobile.ui.devices.AppManagerScreen
@@ -200,6 +203,7 @@ fun AYLinkApp(container: AppContainer) {
     val lastRemoteDevice by container.sessionStore.lastRemoteDevice.collectAsStateWithLifecycle()
     val sessionScopeKey = remember(sessionToken) { sessionToken ?: "logged-out" }
     val initialRemoteDevice = lastRemoteDevice
+    var remoteScreenInstanceId by remember { mutableLongStateOf(0L) }
     var currentScreen by remember {
         mutableStateOf<Screen>(
             when {
@@ -208,6 +212,21 @@ fun AYLinkApp(container: AppContainer) {
                 container.sessionStore.hasConfiguredBaseUrl -> Screen.Login
                 else -> Screen.AddressSetup
             }
+        )
+    }
+    fun remoteScreen(
+        device: com.aylink.mobile.data.model.Device,
+        appPackageName: String? = null,
+        appDisplayName: String? = null,
+        newDisplay: Boolean = false
+    ): Screen.Remote {
+        remoteScreenInstanceId += 1
+        return Screen.Remote(
+            device = device,
+            appPackageName = appPackageName,
+            appDisplayName = appDisplayName,
+            newDisplay = newDisplay,
+            instanceId = remoteScreenInstanceId
         )
     }
 
@@ -253,7 +272,11 @@ fun AYLinkApp(container: AppContainer) {
                     }
 
                     is Screen.Remote -> {
-                        val viewModel = rememberManagedViewModel("remote-$sessionScopeKey-${screen.device.id}") {
+                        val viewModelStoreOwner = rememberDisposableViewModelStoreOwner(screen.instanceId)
+                        val viewModel = rememberManagedViewModel(
+                            key = "remote-$sessionScopeKey-${screen.device.id}-${screen.instanceId}",
+                            viewModelStoreOwner = viewModelStoreOwner
+                        ) {
                             RemoteViewModel(
                                 appContext = appContext,
                                 device = screen.device,
@@ -306,7 +329,7 @@ fun AYLinkApp(container: AppContainer) {
                                 onOpenRemote = { device ->
                                     container.sessionStore.updateLastSelectedDevice(device)
                                     container.sessionStore.updateLastRemoteDevice(device)
-                                    currentScreen = Screen.Remote(device)
+                                    currentScreen = remoteScreen(device)
                                 },
                                 onOpenAppManager = { device ->
                                     container.sessionStore.updateLastSelectedDevice(device)
@@ -341,7 +364,7 @@ fun AYLinkApp(container: AppContainer) {
                                 onOpenRemote = { device, appPackage, appName ->
                                     container.sessionStore.updateLastSelectedDevice(device)
                                     container.sessionStore.updateLastRemoteDevice(device)
-                                    currentScreen = Screen.Remote(
+                                    currentScreen = remoteScreen(
                                         device = device,
                                         appPackageName = appPackage,
                                         appDisplayName = appName,
@@ -395,11 +418,29 @@ fun AYLinkApp(container: AppContainer) {
 @Composable
 private inline fun <reified VM : ViewModel> rememberManagedViewModel(
     key: String,
+    viewModelStoreOwner: ViewModelStoreOwner = LocalViewModelStoreOwner.current
+        ?: error("No ViewModelStoreOwner was provided"),
     noinline creator: () -> VM
 ): VM = viewModel(
     key = key,
+    viewModelStoreOwner = viewModelStoreOwner,
     factory = managedViewModelFactory(creator)
 )
+
+@Composable
+private fun rememberDisposableViewModelStoreOwner(key: Any): ViewModelStoreOwner {
+    val store = remember(key) { ViewModelStore() }
+    DisposableEffect(store) {
+        onDispose {
+            store.clear()
+        }
+    }
+    return remember(store) {
+        object : ViewModelStoreOwner {
+            override val viewModelStore: ViewModelStore = store
+        }
+    }
+}
 
 private inline fun <reified VM : ViewModel> managedViewModelFactory(
     crossinline creator: () -> VM

@@ -57,6 +57,9 @@ class SignalClient(
         val connectionId = connectionSequence
         activeConnectionId = connectionId
         isSocketOpen = false
+        val previousSocket = socket
+        socket = null
+        previousSocket?.close(1000, null)
         val wsUrl = buildWebSocketUrl(args.baseUrl, args.ticket)
         val request = Request.Builder().url(wsUrl).build()
         socket = okHttpClient.newWebSocket(request, object : WebSocketListener() {

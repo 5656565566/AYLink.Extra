@@ -170,14 +170,17 @@ class RemoteViewModel(
     private var currentSessionId: String? = null
     private var autoReconnectEnabled = true
     private var hasReleasedSession = false
+    private var activeWebRtcGeneration = 0
+    private var connectionRequestSequence = 0
+    private var activeConnectionRequestId = 0
 
     init {
         viewModelScope.launch {
             launch {
                 signalClient.events.collect { event ->
                     when (event) {
-                        is SignalClient.Event.Answer -> webRtcManager.setRemoteAnswer(event.payload.type, event.payload.sdp)
-                        is SignalClient.Event.Candidate -> webRtcManager.addRemoteCandidate(event.payload)
+                        is SignalClient.Event.Answer -> webRtcManager.setRemoteAnswer(event.payload.type, event.payload.sdp, activeWebRtcGeneration)
+                        is SignalClient.Event.Candidate -> webRtcManager.addRemoteCandidate(event.payload, activeWebRtcGeneration)
                         is SignalClient.Event.Error -> {
                             _uiState.update { it.copy(status = event.message) }
                             stopHeartbeat()
@@ -190,8 +193,8 @@ class RemoteViewModel(
                         SignalClient.Event.Open -> {
                             _uiState.update { it.copy(status = "创建会话...") }
                             startHeartbeat()
-                            webRtcManager.createPeerConnection()
-                            webRtcManager.createOffer()
+                            activeWebRtcGeneration = webRtcManager.createPeerConnection()
+                            webRtcManager.createOffer(activeWebRtcGeneration)
                         }
                         SignalClient.Event.Closed -> {
                             stopHeartbeat()
@@ -213,14 +216,17 @@ class RemoteViewModel(
 
             launch {
                 webRtcManager.events.collect { event ->
+                    if (event.generation != activeWebRtcGeneration) {
+                        return@collect
+                    }
                     when (event) {
-                        WebRtcManager.Event.Connected -> {
+                        is WebRtcManager.Event.Connected -> {
                             reconnectAttempt = 0
                             stopReconnect()
                             _uiState.update { it.copy(status = "已连接") }
                             startVideoRecoveryWatchdog("peer_connected")
                         }
-                        WebRtcManager.Event.Disconnected -> {
+                        is WebRtcManager.Event.Disconnected -> {
                             _uiState.update { current ->
                                 current.copy(
                                     status = if (autoReconnectEnabled) "连接断开" else current.status,
@@ -313,7 +319,7 @@ class RemoteViewModel(
         preferredDisplayAspectSize = IntSize.Zero
         manualDisconnect = false
         autoReconnectEnabled = true
-        currentSessionId = null
+        releaseRemoteSessionAsync()
         hasReleasedSession = false
         reconnectAttempt = 0
         stopReconnect()
@@ -325,9 +331,14 @@ class RemoteViewModel(
 
     private fun connectInternal(appPackage: String?, appName: String?, newDisplay: Boolean) {
         connectJob?.cancel()
+        val requestId = ++connectionRequestSequence
+        activeConnectionRequestId = requestId
         connectJob = viewModelScope.launch {
             val currentBaseUrl = baseUrl.first()
             token.first() ?: return@launch
+            if (!isActiveConnectionRequest(requestId)) {
+                return@launch
+            }
             _uiState.update {
                 it.copy(
                     status = if (appName.isNullOrBlank()) "正在连接..." else "正在投屏 $appName...",
@@ -336,7 +347,12 @@ class RemoteViewModel(
             }
             suppressReconnect = true
             runCatching {
+                stopHeartbeat()
+                resetPointerControlState()
+                releaseRemoteSessionAsync()
+                hasReleasedSession = false
                 webRtcManager.disconnect()
+                activeWebRtcGeneration = 0
                 signalClient.disconnect()
                 val initialDisplaySize = if (newDisplay) buildAdaptiveDisplaySize() else IntSize.Zero
                 if (newDisplay) {
@@ -344,7 +360,7 @@ class RemoteViewModel(
                 }
                 val ticket = deviceRepository.createWebRtcTicket(
                     deviceId = device.id,
-                    sessionId = currentSessionId,
+                    sessionId = null,
                     appPackage = appPackage,
                     appName = appName,
                     newDisplay = newDisplay,
@@ -352,6 +368,10 @@ class RemoteViewModel(
                     newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
                     newDisplayDpi = if (newDisplay) localDisplayDpi else null
                 )
+                if (!isActiveConnectionRequest(requestId)) {
+                    releaseTicketSession(ticket.sessionId)
+                    return@runCatching
+                }
                 currentSessionId = ticket.sessionId.takeIf { it.isNotBlank() }
                 signalClient.connect(
                     SignalClient.ConnectArgs(
@@ -360,9 +380,15 @@ class RemoteViewModel(
                     )
                 )
             }.onFailure { error ->
+                if (!isActiveConnectionRequest(requestId)) {
+                    return@launch
+                }
                 _uiState.update { it.copy(status = error.message ?: "连接失败") }
                 suppressReconnect = false
                 scheduleReconnect()
+                return@launch
+            }
+            if (!isActiveConnectionRequest(requestId)) {
                 return@launch
             }
             suppressReconnect = false
@@ -420,7 +446,7 @@ class RemoteViewModel(
                 flushSampledPointerMove(payload.pointerId, preferPointerMoveChannel = false)
                 sampledPointerMoves.remove(payload.pointerId)
                 pendingPointerReleases[payload.pointerId] = payload
-                flushPendingPointerReleases(reportFailure = true)
+                flushPendingPointerReleases(reportFailure = false)
             }
             else -> {
                 flushPendingPointerReleases(reportFailure = false)
@@ -491,6 +517,14 @@ class RemoteViewModel(
     private fun stopPointerReleaseRetry() {
         pointerReleaseRetryJob?.cancel()
         pointerReleaseRetryJob = null
+    }
+
+    private fun resetPointerControlState() {
+        sampledPointerMoves.clear()
+        pendingPointerReleases.clear()
+        pointerSamplingJob?.cancel()
+        pointerSamplingJob = null
+        stopPointerReleaseRetry()
     }
 
     private fun startHeartbeat() {
@@ -586,7 +620,7 @@ class RemoteViewModel(
         }
         return runCatching {
             _uiState.update { it.copy(status = "网络波动，正在尝试恢复连接...") }
-            webRtcManager.restartIce()
+            webRtcManager.restartIce(activeWebRtcGeneration)
             startVideoRecoveryWatchdog("ice_restart_$reason")
         }.isSuccess
     }
@@ -641,26 +675,36 @@ class RemoteViewModel(
     }
 
     private fun releaseRuntimeResources() {
+        activeConnectionRequestId = ++connectionRequestSequence
+        connectJob?.cancel()
+        connectJob = null
         stopReconnect()
         stopHeartbeat()
         stopVideoRecoveryWatchdog()
-        sampledPointerMoves.clear()
-        pendingPointerReleases.clear()
-        pointerSamplingJob?.cancel()
-        pointerSamplingJob = null
-        stopPointerReleaseRetry()
+        activeWebRtcGeneration = 0
+        resetPointerControlState()
     }
 
     private fun releaseRemoteSessionAsync() {
         val sessionId = currentSessionId?.takeIf { it.isNotBlank() } ?: return
         if (hasReleasedSession) {
+            currentSessionId = null
             return
         }
         hasReleasedSession = true
         currentSessionId = null
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            runCatching { deviceRepository.releaseScrcpySession(device.id, sessionId) }
+            releaseTicketSession(sessionId)
         }
+    }
+
+    private fun isActiveConnectionRequest(requestId: Int): Boolean {
+        return requestId == activeConnectionRequestId && !manualDisconnect
+    }
+
+    private suspend fun releaseTicketSession(sessionId: String?) {
+        val releasedSessionId = sessionId?.takeIf { it.isNotBlank() } ?: return
+        runCatching { deviceRepository.releaseScrcpySession(device.id, releasedSessionId) }
     }
 
     private fun requestAdaptiveDisplayResize() {

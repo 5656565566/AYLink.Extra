@@ -62,10 +62,12 @@ class WebRtcManager(
     }
 
     sealed interface Event {
-        data object Connected : Event
-        data object Disconnected : Event
-        data class VideoSizeChanged(val width: Int, val height: Int) : Event
-        data class Error(val message: String) : Event
+        val generation: Int
+
+        data class Connected(override val generation: Int) : Event
+        data class Disconnected(override val generation: Int) : Event
+        data class VideoSizeChanged(override val generation: Int, val width: Int, val height: Int) : Event
+        data class Error(override val generation: Int, val message: String) : Event
     }
 
     private val _events = MutableSharedFlow<Event>(
@@ -83,24 +85,20 @@ class WebRtcManager(
     private var pointerMoveChannel: DataChannel? = null
     private var remoteVideoTrack: VideoTrack? = null
     private var remoteAudioTrack: AudioTrack? = null
+    private var frameSizeSink: VideoSink? = null
     private var renderer: SurfaceViewRenderer? = null
     @Volatile
     private var isDisconnecting = false
+    @Volatile
+    private var connectionGeneration = 0
     private var lastVideoWidth = 0
     private var lastVideoHeight = 0
     @Volatile
     private var lastFrameAtMillis = 0L
-    private val frameSizeSink = VideoSink { frame: VideoFrame ->
-        lastFrameAtMillis = System.currentTimeMillis()
-        val width = frame.rotatedWidth
-        val height = frame.rotatedHeight
-        if (width > 0 && height > 0 && (width != lastVideoWidth || height != lastVideoHeight)) {
-            lastVideoWidth = width
-            lastVideoHeight = height
-            _events.tryEmit(Event.VideoSizeChanged(width, height))
-        }
-    }
-
+    private var isIceConnected = false
+    private var isPrimaryControlChannelOpen = false
+    private var hasVideoFrame = false
+    private var hasEmittedConnected = false
     init {
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context)
@@ -134,15 +132,19 @@ class WebRtcManager(
 
     fun releaseRenderer(renderer: SurfaceViewRenderer) {
         remoteVideoTrack?.removeSink(renderer)
-        remoteVideoTrack?.removeSink(frameSizeSink)
+        frameSizeSink?.let { remoteVideoTrack?.removeSink(it) }
         if (this.renderer === renderer) {
             this.renderer = null
         }
         renderer.release()
     }
 
-    fun createPeerConnection() {
+    fun createPeerConnection(): Int {
+        isDisconnecting = true
+        closePeerConnection()
         isDisconnecting = false
+        val generation = ++connectionGeneration
+        frameSizeSink = createFrameSizeSink(generation)
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
@@ -150,12 +152,21 @@ class WebRtcManager(
         peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onSignalingChange(newState: PeerConnection.SignalingState) = Unit
             override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
+                if (!isCurrentGeneration(generation)) {
+                    return
+                }
                 when (newState) {
                     PeerConnection.IceConnectionState.CONNECTED,
-                    PeerConnection.IceConnectionState.COMPLETED -> _events.tryEmit(Event.Connected)
+                    PeerConnection.IceConnectionState.COMPLETED -> {
+                        isIceConnected = true
+                        emitConnectedIfReady(generation)
+                    }
                     PeerConnection.IceConnectionState.DISCONNECTED,
                     PeerConnection.IceConnectionState.CLOSED,
-                    PeerConnection.IceConnectionState.FAILED -> _events.tryEmit(Event.Disconnected)
+                    PeerConnection.IceConnectionState.FAILED -> {
+                        resetConnectionReadyState()
+                        _events.tryEmit(Event.Disconnected(generation))
+                    }
                     else -> Unit
                 }
             }
@@ -163,6 +174,9 @@ class WebRtcManager(
             override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
             override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) = Unit
             override fun onIceCandidate(candidate: IceCandidate) {
+                if (!isCurrentGeneration(generation)) {
+                    return
+                }
                 signalClient.sendCandidate(
                     RtcCandidateMessage(
                         candidate = candidate.sdp,
@@ -179,15 +193,15 @@ class WebRtcManager(
                 when (channel.label()) {
                     POINTER_MOVE_CHANNEL_LABEL -> {
                         pointerMoveChannel = channel
-                        observeDataChannel(channel)
+                        observeDataChannel(channel, generation)
                     }
                     META_CONTROL_CHANNEL_LABEL -> {
                         metaControlChannel = channel
-                        observeDataChannel(channel)
+                        observeDataChannel(channel, generation)
                     }
                     else -> {
                         dataChannel = channel
-                        observeDataChannel(channel)
+                        observeDataChannel(channel, generation)
                     }
                 }
             }
@@ -196,6 +210,9 @@ class WebRtcManager(
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) = Unit
 
             override fun onTrack(transceiver: RtpTransceiver) {
+                if (!isCurrentGeneration(generation)) {
+                    return
+                }
                 when (val track = transceiver.receiver.track()) {
                     is VideoTrack -> {
                         remoteVideoTrack?.removeSink(frameSizeSink)
@@ -210,15 +227,16 @@ class WebRtcManager(
 
         peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, recvOnlyInit())
         peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnlyInit())
-        dataChannel = peerConnection?.createDataChannel(CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also(::observeDataChannel)
-        metaControlChannel = peerConnection?.createDataChannel(META_CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also(::observeDataChannel)
+        dataChannel = peerConnection?.createDataChannel(CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
+        metaControlChannel = peerConnection?.createDataChannel(META_CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
         pointerMoveChannel = peerConnection?.createDataChannel(
             POINTER_MOVE_CHANNEL_LABEL,
             DataChannel.Init().apply {
                 ordered = false
                 maxRetransmits = 0
             }
-        )?.also(::observeDataChannel)
+        )?.also { observeDataChannel(it, generation) }
+        return generation
     }
 
     fun bindRemoteVideo(renderer: SurfaceViewRenderer) {
@@ -226,14 +244,14 @@ class WebRtcManager(
         bindTrackToRenderer()
     }
 
-    fun createOffer() {
-        createOfferInternal()
+    fun createOffer(generation: Int = connectionGeneration) {
+        createOfferInternal(generation)
     }
 
-    fun restartIce() {
+    fun restartIce(generation: Int = connectionGeneration) {
         val connection = peerConnection ?: return
         connection.restartIce()
-        createOfferInternal()
+        createOfferInternal(generation)
     }
 
     fun isPeerConnected(): Boolean {
@@ -249,12 +267,18 @@ class WebRtcManager(
         return System.currentTimeMillis() - last <= withinMs
     }
 
-    private fun createOfferInternal() {
+    private fun createOfferInternal(generation: Int) {
         val connection = peerConnection ?: return
         connection.createOffer(object : SdpObserver {
             override fun onCreateSuccess(description: SessionDescription) {
+                if (!isCurrentConnection(connection, generation)) {
+                    return
+                }
                 connection.setLocalDescription(object : SdpObserver {
                     override fun onSetSuccess() {
+                        if (!isCurrentConnection(connection, generation)) {
+                            return
+                        }
                         signalClient.sendOffer(
                             RtcOfferMessage(
                                 type = description.type.canonicalForm(),
@@ -264,7 +288,10 @@ class WebRtcManager(
                     }
 
                     override fun onSetFailure(error: String) {
-                        _events.tryEmit(Event.Error(error))
+                        if (!isCurrentConnection(connection, generation)) {
+                            return
+                        }
+                        _events.tryEmit(Event.Error(generation, error))
                     }
 
                     override fun onCreateSuccess(description: SessionDescription) = Unit
@@ -273,7 +300,10 @@ class WebRtcManager(
             }
 
             override fun onCreateFailure(error: String) {
-                _events.tryEmit(Event.Error(error))
+                if (!isCurrentConnection(connection, generation)) {
+                    return
+                }
+                _events.tryEmit(Event.Error(generation, error))
             }
 
             override fun onSetSuccess() = Unit
@@ -281,17 +311,21 @@ class WebRtcManager(
         }, MediaConstraints())
     }
 
-    fun setRemoteAnswer(type: String, sdp: String) {
+    fun setRemoteAnswer(type: String, sdp: String, generation: Int = connectionGeneration) {
         val connection = peerConnection ?: return
         val description = SessionDescription(
             if (type.equals("answer", ignoreCase = true)) SessionDescription.Type.ANSWER else SessionDescription.Type.OFFER,
             sdp
         )
-        connection.setRemoteDescription(noopSdpObserver(), description)
+        connection.setRemoteDescription(noopSdpObserver(connection, generation), description)
     }
 
-    fun addRemoteCandidate(candidate: RtcCandidateMessage) {
-        peerConnection?.addIceCandidate(
+    fun addRemoteCandidate(candidate: RtcCandidateMessage, generation: Int = connectionGeneration) {
+        val connection = peerConnection ?: return
+        if (!isCurrentConnection(connection, generation)) {
+            return
+        }
+        connection.addIceCandidate(
             IceCandidate(candidate.sdpMid, candidate.sdpMLineIndex ?: 0, candidate.candidate)
         )
     }
@@ -336,24 +370,8 @@ class WebRtcManager(
 
     fun disconnect() {
         isDisconnecting = true
-        remoteAudioTrack?.setEnabled(false)
-        remoteVideoTrack?.setEnabled(false)
-        dataChannel?.close()
-        metaControlChannel?.close()
-        pointerMoveChannel?.close()
-        dataChannel = null
-        metaControlChannel = null
-        pointerMoveChannel = null
-        peerConnection?.close()
-        peerConnection?.dispose()
-        peerConnection = null
-        remoteVideoTrack?.removeSink(frameSizeSink)
-        renderer?.let { remoteVideoTrack?.removeSink(it) }
-        remoteVideoTrack = null
-        remoteAudioTrack = null
-        lastVideoWidth = 0
-        lastVideoHeight = 0
-        lastFrameAtMillis = 0L
+        connectionGeneration += 1
+        closePeerConnection()
         signalClient.disconnect()
         isDisconnecting = false
     }
@@ -374,7 +392,7 @@ class WebRtcManager(
     }
 
     private fun sendPointerMove(message: ByteArray): Boolean {
-        return sendBinary(selectPointerMoveChannel(), message, reportFailure = false)
+        return sendBinary(selectPointerMoveSendChannel(), message, reportFailure = false)
     }
 
     private fun sendBinary(
@@ -414,7 +432,15 @@ class WebRtcManager(
         }
     }
 
-    private fun selectPointerMoveChannel(): DataChannel? {
+    private fun selectPointerMoveSendChannel(): DataChannel? {
+        val dedicatedPointerMoveChannel = pointerMoveChannel
+        if (dedicatedPointerMoveChannel != null) {
+            return if (dedicatedPointerMoveChannel.state() == DataChannel.State.OPEN) dedicatedPointerMoveChannel else null
+        }
+        return if (dataChannel?.state() == DataChannel.State.OPEN) dataChannel else null
+    }
+
+    private fun selectHighFrequencyControlChannel(): DataChannel? {
         return when {
             pointerMoveChannel?.state() == DataChannel.State.OPEN -> pointerMoveChannel
             dataChannel?.state() == DataChannel.State.OPEN -> dataChannel
@@ -423,7 +449,7 @@ class WebRtcManager(
     }
 
     fun getPointerMoveBufferedAmount(): Long {
-        return selectPointerMoveChannel()?.bufferedAmount() ?: 0L
+        return selectHighFrequencyControlChannel()?.bufferedAmount() ?: 0L
     }
 
     private fun recvOnlyInit(): RtpTransceiver.RtpTransceiverInit {
@@ -433,21 +459,76 @@ class WebRtcManager(
     private fun bindTrackToRenderer() {
         val track = remoteVideoTrack ?: return
         val target = renderer
-        track.removeSink(frameSizeSink)
+        val sink = frameSizeSink
+        if (sink != null) {
+            track.removeSink(sink)
+        }
         if (target != null) {
             track.removeSink(target)
         }
-        track.addSink(frameSizeSink)
+        if (sink != null) {
+            track.addSink(sink)
+        }
         if (target != null) {
             track.addSink(target)
         }
     }
 
-    private fun observeDataChannel(channel: DataChannel) {
+    private fun createFrameSizeSink(generation: Int): VideoSink {
+        return VideoSink { frame: VideoFrame ->
+            if (!isCurrentGeneration(generation)) {
+                return@VideoSink
+            }
+            lastFrameAtMillis = System.currentTimeMillis()
+            val width = frame.rotatedWidth
+            val height = frame.rotatedHeight
+            if (width > 0 && height > 0 && (width != lastVideoWidth || height != lastVideoHeight)) {
+                lastVideoWidth = width
+                lastVideoHeight = height
+                hasVideoFrame = true
+                _events.tryEmit(Event.VideoSizeChanged(generation, width, height))
+                emitConnectedIfReady(generation)
+            }
+        }
+    }
+
+    private fun closePeerConnection() {
+        resetConnectionReadyState()
+        dataChannel?.unregisterObserver()
+        metaControlChannel?.unregisterObserver()
+        pointerMoveChannel?.unregisterObserver()
+        dataChannel?.close()
+        metaControlChannel?.close()
+        pointerMoveChannel?.close()
+        dataChannel = null
+        metaControlChannel = null
+        pointerMoveChannel = null
+
+        remoteAudioTrack?.setEnabled(false)
+        remoteVideoTrack?.setEnabled(false)
+        frameSizeSink?.let { remoteVideoTrack?.removeSink(it) }
+        renderer?.let { remoteVideoTrack?.removeSink(it) }
+        remoteVideoTrack = null
+        remoteAudioTrack = null
+        frameSizeSink = null
+
+        peerConnection?.close()
+        peerConnection?.dispose()
+        peerConnection = null
+
+        lastVideoWidth = 0
+        lastVideoHeight = 0
+        lastFrameAtMillis = 0L
+    }
+
+    private fun observeDataChannel(channel: DataChannel, generation: Int) {
         channel.registerObserver(object : DataChannel.Observer {
             override fun onBufferedAmountChange(previousAmount: Long) = Unit
 
             override fun onStateChange() {
+                if (!isCurrentGeneration(generation)) {
+                    return
+                }
                 val state = channel.state()
                 if (state == DataChannel.State.CLOSED) {
                     val wasPrimaryControlChannel = channel.label() == CONTROL_CHANNEL_LABEL
@@ -457,8 +538,14 @@ class WebRtcManager(
                         else -> if (dataChannel === channel) dataChannel = null
                     }
                     if (wasPrimaryControlChannel) {
+                        isPrimaryControlChannelOpen = false
+                        hasEmittedConnected = false
                         reportControlChannelIssue("控制通道断开")
                     }
+                }
+                if (state == DataChannel.State.OPEN && channel.label() == CONTROL_CHANNEL_LABEL) {
+                    isPrimaryControlChannelOpen = true
+                    emitConnectedIfReady(generation)
                 }
                 if (state == DataChannel.State.OPEN && lastVideoWidth > 0 && lastVideoHeight > 0) {
                     sendVideoReset(lastVideoWidth, lastVideoHeight, "channel-open")
@@ -469,6 +556,31 @@ class WebRtcManager(
         })
     }
 
+    private fun isCurrentGeneration(generation: Int): Boolean {
+        return generation == connectionGeneration
+    }
+
+    private fun isCurrentConnection(connection: PeerConnection, generation: Int): Boolean {
+        return isCurrentGeneration(generation) && peerConnection === connection
+    }
+
+    private fun resetConnectionReadyState() {
+        isIceConnected = false
+        isPrimaryControlChannelOpen = false
+        hasVideoFrame = false
+        hasEmittedConnected = false
+    }
+
+    private fun emitConnectedIfReady(generation: Int) {
+        if (hasEmittedConnected) {
+            return
+        }
+        if (isCurrentGeneration(generation) && isIceConnected && isPrimaryControlChannelOpen && hasVideoFrame) {
+            hasEmittedConnected = true
+            _events.tryEmit(Event.Connected(generation))
+        }
+    }
+
     private fun reportControlChannelIssue(message: String) {
         if (isDisconnecting) {
             return
@@ -476,7 +588,7 @@ class WebRtcManager(
         if (peerConnection?.connectionState() == PeerConnection.PeerConnectionState.CLOSED) {
             return
         }
-        _events.tryEmit(Event.Error(message))
+        _events.tryEmit(Event.Error(connectionGeneration, message))
     }
 
     private fun mapAndroidCommandToKeycode(action: String): Int? {
@@ -559,12 +671,15 @@ class WebRtcManager(
         return buffer.array()
     }
 
-    private fun noopSdpObserver() = object : SdpObserver {
+    private fun noopSdpObserver(connection: PeerConnection, generation: Int) = object : SdpObserver {
         override fun onCreateSuccess(description: SessionDescription) = Unit
         override fun onSetSuccess() = Unit
         override fun onCreateFailure(error: String) = Unit
         override fun onSetFailure(error: String) {
-            _events.tryEmit(Event.Error(error))
+            if (!isCurrentConnection(connection, generation)) {
+                return
+            }
+            _events.tryEmit(Event.Error(generation, error))
         }
     }
 }

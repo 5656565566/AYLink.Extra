@@ -14,7 +14,8 @@ sealed interface Screen {
         val device: Device,
         val appPackageName: String? = null,
         val appDisplayName: String? = null,
-        val newDisplay: Boolean = false
+        val newDisplay: Boolean = false,
+        val instanceId: Long = 0
     ) : Screen
     data class AppManager(val device: Device) : Screen
     data class FileManager(val device: Device) : Screen

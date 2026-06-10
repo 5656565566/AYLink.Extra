@@ -82,6 +82,7 @@ internal class RemoteTouchPointerState {
     fun clear() {
         activePointers.clear()
         primarySourcePointerId = null
+        nextScrcpyPointerId = 0
     }
 
     private fun releasePointer(
@@ -108,10 +109,10 @@ internal class RemoteTouchPointerState {
 
         val pointers = activePointers.values.toList()
         activePointers.clear()
-        primarySourcePointerId = null
         pointers.forEach { pointer ->
             emit(pointer.toEvent(phase, pointer.lastPoint))
         }
+        primarySourcePointerId = null
     }
 
     private fun ActivePointer.toEvent(phase: String, point: Offset): RemoteTouchPointerEvent {

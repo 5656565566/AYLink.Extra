@@ -2094,8 +2094,8 @@ export default defineComponent({
         }
 
         status.value = t('Screencast.StatusConnected', '已连接')
-      } catch (error: any) {
-        if (error.name === 'AbortError') {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
           console.log('Play request aborted due to new load, ignoring.');
         } else {
           console.warn('Media play failed:', error);

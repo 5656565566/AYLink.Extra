@@ -62,7 +62,7 @@ vi.mock('../utils/api', () => ({
 }));
 
 vi.mock('../features/apps/useAppManagerTabs', () => ({
-  useAppManagerTabs: (_getTitle: () => string, _onTabChanged: () => Promise<void>) => ({
+  useAppManagerTabs: () => ({
     route: ref({ name: 'apps', query: {} }),
     router: { replace: vi.fn(), push: vi.fn() },
     appTabs: appTabsRef,

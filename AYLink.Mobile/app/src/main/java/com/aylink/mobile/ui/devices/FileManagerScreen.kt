@@ -167,7 +167,7 @@ fun FileManagerScreen(
         }
 
         dialogState.selectedFile?.takeIf { dialogState.isActionMenuOpen }?.let { file ->
-            val fullPath = listState.currentPath + file.name + (if (file.isDirectory) "/" else "")
+            val fullPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
             
             AyDialog(
                 title = "操作",
@@ -243,7 +243,7 @@ fun FileManagerScreen(
         }
 
         dialogState.selectedFile?.takeIf { dialogState.isRenameDialogOpen }?.let { file ->
-            val oldPath = listState.currentPath + file.name + (if (file.isDirectory) "/" else "")
+            val oldPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
 
             AyDialog(
                 title = "重命名",

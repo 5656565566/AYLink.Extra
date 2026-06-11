@@ -338,7 +338,7 @@ private class TermuxTerminalBridge(
 
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, currentSession: TerminalSession): Boolean {
         val text = if (ctrlDown && codePoint in 64..95) {
-            ((codePoint - 64).toChar()).toString()
+            (codePoint - 64).toChar().toString()
         } else {
             String(Character.toChars(codePoint))
         }

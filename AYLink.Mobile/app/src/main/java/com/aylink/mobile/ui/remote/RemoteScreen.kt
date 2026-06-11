@@ -152,7 +152,7 @@ fun RemoteScreen(
         if (viewportArea <= 0f) {
             1f
         } else {
-            ((videoBounds.width * videoBounds.height) / viewportArea).coerceIn(0f, 1f)
+            (videoBounds.width * videoBounds.height / viewportArea).coerceIn(0f, 1f)
         }
     }
     val desiredScreenOrientation = remember(visibleViewportSize, viewportState.videoSize, videoOccupancyRatio) {
@@ -519,7 +519,7 @@ private fun RemoteFloatingControl(
                             }
                         },
                         onDragEnd = {
-                            isFabDockedRight = fabOffset.x + (fabSizePx / 2f) >= (viewportSize.width / 2f)
+                            isFabDockedRight = fabOffset.x + fabSizePx / 2f >= viewportSize.width / 2f
                             dockFab(collapsed = true)
                         }
                     ) { change, dragAmount ->

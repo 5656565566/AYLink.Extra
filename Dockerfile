@@ -46,7 +46,7 @@ RUN cd AYLink.Agent && \
 # =============================================================================
 # Runtime Environment
 # =============================================================================
-FROM alpine:latest
+FROM alpine:3.22
 
 # 设置时区和安装基础依赖 包括 adb (android-tools)
 RUN apk add --no-cache tzdata ca-certificates android-tools

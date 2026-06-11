@@ -17,6 +17,15 @@ interface UseCastDeviceContextOptions {
   upsertTab: (tab: CastTab) => void;
 }
 
+interface DeviceListItem {
+  Id?: string | number;
+  id?: string | number;
+  Name?: string;
+  name?: string;
+  Serial?: string;
+  serial?: string;
+}
+
 export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
   const {
     deviceId,
@@ -53,7 +62,7 @@ export function useCastDeviceContext(options: UseCastDeviceContextOptions) {
 
       const devices = await response.json();
       const target = Array.isArray(devices)
-        ? devices.find((item: any) => String(item.Id ?? item.id) === normalizedDeviceId)
+        ? (devices as DeviceListItem[]).find((item) => String(item.Id ?? item.id) === normalizedDeviceId)
         : null;
       selectedDeviceName.value = target?.Name ?? target?.name ?? target?.Serial ?? target?.serial ?? (getDefaultDeviceName ? getDefaultDeviceName() : '设备投屏');
       if (activeTab.value) {

@@ -526,14 +526,14 @@
   grid-template-rows: 1fr;
 }
 
-.group-management-list {
+.group-management-section__body .group-management-list {
   overflow: hidden;
   padding: 0 16px;
   transition: padding 0.25s ease;
 }
 
 .group-management-section__body.expanded .group-management-list {
-  padding: 16px 16px 16px;
+  padding: 16px;
 }
 
 .group-card {

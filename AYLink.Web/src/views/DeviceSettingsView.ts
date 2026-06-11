@@ -63,9 +63,39 @@ export default defineComponent({
       CodecOptions: ''    
     });
 
+    type DeviceSettings = ReturnType<typeof createDefaultSettings>;
+    type BooleanSettingKey = {
+      [Key in keyof DeviceSettings]: DeviceSettings[Key] extends boolean ? Key : never;
+    }[keyof DeviceSettings];
+
+    const booleanSettingKeys = new Set<keyof DeviceSettings>([
+      'Video',
+      'Audio',
+      'Control',
+      'StayAwake',
+      'ShowTouches',
+      'PowerOn',
+      'PowerOffOnClose',
+      'HidKeyboard',
+      'HidMouse',
+      'CameraHighSpeed',
+      'AudioDup',
+      'VdDestroyContent',
+      'VdSystemDecorations',
+      'FlexDisplay'
+    ]);
+
+    const isBooleanSettingKey = (key: keyof DeviceSettings): key is BooleanSettingKey => booleanSettingKeys.has(key);
+
     const settings = reactive(createDefaultSettings());
 
     let initialSettingsString = '';
+
+    interface DeviceListItem {
+      Id?: string | number;
+      Name?: string;
+      Serial?: string;
+    }
 
     const normalizeNullableInteger = (value: unknown): number | null => {    
       if (value == null || value === '') {    
@@ -162,10 +192,10 @@ export default defineComponent({
       }    
     };
 
-    const toggleSetting = (key: keyof typeof settings) => {    
-      if (typeof settings[key] === 'boolean') {    
-        (settings as any)[key] = !settings[key];    
-      }    
+    const toggleSetting = (key: keyof typeof settings) => {
+      if (isBooleanSettingKey(key)) {
+        settings[key] = !settings[key];
+      }
     };
 
     const applySettings = (payload?: Partial<typeof settings> | null) => {    
@@ -214,8 +244,8 @@ export default defineComponent({
       try {    
         const res = await apiFetch('/api/devices');    
         if (res.ok) {    
-          const devices = await res.json();    
-          const target = devices.find((d: any) => String(d.Id) === currentDeviceId);    
+          const devices = await res.json() as DeviceListItem[];
+          const target = devices.find((d) => String(d.Id) === currentDeviceId);
           if (target) {    
             deviceName.value = target.Name || target.Serial || t('DeviceSettings.Title', '设备设置');
           }    

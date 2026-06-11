@@ -433,8 +433,7 @@ class RemoteViewModel(
         }
     }
 
-    fun onAppBackgrounded() {
-    }
+    fun onAppBackgrounded() = Unit
 
     private fun handlePointer(payload: PointerControlMessage) {
         when (payload.phase.lowercase()) {
@@ -592,19 +591,19 @@ class RemoteViewModel(
         videoRecoveryJob?.cancel()
         videoRecoveryJob = viewModelScope.launch {
             delay(VIDEO_RECOVERY_TIMEOUT_MS)
-            while (isActive && !manualDisconnect) {
-                val hasVideo = _uiState.value.videoSize != IntSize.Zero
-                val hasRecentFrame = webRtcManager.hasRecentFrame(VIDEO_RECOVERY_TIMEOUT_MS)
-                if (webRtcManager.isPeerConnected() && hasVideo && hasRecentFrame) {
-                    delay(VIDEO_RECOVERY_POLL_INTERVAL_MS)
-                    continue
-                }
+            if (!isActive || manualDisconnect) {
+                return@launch
+            }
 
-                _uiState.update { it.copy(status = "画面恢复中...") }
-                if (tryIceRecovery("watchdog_$reason").not()) {
-                    scheduleReconnectNow()
-                }
-                break
+            val hasVideo = _uiState.value.videoSize != IntSize.Zero
+            val hasRecentFrame = webRtcManager.hasRecentFrame(VIDEO_RECOVERY_TIMEOUT_MS)
+            if (webRtcManager.isPeerConnected() && hasVideo && hasRecentFrame) {
+                return@launch
+            }
+
+            _uiState.update { it.copy(status = "画面恢复中...") }
+            if (tryIceRecovery("watchdog_$reason").not()) {
+                scheduleReconnectNow()
             }
         }
     }

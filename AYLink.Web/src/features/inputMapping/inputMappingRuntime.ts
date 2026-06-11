@@ -461,7 +461,8 @@ export function createInputMappingRuntime(profile: InputMappingProfile | null = 
     return createInputMappingResult(commands);
   }
 
-  const releaseAll = (_reason: 'blur' | 'disconnect' | 'profile-change') => {
+  const releaseAll = (reason: 'blur' | 'disconnect' | 'profile-change') => {
+    void reason;
     const commands: InputMappingCommand[] = [];
 
     for (const active of activeTouches.values()) {

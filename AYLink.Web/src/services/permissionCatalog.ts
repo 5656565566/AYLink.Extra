@@ -1,4 +1,4 @@
-type TranslateFn = (key: string, fallback?: string, ...args: any[]) => string;
+type TranslateFn = (key: string, fallback?: string, ...args: Array<string | number>) => string;
 
 const permissionKeyMap: Record<string, string> = {
   'dashboard.view': 'PermissionCatalog.dashboard.view',

@@ -201,14 +201,14 @@ func TestSaveWebRtcNetworkSettingsNormalizesAndPersists(t *testing.T) {
 }
 
 func TestNormalizeOptionalPortRange(t *testing.T) {
-	min, max := normalizeOptionalPortRange(intPtr(1000), intPtr(2000))
-	if min == nil || max == nil || *min != 1000 || *max != 2000 {
-		t.Fatalf("expected valid port range, got %+v %+v", min, max)
+	portMin, portMax := normalizeOptionalPortRange(intPtr(1000), intPtr(2000))
+	if portMin == nil || portMax == nil || *portMin != 1000 || *portMax != 2000 {
+		t.Fatalf("expected valid port range, got %+v %+v", portMin, portMax)
 	}
 
-	min, max = normalizeOptionalPortRange(intPtr(2000), intPtr(1000))
-	if min != nil || max != nil {
-		t.Fatalf("expected invalid descending range to normalize to nil, got %+v %+v", min, max)
+	portMin, portMax = normalizeOptionalPortRange(intPtr(2000), intPtr(1000))
+	if portMin != nil || portMax != nil {
+		t.Fatalf("expected invalid descending range to normalize to nil, got %+v %+v", portMin, portMax)
 	}
 }
 

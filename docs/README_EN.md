@@ -1,6 +1,7 @@
 ﻿# AYLink
 
 [![License](https://img.shields.io/badge/License-Apache2.0-blue.svg)](../LICENSE)
+[![CodeFactor](https://www.codefactor.io/repository/github/5656565566/aylink.extra/badge)](https://www.codefactor.io/repository/github/5656565566/aylink.extra)
 ![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vue.js&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-15-3DDC84.svg?logo=android&logoColor=white)
@@ -36,6 +37,8 @@
 | ![Main View](screenshot/1.png) | ![Casting View](screenshot/2.png) |
 | **Main Settings** | **Permission Settings** |
 | ![Main Settings](screenshot/3.png) | ![Permission Settings](screenshot/4.png) |
+
+- Deploy and try it out to experience more features
 
 ## 🚀 Quick Start
 
@@ -182,16 +185,11 @@ go build ./...
 make agent
 ```
 
-This generates Agent binaries for:
+This generates Agent executables for:
 
 - Windows `amd64 / arm64`
-- Linux `amd64 / arm64`
+- Linux `amd64 / arm64 / loong64 ...`
 - macOS `amd64 / arm64`
-
-Note:
-
-- Other platforms can also be built manually if needed
-- CGO is not used here
 
 ## 📦 Dependencies and Credits
 

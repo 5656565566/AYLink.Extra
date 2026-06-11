@@ -1,6 +1,7 @@
 # AYLink (安易连)
 
 [![License](https://img.shields.io/badge/License-Apache2.0-blue.svg)](../LICENSE)
+[![CodeFactor](https://www.codefactor.io/repository/github/5656565566/aylink.extra/badge)](https://www.codefactor.io/repository/github/5656565566/aylink.extra)
 ![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vue.js&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-15-3DDC84.svg?logo=android&logoColor=white)
@@ -36,6 +37,8 @@
 | ![主界面](screenshot/1.png) | ![投屏窗口](screenshot/2.png) |
 | **主要设置** | **权限设置** |
 | ![主要设置](screenshot/3.png) | ![权限设置](screenshot/4.png) |
+
+- 更多功能请部署后体验
 
 ## 🚀 快速开始
 
@@ -188,12 +191,10 @@ make agent
 会生成：
 
 - Windows `amd64 / arm64`
-- Linux `amd64 / arm64`
+- Linux `amd64 / arm64 / loong64 ...`
 - macOS `amd64 / arm64`
 
-的 Agent 可执行文件。
-
-- 注: 如果其他平台可以自行编译 未使用 CGO
+平台的 Agent 可执行文件。
 
 ## 📦 依赖与致谢
 

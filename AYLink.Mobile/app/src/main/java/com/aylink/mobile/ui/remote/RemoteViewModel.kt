@@ -92,6 +92,12 @@ sealed interface RemoteIntent {
     data object DismissAppError : RemoteIntent
 }
 
+private enum class VideoRecoveryStage {
+    Monitoring,
+    KeyFrameRequested,
+    IceRestartRequested
+}
+
 class RemoteViewModel(
     appContext: Context,
     val device: Device,
@@ -112,8 +118,14 @@ class RemoteViewModel(
         private const val WEAK_NETWORK_POINTER_MOVE_BUFFER_LIMIT_BYTES = POINTER_MOVE_BUFFER_LIMIT_BYTES / 2
         private const val POINTER_MOVE_BUFFER_PRESSURE_MEDIUM_RATIO = 0.35
         private const val POINTER_MOVE_BUFFER_PRESSURE_HIGH_RATIO = 0.75
-        private const val VIDEO_RECOVERY_TIMEOUT_MS = 8_000L
         private const val VIDEO_RECOVERY_POLL_INTERVAL_MS = 2_000L
+        private const val VIDEO_STALL_CONFIRMATION_COUNT = 2
+        private const val VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS = 3_000L
+        private const val VIDEO_ICE_RECOVERY_OBSERVATION_MS = 5_000L
+        private const val VIDEO_ACTIVITY_RECOVERY_WINDOW_MS = 15_000L
+        private const val VIDEO_IDLE_STALL_CONFIRMATION_MS = 30_000L
+        private const val ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS = 300L
+        private const val ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX = 16
         private const val MIN_NEW_DISPLAY_DIMENSION = 240
         private const val MIN_NEW_DISPLAY_LONG_EDGE = 1280
         private const val MAX_NEW_DISPLAY_LONG_EDGE = 1920
@@ -146,6 +158,7 @@ class RemoteViewModel(
     private var pointerSamplingJob: Job? = null
     private var pointerReleaseRetryJob: Job? = null
     private var videoRecoveryJob: Job? = null
+    private var adaptiveDisplayResizeJob: Job? = null
     private val sampledPointerMoves = linkedMapOf<Int, PointerControlMessage>()
     private val pendingPointerReleases = linkedMapOf<Int, PointerControlMessage>()
     private var currentAppPackage: String? = null
@@ -173,6 +186,10 @@ class RemoteViewModel(
     private var activeWebRtcGeneration = 0
     private var connectionRequestSequence = 0
     private var activeConnectionRequestId = 0
+    private var videoRecoveryStage = VideoRecoveryStage.Monitoring
+    private var lastVideoHealthSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null
+    private var stalledVideoObservationCount = 0
+    private var lastVideoRecoveryActivityAtMillis = 0L
 
     init {
         viewModelScope.launch {
@@ -251,7 +268,6 @@ class RemoteViewModel(
                             preferredDisplayAspectSize = videoSize
                             _uiState.update { it.copy(videoSize = videoSize) }
                             requestAdaptiveDisplayResize()
-                            webRtcManager.sendVideoReset(event.width, event.height, "first-frame")
                             startVideoRecoveryWatchdog("first-frame")
                         }
                     }
@@ -268,9 +284,18 @@ class RemoteViewModel(
             RemoteIntent.LoadApps -> loadApps()
             is RemoteIntent.ReconnectToApp -> reconnectToApp(intent.app)
             RemoteIntent.ReconnectToDevice -> reconnectToDevice()
-            is RemoteIntent.SendPointer -> handlePointer(intent.payload)
-            is RemoteIntent.SendKey -> webRtcManager.sendKeyMessage(intent.action)
-            is RemoteIntent.SendDisplayResize -> webRtcManager.sendDisplayResize(intent.width, intent.height)
+            is RemoteIntent.SendPointer -> {
+                markVideoRecoveryActivity()
+                handlePointer(intent.payload)
+            }
+            is RemoteIntent.SendKey -> {
+                markVideoRecoveryActivity()
+                webRtcManager.sendKeyMessage(intent.action)
+            }
+            is RemoteIntent.SendDisplayResize -> {
+                markVideoRecoveryActivity()
+                webRtcManager.sendDisplayResize(intent.width, intent.height)
+            }
             is RemoteIntent.SetControlDialogOpen -> _uiState.update { it.copy(isControlDialogOpen = intent.isOpen) }
             is RemoteIntent.SetAppSelectDialogOpen -> _uiState.update { it.copy(isAppSelectDialogOpen = intent.isOpen) }
             is RemoteIntent.SetFillMode -> _uiState.update { it.copy(fillMode = intent.fillMode) }
@@ -310,11 +335,14 @@ class RemoteViewModel(
         _uiState.update {
             it.copy(
                 isAppProjectionMode = appPackage.isNullOrBlank().not(),
-                isNewDisplayMode = newDisplay
+                isNewDisplayMode = newDisplay,
+                fillMode = false
             )
         }
         lastReportedDisplaySize = null
         lastRequestedDisplaySize = null
+        adaptiveDisplayResizeJob?.cancel()
+        adaptiveDisplayResizeJob = null
         lastObservedVideoSize = IntSize.Zero
         preferredDisplayAspectSize = IntSize.Zero
         manualDisconnect = false
@@ -424,6 +452,7 @@ class RemoteViewModel(
     }
 
     fun onAppForegrounded() {
+        markVideoRecoveryActivity()
         if (!manualDisconnect && localSettings.value.resumeLastRemote && !webRtcManager.isPeerConnected()) {
             if (tryIceRecovery("foreground_resume").not()) {
                 scheduleReconnectNow()
@@ -588,22 +617,15 @@ class RemoteViewModel(
         if (manualDisconnect) {
             return
         }
+        if (videoRecoveryJob?.isActive == true) {
+            return
+        }
+        resetVideoRecoveryState()
         videoRecoveryJob?.cancel()
         videoRecoveryJob = viewModelScope.launch {
-            delay(VIDEO_RECOVERY_TIMEOUT_MS)
-            if (!isActive || manualDisconnect) {
-                return@launch
-            }
-
-            val hasVideo = _uiState.value.videoSize != IntSize.Zero
-            val hasRecentFrame = webRtcManager.hasRecentFrame(VIDEO_RECOVERY_TIMEOUT_MS)
-            if (webRtcManager.isPeerConnected() && hasVideo && hasRecentFrame) {
-                return@launch
-            }
-
-            _uiState.update { it.copy(status = "画面恢复中...") }
-            if (tryIceRecovery("watchdog_$reason").not()) {
-                scheduleReconnectNow()
+            while (isActive && !manualDisconnect) {
+                delay(VIDEO_RECOVERY_POLL_INTERVAL_MS)
+                observeVideoHealth("watchdog_$reason")
             }
         }
     }
@@ -611,6 +633,7 @@ class RemoteViewModel(
     private fun stopVideoRecoveryWatchdog() {
         videoRecoveryJob?.cancel()
         videoRecoveryJob = null
+        resetVideoRecoveryState()
     }
 
     private fun tryIceRecovery(reason: String): Boolean {
@@ -619,9 +642,124 @@ class RemoteViewModel(
         }
         return runCatching {
             _uiState.update { it.copy(status = "网络波动，正在尝试恢复连接...") }
+            videoRecoveryStage = VideoRecoveryStage.IceRestartRequested
+            stalledVideoObservationCount = 0
             webRtcManager.restartIce(activeWebRtcGeneration)
-            startVideoRecoveryWatchdog("ice_restart_$reason")
         }.isSuccess
+    }
+
+    private fun tryVideoKeyFrameRecovery(reason: String): Boolean {
+        if (!signalClient.isOpen || manualDisconnect || suppressReconnect) {
+            return false
+        }
+        val requested = webRtcManager.requestVideoKeyFrameReplay(reason)
+        if (!requested) {
+            return false
+        }
+
+        videoRecoveryStage = VideoRecoveryStage.KeyFrameRequested
+        stalledVideoObservationCount = 0
+        return true
+    }
+
+    private fun observeVideoHealth(reason: String) {
+        if (manualDisconnect || suppressReconnect || !autoReconnectEnabled) {
+            return
+        }
+
+        val snapshot = webRtcManager.getVideoFrameHealthSnapshot()
+        if (snapshot.generation != activeWebRtcGeneration) {
+            resetVideoRecoveryState(snapshot)
+            return
+        }
+
+        val previous = lastVideoHealthSnapshot
+        lastVideoHealthSnapshot = snapshot
+
+        val hasVideo = _uiState.value.videoSize != IntSize.Zero && snapshot.hasVideoFrame
+        if (!snapshot.isPeerConnected || !hasVideo) {
+            stalledVideoObservationCount += 1
+            recoverVideoIfConfirmed(reason)
+            return
+        }
+
+        val frameAdvanced = previous == null || previous.generation != snapshot.generation || snapshot.frameCount > previous.frameCount
+        if (frameAdvanced) {
+            resetVideoRecoveryState(snapshot)
+            return
+        }
+
+        stalledVideoObservationCount += 1
+        recoverVideoIfConfirmed(
+            reason = reason,
+            confirmationCount = confirmationCountForCurrentActivity()
+        )
+    }
+
+    private fun recoverVideoIfConfirmed(
+        reason: String,
+        confirmationCount: Int = VIDEO_STALL_CONFIRMATION_COUNT
+    ) {
+        if (stalledVideoObservationCount < confirmationCount) {
+            return
+        }
+
+        when (videoRecoveryStage) {
+            VideoRecoveryStage.Monitoring -> {
+                _uiState.update { it.copy(status = "画面恢复中...") }
+                if (!tryVideoKeyFrameRecovery(reason)) {
+                    if (tryIceRecovery("key_frame_unavailable_$reason").not()) {
+                        scheduleReconnectNow()
+                    }
+                }
+            }
+            VideoRecoveryStage.KeyFrameRequested -> {
+                val observationCount = observationCountFor(VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS)
+                if (stalledVideoObservationCount < observationCount) {
+                    return
+                }
+                if (tryIceRecovery("key_frame_recovery_failed_$reason").not()) {
+                    scheduleReconnectNow()
+                }
+            }
+            VideoRecoveryStage.IceRestartRequested -> {
+                val observationCount = observationCountFor(VIDEO_ICE_RECOVERY_OBSERVATION_MS)
+                if (stalledVideoObservationCount < observationCount) {
+                    return
+                }
+                scheduleReconnectNow()
+            }
+        }
+    }
+
+    private fun resetVideoRecoveryState(snapshot: WebRtcManager.VideoFrameHealthSnapshot? = null) {
+        videoRecoveryStage = VideoRecoveryStage.Monitoring
+        stalledVideoObservationCount = 0
+        lastVideoHealthSnapshot = snapshot
+    }
+
+    private fun observationCountFor(durationMs: Long): Int {
+        return ((durationMs + VIDEO_RECOVERY_POLL_INTERVAL_MS - 1) / VIDEO_RECOVERY_POLL_INTERVAL_MS).toInt().coerceAtLeast(1)
+    }
+
+    private fun markVideoRecoveryActivity() {
+        lastVideoRecoveryActivityAtMillis = System.currentTimeMillis()
+    }
+
+    private fun hasRecentVideoRecoveryActivity(): Boolean {
+        val lastActivity = lastVideoRecoveryActivityAtMillis
+        if (lastActivity <= 0L) {
+            return false
+        }
+        return System.currentTimeMillis() - lastActivity <= VIDEO_ACTIVITY_RECOVERY_WINDOW_MS
+    }
+
+    private fun confirmationCountForCurrentActivity(): Int {
+        return if (hasRecentVideoRecoveryActivity()) {
+            VIDEO_STALL_CONFIRMATION_COUNT
+        } else {
+            observationCountFor(VIDEO_IDLE_STALL_CONFIRMATION_MS)
+        }
     }
 
     private fun scheduleReconnectNow() {
@@ -680,6 +818,8 @@ class RemoteViewModel(
         stopReconnect()
         stopHeartbeat()
         stopVideoRecoveryWatchdog()
+        adaptiveDisplayResizeJob?.cancel()
+        adaptiveDisplayResizeJob = null
         activeWebRtcGeneration = 0
         resetPointerControlState()
     }
@@ -715,12 +855,34 @@ class RemoteViewModel(
         }
 
         val targetSize = buildAdaptiveDisplaySize()
-        if (targetSize.width <= 0 || targetSize.height <= 0 || targetSize == lastReportedDisplaySize) {
+        if (targetSize.width <= 0 || targetSize.height <= 0 || !shouldReportAdaptiveDisplaySize(targetSize)) {
             return
         }
 
-        lastReportedDisplaySize = targetSize
-        webRtcManager.sendDisplayResize(targetSize.width, targetSize.height)
+        adaptiveDisplayResizeJob?.cancel()
+        adaptiveDisplayResizeJob = viewModelScope.launch {
+            delay(ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS)
+            val latestTargetSize = buildAdaptiveDisplaySize()
+            if (latestTargetSize.width <= 0 || latestTargetSize.height <= 0 || !shouldReportAdaptiveDisplaySize(latestTargetSize)) {
+                return@launch
+            }
+
+            lastRequestedDisplaySize = latestTargetSize
+            lastReportedDisplaySize = latestTargetSize
+            webRtcManager.sendDisplayResize(latestTargetSize.width, latestTargetSize.height)
+        }
+    }
+
+    private fun shouldReportAdaptiveDisplaySize(targetSize: IntSize): Boolean {
+        val lastSize = lastReportedDisplaySize ?: lastRequestedDisplaySize ?: return true
+        if (targetSize == lastSize) {
+            return false
+        }
+
+        val sameOrientation = (targetSize.width >= targetSize.height) == (lastSize.width >= lastSize.height)
+        val widthDelta = kotlin.math.abs(targetSize.width - lastSize.width)
+        val heightDelta = kotlin.math.abs(targetSize.height - lastSize.height)
+        return !sameOrientation || widthDelta >= ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX || heightDelta >= ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX
     }
 
     private fun isAppProjectionMode(): Boolean = currentAppPackage.isNullOrBlank().not()

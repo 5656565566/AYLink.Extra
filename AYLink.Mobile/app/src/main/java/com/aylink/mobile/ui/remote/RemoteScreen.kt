@@ -58,11 +58,17 @@ import androidx.lifecycle.LifecycleOwner
 import com.aylink.mobile.data.model.Device
 import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.PointerControlMessage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import android.graphics.Rect as AndroidRect
+
+private const val ORIENTATION_CHANGE_DEBOUNCE_MS = 450L
+private const val ORIENTATION_ASPECT_DEAD_ZONE = 0.08f
+private const val ORIENTATION_OCCUPANCY_THRESHOLD = 0.48f
 
 @Composable
 fun AyDialog(
@@ -185,6 +191,7 @@ fun RemoteScreen(
     }
 
     LaunchedEffect(activity, desiredScreenOrientation) {
+        delay(ORIENTATION_CHANGE_DEBOUNCE_MS)
         val targetOrientation = desiredScreenOrientation ?: ActivityInfo.SCREEN_ORIENTATION_LOCKED
         if (activity?.requestedOrientation != targetOrientation) {
             activity?.requestedOrientation = targetOrientation
@@ -209,8 +216,6 @@ fun RemoteScreen(
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
-
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             activity?.window?.let { window ->
@@ -295,19 +300,22 @@ private fun RemoteVideoSurface(
         }
     }
     val touchPointerState = remember { RemoteTouchPointerState() }
+    val latestPointerDispatch by rememberUpdatedState(
+        newValue = { event: RemoteTouchPointerEvent ->
+            sendPointer(
+                viewModel = viewModel,
+                event = event,
+                viewportSize = viewportSize,
+                videoSize = viewportState.videoSize,
+                fillMode = effectiveFillMode,
+                videoBounds = videoBounds
+            )
+        }
+    )
 
-    DisposableEffect(touchPointerState, viewModel, viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
+    DisposableEffect(touchPointerState, viewModel) {
         onDispose {
-            touchPointerState.cancelActivePointers { event ->
-                sendPointer(
-                    viewModel = viewModel,
-                    event = event,
-                    viewportSize = viewportSize,
-                    videoSize = viewportState.videoSize,
-                    fillMode = effectiveFillMode,
-                    videoBounds = videoBounds
-                )
-            }
+            touchPointerState.cancelActivePointers(latestPointerDispatch)
             touchPointerState.clear()
         }
     }
@@ -352,31 +360,24 @@ private fun RemoteVideoSurface(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
+                .pointerInput(touchPointerState) {
                     awaitEachGesture {
                         val emitPointer: (RemoteTouchPointerEvent) -> Unit = { event ->
-                            sendPointer(
-                                viewModel = viewModel,
-                                event = event,
-                                viewportSize = viewportSize,
-                                videoSize = viewportState.videoSize,
-                                fillMode = effectiveFillMode,
-                                videoBounds = videoBounds
-                            )
+                            latestPointerDispatch(event)
                         }
                         try {
                             val down = awaitFirstDown(requireUnconsumed = false)
-                            touchPointerState.beginGesture(down.id.value.toInt(), down.position, emitPointer)
+                            touchPointerState.beginGesture(down.id.value, down.position, emitPointer)
 
                             do {
                                 val event = awaitPointerEvent(pass = PointerEventPass.Main)
                                 event.changes.forEach { change ->
                                     if (!change.previousPressed && change.pressed) {
-                                        touchPointerState.pointerDown(change.id.value.toInt(), change.position, emitPointer)
+                                        touchPointerState.pointerDown(change.id.value, change.position, emitPointer)
                                     } else if (change.changedToUp()) {
-                                        touchPointerState.pointerUp(change.id.value.toInt(), change.position, emitPointer)
+                                        touchPointerState.pointerUp(change.id.value, change.position, emitPointer)
                                     } else if (change.pressed) {
-                                        touchPointerState.pointerMove(change.id.value.toInt(), change.position, emitPointer)
+                                        touchPointerState.pointerMove(change.id.value, change.position, emitPointer)
                                     }
                                 }
                             } while (event.changes.any { it.pressed })
@@ -789,13 +790,17 @@ private fun resolveDesiredScreenOrientation(
         return null
     }
 
+    if (isAspectNearSquare(videoSize)) {
+        return null
+    }
+
     val viewportLandscape = viewportSize.width >= viewportSize.height
     val videoLandscape = videoSize.width >= videoSize.height
     if (viewportLandscape == videoLandscape) {
         return null
     }
 
-    return if (occupancyRatio <= 0.5f) {
+    return if (occupancyRatio <= ORIENTATION_OCCUPANCY_THRESHOLD) {
         if (videoLandscape) {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         } else {
@@ -808,6 +813,10 @@ private fun resolveDesiredScreenOrientation(
 
 private fun resolveNormalCastScreenOrientation(videoSize: IntSize): Int? {
     if (videoSize.width <= 0 || videoSize.height <= 0) {
+        return null
+    }
+
+    if (isAspectNearSquare(videoSize)) {
         return null
     }
 
@@ -841,6 +850,12 @@ private fun calculateVisibleViewportSize(
     val width = (right - left).toInt().coerceIn(1, fallbackSize.width)
     val height = (bottom - top).toInt().coerceIn(1, fallbackSize.height)
     return IntSize(width, height)
+}
+
+private fun isAspectNearSquare(size: IntSize): Boolean {
+    val longEdge = maxOf(size.width, size.height).toFloat().coerceAtLeast(1f)
+    val shortEdge = minOf(size.width, size.height).toFloat().coerceAtLeast(1f)
+    return abs(longEdge / shortEdge - 1f) <= ORIENTATION_ASPECT_DEAD_ZONE
 }
 
 private data class VideoBounds(

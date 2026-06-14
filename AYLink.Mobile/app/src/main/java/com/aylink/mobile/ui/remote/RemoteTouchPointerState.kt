@@ -10,12 +10,12 @@ internal data class RemoteTouchPointerEvent(
 )
 
 internal class RemoteTouchPointerState {
-    private val activePointers = linkedMapOf<Int, ActivePointer>()
-    private var primarySourcePointerId: Int? = null
+    private val activePointers = linkedMapOf<Long, ActivePointer>()
+    private var primarySourcePointerId: Long? = null
     private var nextScrcpyPointerId = 0
 
     fun beginGesture(
-        sourcePointerId: Int,
+        sourcePointerId: Long,
         point: Offset,
         emit: (RemoteTouchPointerEvent) -> Unit
     ) {
@@ -24,7 +24,7 @@ internal class RemoteTouchPointerState {
     }
 
     fun pointerDown(
-        sourcePointerId: Int,
+        sourcePointerId: Long,
         point: Offset,
         emit: (RemoteTouchPointerEvent) -> Unit
     ) {
@@ -46,7 +46,7 @@ internal class RemoteTouchPointerState {
     }
 
     fun pointerMove(
-        sourcePointerId: Int,
+        sourcePointerId: Long,
         point: Offset,
         emit: (RemoteTouchPointerEvent) -> Unit
     ) {
@@ -60,7 +60,7 @@ internal class RemoteTouchPointerState {
     }
 
     fun pointerUp(
-        sourcePointerId: Int,
+        sourcePointerId: Long,
         point: Offset,
         emit: (RemoteTouchPointerEvent) -> Unit
     ) {
@@ -68,7 +68,7 @@ internal class RemoteTouchPointerState {
     }
 
     fun pointerCancel(
-        sourcePointerId: Int,
+        sourcePointerId: Long,
         point: Offset? = null,
         emit: (RemoteTouchPointerEvent) -> Unit
     ) {
@@ -86,7 +86,7 @@ internal class RemoteTouchPointerState {
     }
 
     private fun releasePointer(
-        sourcePointerId: Int,
+        sourcePointerId: Long,
         phase: String,
         point: Offset?,
         emit: (RemoteTouchPointerEvent) -> Unit
@@ -125,7 +125,7 @@ internal class RemoteTouchPointerState {
     }
 
     private data class ActivePointer(
-        val sourcePointerId: Int,
+        val sourcePointerId: Long,
         val scrcpyPointerId: Int,
         var lastPoint: Offset
     )

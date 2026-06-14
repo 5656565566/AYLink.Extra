@@ -37,14 +37,25 @@ class WebRtcManager(
     private val json: Json,
     private val signalClient: SignalClient
 ) {
+    data class VideoFrameHealthSnapshot(
+        val generation: Int,
+        val frameCount: Long,
+        val lastFrameAtMillis: Long,
+        val width: Int,
+        val height: Int,
+        val isPeerConnected: Boolean,
+        val hasVideoFrame: Boolean
+    )
+
     companion object {
         private const val CONTROL_CHANNEL_LABEL = "control"
         private const val META_CONTROL_CHANNEL_LABEL = "control-meta"
         private const val POINTER_MOVE_CHANNEL_LABEL = "pointer-move"
+        private const val LOCAL_META_CONTROL_PREFIX: Byte = -1
+        private const val LOCAL_META_MSG_VIDEO_KEY_FRAME: Byte = 2
         private const val SCRCPY_MSG_INJECT_KEYCODE: Byte = 0
         private const val SCRCPY_MSG_INJECT_TOUCH_EVENT: Byte = 2
         private const val SCRCPY_MSG_SET_SCREEN_POWER_MODE: Byte = 10
-        private const val SCRCPY_MSG_RESET_VIDEO: Byte = 17
         private const val SCRCPY_MSG_RESIZE_DISPLAY: Byte = 21
 
         private const val SCRCPY_ACTION_DOWN: Byte = 0
@@ -95,6 +106,8 @@ class WebRtcManager(
     private var lastVideoHeight = 0
     @Volatile
     private var lastFrameAtMillis = 0L
+    @Volatile
+    private var videoFrameCount = 0L
     private var isIceConnected = false
     private var isPrimaryControlChannelOpen = false
     private var hasVideoFrame = false
@@ -267,6 +280,18 @@ class WebRtcManager(
         return System.currentTimeMillis() - last <= withinMs
     }
 
+    fun getVideoFrameHealthSnapshot(): VideoFrameHealthSnapshot {
+        return VideoFrameHealthSnapshot(
+            generation = connectionGeneration,
+            frameCount = videoFrameCount,
+            lastFrameAtMillis = lastFrameAtMillis,
+            width = lastVideoWidth,
+            height = lastVideoHeight,
+            isPeerConnected = isPeerConnected(),
+            hasVideoFrame = hasVideoFrame
+        )
+    }
+
     private fun createOfferInternal(generation: Int) {
         val connection = peerConnection ?: return
         connection.createOffer(object : SdpObserver {
@@ -364,8 +389,12 @@ class WebRtcManager(
         sendMetaControl(buildResizeDisplayMessage(width, height))
     }
 
-    fun sendVideoReset(width: Int, height: Int, reason: String) {
-        sendMetaControl(byteArrayOf(SCRCPY_MSG_RESET_VIDEO))
+    fun requestVideoKeyFrameReplay(reason: String): Boolean {
+        return sendBinary(
+            selectDedicatedMetaControlChannel(),
+            byteArrayOf(LOCAL_META_CONTROL_PREFIX, LOCAL_META_MSG_VIDEO_KEY_FRAME),
+            reportFailure = false
+        )
     }
 
     fun disconnect() {
@@ -432,6 +461,10 @@ class WebRtcManager(
         }
     }
 
+    private fun selectDedicatedMetaControlChannel(): DataChannel? {
+        return if (metaControlChannel?.state() == DataChannel.State.OPEN) metaControlChannel else null
+    }
+
     private fun selectPointerMoveSendChannel(): DataChannel? {
         val dedicatedPointerMoveChannel = pointerMoveChannel
         if (dedicatedPointerMoveChannel != null) {
@@ -480,13 +513,18 @@ class WebRtcManager(
                 return@VideoSink
             }
             lastFrameAtMillis = System.currentTimeMillis()
+            videoFrameCount += 1
             val width = frame.rotatedWidth
             val height = frame.rotatedHeight
-            if (width > 0 && height > 0 && (width != lastVideoWidth || height != lastVideoHeight)) {
+            val wasMissingVideoFrame = !hasVideoFrame
+            val sizeChanged = width != lastVideoWidth || height != lastVideoHeight
+            if (width > 0 && height > 0) {
                 lastVideoWidth = width
                 lastVideoHeight = height
                 hasVideoFrame = true
-                _events.tryEmit(Event.VideoSizeChanged(generation, width, height))
+                if (wasMissingVideoFrame || sizeChanged) {
+                    _events.tryEmit(Event.VideoSizeChanged(generation, width, height))
+                }
                 emitConnectedIfReady(generation)
             }
         }
@@ -519,6 +557,7 @@ class WebRtcManager(
         lastVideoWidth = 0
         lastVideoHeight = 0
         lastFrameAtMillis = 0L
+        videoFrameCount = 0L
     }
 
     private fun observeDataChannel(channel: DataChannel, generation: Int) {
@@ -546,9 +585,6 @@ class WebRtcManager(
                 if (state == DataChannel.State.OPEN && channel.label() == CONTROL_CHANNEL_LABEL) {
                     isPrimaryControlChannelOpen = true
                     emitConnectedIfReady(generation)
-                }
-                if (state == DataChannel.State.OPEN && lastVideoWidth > 0 && lastVideoHeight > 0) {
-                    sendVideoReset(lastVideoWidth, lastVideoHeight, "channel-open")
                 }
             }
 

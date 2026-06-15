@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       mobile: ${{ steps.filter.outputs.mobile }}
+      agent_web: ${{ steps.filter.outputs.agent_web }}
 
     steps:
     - name: Checkout code
@@ -29,12 +30,13 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Check AYLink.Mobile changes
+    - name: Check build changes
       id: filter
       run: |
         set -euo pipefail
 
         mobile_changed=false
+        agent_web_changed=false
 
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
@@ -57,10 +59,17 @@ jobs:
           mobile_changed=true
         fi
 
+        if printf '%s\n' "${changed_files}" | grep -Eq '^(AYLink\.Agent/|AYLink\.Web/|Makefile$|Dockerfile\.release$|scripts/download-scrcpy-server\.sh$|\.github/workflows/build\.yml$)'; then
+          agent_web_changed=true
+        fi
+
         echo "mobile=${mobile_changed}" >> "${GITHUB_OUTPUT}"
+        echo "agent_web=${agent_web_changed}" >> "${GITHUB_OUTPUT}"
       shell: bash
 
   build:
+    needs: changes
+    if: needs.changes.outputs.agent_web == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -247,8 +256,8 @@ jobs:
         if-no-files-found: error
 
   docker-build:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [changes, build]
+    if: startsWith(github.ref, 'refs/tags/') && needs.changes.outputs.agent_web == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -350,13 +359,14 @@ jobs:
         path: docker-release/*.tar.gz
 
   release:
-    needs: [build, android-build, docker-build]
+    needs: [changes, build, android-build, docker-build]
     if: >-
       always() &&
       startsWith(github.ref, 'refs/tags/') &&
-      needs.build.result == 'success' &&
-      needs.docker-build.result == 'success' &&
-      (needs.android-build.result == 'success' || needs.android-build.result == 'skipped')
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.docker-build.result == 'success' || needs.docker-build.result == 'skipped') &&
+      (needs.android-build.result == 'success' || needs.android-build.result == 'skipped') &&
+      (needs.build.result == 'success' || needs.android-build.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -385,30 +395,46 @@ jobs:
         path: artifacts
         merge-multiple: true
 
+    - name: Prepare release files and notes
+      id: release_files
+      run: |
+        set -euo pipefail
+
+        files="$(find artifacts -type f | sort)"
+        if [ -z "${files}" ]; then
+          echo "No release artifacts found." >&2
+          exit 1
+        fi
+
+        {
+          echo 'files<<EOF'
+          printf '%s\n' "${files}"
+          echo 'EOF'
+        } >> "${GITHUB_OUTPUT}"
+
+        printf '%s\n\n' '${{ github.ref_name }}' > release-body.md
+        printf '%s\n' 'Full Changelog: [${{ steps.previous_tag.outputs.value }}...${{ github.ref_name }}](https://github.com/${{ github.repository }}/compare/${{ steps.previous_tag.outputs.value }}...${{ github.ref_name }})' >> release-body.md
+
+        if [ "${{ needs.android-build.result }}" = "success" ]; then
+          printf '\n%s\n' '[AYLink.apk](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/AYLink.apk)' >> release-body.md
+        fi
+
+        if [ "${{ needs.docker-build.result }}" = "success" ]; then
+          printf '\n%s\n' 'Docker 离线镜像为 OCI 标准，无法在老版本的 Docker（20.10 之前）中使用。' >> release-body.md
+          printf '%s\n\n' 'The offline Docker image uses the OCI format and cannot be used with older Docker versions before 20.10.' >> release-body.md
+          printf '%s\n' '推荐直接使用 `docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest` 获取最新镜像。' >> release-body.md
+          printf '%s\n\n' 'It is recommended to use `docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest` to get the latest image.' >> release-body.md
+          printf '%s\n' '也可以直接使用 `docker-compose.yml` 快速部署。' >> release-body.md
+          printf '%s\n' 'You can also use `docker-compose.yml` for quick deployment.' >> release-body.md
+        fi
+      shell: bash
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.ref_name }}
         name: ${{ github.ref_name }}
-        body: |
-          ${{ github.ref_name }}
-
-          Full Changelog: [${{ steps.previous_tag.outputs.value }}...${{ github.ref_name }}](https://github.com/${{ github.repository }}/compare/${{ steps.previous_tag.outputs.value }}...${{ github.ref_name }})
-
-          [AYLink.apk](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/AYLink.apk)
-
-          Docker 离线镜像为 OCI 标准，无法在老版本的 Docker（20.10 之前）中使用。
-          The offline Docker image uses the OCI format and cannot be used with older Docker versions before 20.10.
-
-          推荐直接使用 \`docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest\` 获取最新镜像。
-          It is recommended to use \`docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/aylink.agent:latest\` to get the latest image.
-
-          也可以直接使用 \`docker-compose.yml\` 快速部署。
-          You can also use \`docker-compose.yml\` for quick deployment.
-        files: |
-          artifacts/AYLink.Agent-${{ github.ref_name }}-*.tar.gz
-          artifacts/AYLink.Agent-${{ github.ref_name }}-*.zip
-          artifacts/AYLink.Agent-docker-oci-*.tar.gz
-          artifacts/AYLink.apk
+        body_path: release-body.md
+        files: ${{ steps.release_files.outputs.files }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,6 +2,7 @@ package com.aylink.mobile.ui.remote
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -200,6 +201,10 @@ fun RemoteScreen(
 
     DisposableEffect(activity, lifecycleOwner) {
         val previousOrientation = activity?.requestedOrientation
+        val hadKeepScreenOn = activity?.window
+            ?.attributes
+            ?.flags
+            ?.and(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
         val observer = object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 viewModel.onAppForegrounded()
@@ -212,6 +217,7 @@ fun RemoteScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         
         activity?.window?.let { window ->
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             val insetsController = WindowCompat.getInsetsController(window, window.decorView)
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -221,6 +227,9 @@ fun RemoteScreen(
             activity?.window?.let { window ->
                 val insetsController = WindowCompat.getInsetsController(window, window.decorView)
                 insetsController.show(WindowInsetsCompat.Type.systemBars())
+                if (!hadKeepScreenOn) {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
             }
             activity?.requestedOrientation = previousOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             rendererRef?.let(viewModel.webRtcManager::releaseRenderer)

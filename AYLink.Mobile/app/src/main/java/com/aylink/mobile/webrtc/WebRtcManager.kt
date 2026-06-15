@@ -2,6 +2,7 @@ package com.aylink.mobile.webrtc
 
 import android.media.AudioAttributes
 import android.content.Context
+import android.util.Log
 import com.aylink.mobile.data.model.PointerControlMessage
 import com.aylink.mobile.data.model.RtcCandidateMessage
 import com.aylink.mobile.data.model.RtcOfferMessage
@@ -48,6 +49,7 @@ class WebRtcManager(
     )
 
     companion object {
+        private const val LOG_TAG = "AYLinkWebRtc"
         private const val CONTROL_CHANNEL_LABEL = "control"
         private const val META_CONTROL_CHANNEL_LABEL = "control-meta"
         private const val POINTER_MOVE_CHANNEL_LABEL = "pointer-move"
@@ -168,6 +170,7 @@ class WebRtcManager(
                 if (!isCurrentGeneration(generation)) {
                     return
                 }
+                Log.i(LOG_TAG, "ICE connection state changed, generation=$generation, state=$newState")
                 when (newState) {
                     PeerConnection.IceConnectionState.CONNECTED,
                     PeerConnection.IceConnectionState.COMPLETED -> {
@@ -203,6 +206,7 @@ class WebRtcManager(
             override fun onAddStream(stream: MediaStream) = Unit
             override fun onRemoveStream(stream: MediaStream) = Unit
             override fun onDataChannel(channel: DataChannel) {
+                Log.i(LOG_TAG, "Remote data channel received, generation=$generation, label=${channel.label()}")
                 when (channel.label()) {
                     POINTER_MOVE_CHANNEL_LABEL -> {
                         pointerMoveChannel = channel
@@ -569,6 +573,7 @@ class WebRtcManager(
                     return
                 }
                 val state = channel.state()
+                Log.i(LOG_TAG, "Data channel state changed, generation=$generation, label=${channel.label()}, state=$state")
                 if (state == DataChannel.State.CLOSED) {
                     val wasPrimaryControlChannel = channel.label() == CONTROL_CHANNEL_LABEL
                     when (channel.label()) {

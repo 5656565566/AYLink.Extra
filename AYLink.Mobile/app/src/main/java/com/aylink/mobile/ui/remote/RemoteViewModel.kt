@@ -1,6 +1,7 @@
 package com.aylink.mobile.ui.remote
 
 import android.content.Context
+import android.util.Log
 import android.util.DisplayMetrics
 import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.ViewModel
@@ -124,6 +125,7 @@ class RemoteViewModel(
         private const val VIDEO_ICE_RECOVERY_OBSERVATION_MS = 5_000L
         private const val VIDEO_ACTIVITY_RECOVERY_WINDOW_MS = 15_000L
         private const val VIDEO_IDLE_STALL_CONFIRMATION_MS = 30_000L
+        private const val LOG_TAG = "AYLinkRemote"
         private const val ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS = 300L
         private const val ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX = 16
         private const val MIN_NEW_DISPLAY_DIMENSION = 240
@@ -199,12 +201,20 @@ class RemoteViewModel(
                         is SignalClient.Event.Answer -> webRtcManager.setRemoteAnswer(event.payload.type, event.payload.sdp, activeWebRtcGeneration)
                         is SignalClient.Event.Candidate -> webRtcManager.addRemoteCandidate(event.payload, activeWebRtcGeneration)
                         is SignalClient.Event.Error -> {
-                            _uiState.update { it.copy(status = event.message) }
-                            stopHeartbeat()
-                            if (event.retryable) {
-                                scheduleReconnect()
+                            if (event.retryable && webRtcManager.isPeerConnected()) {
+                                Log.w(LOG_TAG, "Signaling failed while WebRTC remains connected; keeping media session alive: ${event.message}")
+                                _uiState.update { current ->
+                                    current.copy(status = if (current.videoSize != IntSize.Zero) "已连接" else current.status)
+                                }
+                                startVideoRecoveryWatchdog("signal_failed_after_connect")
                             } else {
-                                autoReconnectEnabled = false
+                                _uiState.update { it.copy(status = event.message) }
+                                stopHeartbeat()
+                                if (event.retryable) {
+                                    scheduleReconnect()
+                                } else {
+                                    autoReconnectEnabled = false
+                                }
                             }
                         }
                         SignalClient.Event.Open -> {
@@ -214,16 +224,17 @@ class RemoteViewModel(
                             webRtcManager.createOffer(activeWebRtcGeneration)
                         }
                         SignalClient.Event.Closed -> {
-                            stopHeartbeat()
                             if (webRtcManager.isPeerConnected()) {
                                 _uiState.update { current ->
                                     current.copy(status = if (current.videoSize != IntSize.Zero) "已连接" else current.status)
                                 }
                                 startVideoRecoveryWatchdog("signal_closed_after_connect")
                             } else if (autoReconnectEnabled) {
+                                stopHeartbeat()
                                 _uiState.update { it.copy(status = "信令断开", videoSize = IntSize.Zero) }
                                 scheduleReconnect()
                             } else {
+                                stopHeartbeat()
                                 _uiState.update { it.copy(videoSize = IntSize.Zero) }
                             }
                         }
@@ -562,6 +573,7 @@ class RemoteViewModel(
                 val sessionId = currentSessionId
                 if (!sessionId.isNullOrBlank()) {
                     runCatching { deviceRepository.heartbeatScrcpySession(device.id, sessionId) }
+                        .onFailure { error -> Log.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error) }
                 }
                 delay(15_000)
             }
@@ -649,7 +661,7 @@ class RemoteViewModel(
     }
 
     private fun tryVideoKeyFrameRecovery(reason: String): Boolean {
-        if (!signalClient.isOpen || manualDisconnect || suppressReconnect) {
+        if (manualDisconnect || suppressReconnect) {
             return false
         }
         val requested = webRtcManager.requestVideoKeyFrameReplay(reason)
@@ -686,6 +698,9 @@ class RemoteViewModel(
         val frameAdvanced = previous == null || previous.generation != snapshot.generation || snapshot.frameCount > previous.frameCount
         if (frameAdvanced) {
             resetVideoRecoveryState(snapshot)
+            if (snapshot.isPeerConnected && hasVideo) {
+                _uiState.update { it.copy(status = "已连接") }
+            }
             return
         }
 

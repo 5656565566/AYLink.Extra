@@ -489,7 +489,7 @@ class RemoteViewModel(
             }
             else -> {
                 flushPendingPointerReleases(reportFailure = false)
-                webRtcManager.sendPointerMessage(payload)
+                webRtcManager.sendPointerMessage(payload, reportFailure = false)
             }
         }
     }
@@ -505,7 +505,7 @@ class RemoteViewModel(
                 }
                 val moves = sampledPointerMoves.values.toList()
                 sampledPointerMoves.clear()
-                moves.forEach(webRtcManager::sendPointerMessage)
+                moves.forEach { move -> webRtcManager.sendPointerMessage(move, reportFailure = false) }
                 delay(getCurrentPointerSampleIntervalMs())
             }
             pointerSamplingJob = null
@@ -514,7 +514,11 @@ class RemoteViewModel(
 
     private fun flushSampledPointerMove(pointerId: Int, preferPointerMoveChannel: Boolean = true) {
         val sampled = sampledPointerMoves.remove(pointerId) ?: return
-        webRtcManager.sendPointerMessage(sampled, preferPointerMoveChannel)
+        webRtcManager.sendPointerMessage(
+            payload = sampled,
+            preferPointerMoveChannel = preferPointerMoveChannel,
+            reportFailure = false
+        )
     }
 
     private fun flushPendingPointerReleases(reportFailure: Boolean) {

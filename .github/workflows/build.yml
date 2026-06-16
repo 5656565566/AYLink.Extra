@@ -400,7 +400,7 @@ jobs:
       run: |
         set -euo pipefail
 
-        files="$(find artifacts -type f | sort)"
+        files="$(find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.apk" \) | sort)"
         if [ -z "${files}" ]; then
           echo "No release artifacts found." >&2
           exit 1

@@ -898,7 +898,9 @@ class RemoteViewModel(
             return false
         }
 
-        val sameOrientation = (targetSize.width >= targetSize.height) == (lastSize.width >= lastSize.height)
+        val targetLandscape = targetSize.width >= targetSize.height
+        val lastLandscape = lastSize.width >= lastSize.height
+        val sameOrientation = targetLandscape == lastLandscape
         val widthDelta = kotlin.math.abs(targetSize.width - lastSize.width)
         val heightDelta = kotlin.math.abs(targetSize.height - lastSize.height)
         return !sameOrientation || widthDelta >= ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX || heightDelta >= ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX

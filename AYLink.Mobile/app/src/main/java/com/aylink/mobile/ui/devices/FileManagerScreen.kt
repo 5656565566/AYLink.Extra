@@ -27,8 +27,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aylink.mobile.data.model.FileEntry
 import com.aylink.mobile.data.model.LocalFileHandle
@@ -360,7 +357,7 @@ private fun openLocalFile(context: Context, file: LocalFileHandle) {
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching {
-        ContextCompat.startActivity(context, Intent.createChooser(intent, "打开文件"), null)
+        context.startActivity(Intent.createChooser(intent, "打开文件"))
     }.onFailure {
         Toast.makeText(context, "没有可用的打开方式", Toast.LENGTH_SHORT).show()
     }
@@ -373,7 +370,7 @@ private fun shareLocalFile(context: Context, file: LocalFileHandle) {
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching {
-        ContextCompat.startActivity(context, Intent.createChooser(intent, "分享文件"), null)
+        context.startActivity(Intent.createChooser(intent, "分享文件"))
     }.onFailure {
         Toast.makeText(context, "无法分享该文件", Toast.LENGTH_SHORT).show()
     }

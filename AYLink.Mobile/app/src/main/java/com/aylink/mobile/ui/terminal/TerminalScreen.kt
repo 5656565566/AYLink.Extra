@@ -1,5 +1,6 @@
 package com.aylink.mobile.ui.terminal
 
+import android.content.ClipData
 import android.content.Context
 import android.graphics.Typeface
 import android.view.KeyEvent
@@ -27,13 +28,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.ClipboardManager
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.toClipEntry
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -44,6 +46,8 @@ import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 @Composable
 fun TerminalScreen(
@@ -51,7 +55,8 @@ fun TerminalScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
+    val clipboardManager = LocalClipboard.current
+    val coroutineScope = rememberCoroutineScope()
     var terminalBridge by remember { mutableStateOf<TermuxTerminalBridge?>(null) }
 
     LaunchedEffect(viewModel) {
@@ -131,6 +136,7 @@ fun TerminalScreen(
                             context = viewContext,
                             terminalView = this,
                             clipboardManager = clipboardManager,
+                            coroutineScope = coroutineScope,
                             onSendInput = viewModel::sendInput,
                             onResize = viewModel::resize
                         )
@@ -202,7 +208,15 @@ fun TerminalScreen(
             )
             FilterChip(
                 selected = false,
-                onClick = { clipboardManager.getText()?.let { viewModel.sendInput(it.text) } },
+                onClick = {
+                    coroutineScope.launch {
+                        val clipEntry = clipboardManager.getClipEntry()
+                        val text = clipEntry?.clipData?.getItemAt(0)?.text?.toString()
+                        if (!text.isNullOrEmpty()) {
+                            viewModel.sendInput(text)
+                        }
+                    }
+                },
                 label = { Text("粘贴") }
             )
         }
@@ -221,7 +235,8 @@ fun TerminalScreen(
 private class TermuxTerminalBridge(
     context: Context,
     terminalView: TerminalView,
-    private val clipboardManager: ClipboardManager,
+    private val clipboardManager: Clipboard,
+    private val coroutineScope: CoroutineScope,
     private val onSendInput: (String) -> Unit,
     private val onResize: (Int, Int) -> Unit
 ) : TerminalViewClient, TerminalSessionClient {
@@ -366,11 +381,20 @@ private class TermuxTerminalBridge(
     override fun onSessionFinished(finishedSession: TerminalSession) = Unit
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
-        clipboardManager.setText(AnnotatedString(text))
+        coroutineScope.launch {
+            val clipData = ClipData.newPlainText("terminal_copy", text)
+            clipboardManager.setClipEntry(clipData.toClipEntry())
+        }
     }
 
     override fun onPasteTextFromClipboard(session: TerminalSession) {
-        clipboardManager.getText()?.let { onSendInput(it.text) }
+        coroutineScope.launch {
+            val clipEntry = clipboardManager.getClipEntry()
+            val text = clipEntry?.clipData?.getItemAt(0)?.text?.toString()
+            if (!text.isNullOrEmpty()) {
+                onSendInput(text)
+            }
+        }
     }
 
     override fun onBell(session: TerminalSession) = Unit

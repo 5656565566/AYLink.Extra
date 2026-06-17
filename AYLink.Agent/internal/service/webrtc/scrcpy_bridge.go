@@ -113,7 +113,14 @@ func (s *Service) bindScrcpyControl(peerConnection *pion.PeerConnection, deviceI
 					return
 				}
 			}
-			_ = runtime.SendControl(msg.Data)
+			if err := runtime.SendControl(msg.Data); err != nil && s.logger != nil {
+				s.logger.Warn("webrtc scrcpy control forwarding failed",
+					"channel", channel.Label(),
+					"payloadType", msg.Data[0],
+					"payloadSize", len(msg.Data),
+					"err", err,
+				)
+			}
 		})
 	})
 }

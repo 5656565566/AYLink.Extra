@@ -425,7 +425,14 @@ class WebRtcManager(
     }
 
     private fun sendPointerMove(message: ByteArray): Boolean {
-        return sendBinary(selectPointerMoveSendChannel(), message, reportFailure = false)
+        val dedicatedPointerMoveChannel = pointerMoveChannel
+        if (dedicatedPointerMoveChannel?.state() == DataChannel.State.OPEN &&
+            sendBinary(dedicatedPointerMoveChannel, message, reportFailure = false)
+        ) {
+            return true
+        }
+
+        return sendBinary(selectControlChannel(), message, reportFailure = false)
     }
 
     private fun sendBinary(
@@ -467,14 +474,6 @@ class WebRtcManager(
 
     private fun selectDedicatedMetaControlChannel(): DataChannel? {
         return if (metaControlChannel?.state() == DataChannel.State.OPEN) metaControlChannel else null
-    }
-
-    private fun selectPointerMoveSendChannel(): DataChannel? {
-        val dedicatedPointerMoveChannel = pointerMoveChannel
-        if (dedicatedPointerMoveChannel != null) {
-            return if (dedicatedPointerMoveChannel.state() == DataChannel.State.OPEN) dedicatedPointerMoveChannel else null
-        }
-        return if (dataChannel?.state() == DataChannel.State.OPEN) dataChannel else null
     }
 
     private fun selectHighFrequencyControlChannel(): DataChannel? {

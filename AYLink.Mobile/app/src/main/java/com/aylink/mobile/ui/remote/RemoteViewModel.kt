@@ -124,7 +124,6 @@ class RemoteViewModel(
         private const val VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS = 3_000L
         private const val VIDEO_ICE_RECOVERY_OBSERVATION_MS = 5_000L
         private const val VIDEO_ACTIVITY_RECOVERY_WINDOW_MS = 15_000L
-        private const val VIDEO_IDLE_STALL_CONFIRMATION_MS = 30_000L
         private const val LOG_TAG = "AYLinkRemote"
         private const val ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS = 300L
         private const val ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX = 16
@@ -698,8 +697,7 @@ class RemoteViewModel(
 
         val hasVideo = _uiState.value.videoSize != IntSize.Zero && snapshot.hasVideoFrame
         if (!snapshot.isPeerConnected || !hasVideo) {
-            stalledVideoObservationCount += 1
-            recoverVideoIfConfirmed(reason)
+            resetVideoRecoveryState(snapshot)
             return
         }
 
@@ -712,11 +710,14 @@ class RemoteViewModel(
             return
         }
 
+        if (!hasRecentVideoRecoveryActivity()) {
+            resetVideoRecoveryState(snapshot)
+            _uiState.update { it.copy(status = "已连接") }
+            return
+        }
+
         stalledVideoObservationCount += 1
-        recoverVideoIfConfirmed(
-            reason = reason,
-            confirmationCount = confirmationCountForCurrentActivity()
-        )
+        recoverVideoIfConfirmed(reason)
     }
 
     private fun recoverVideoIfConfirmed(
@@ -775,14 +776,6 @@ class RemoteViewModel(
             return false
         }
         return System.currentTimeMillis() - lastActivity <= VIDEO_ACTIVITY_RECOVERY_WINDOW_MS
-    }
-
-    private fun confirmationCountForCurrentActivity(): Int {
-        return if (hasRecentVideoRecoveryActivity()) {
-            VIDEO_STALL_CONFIRMATION_COUNT
-        } else {
-            observationCountFor(VIDEO_IDLE_STALL_CONFIRMATION_MS)
-        }
     }
 
     private fun scheduleReconnectNow() {

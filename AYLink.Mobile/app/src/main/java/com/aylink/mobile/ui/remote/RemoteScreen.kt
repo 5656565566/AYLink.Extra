@@ -1,9 +1,9 @@
 package com.aylink.mobile.ui.remote
 
-import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -35,7 +35,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -142,7 +141,7 @@ fun RemoteScreen(
     val controlState by viewModel.controlUiState.collectAsStateWithLifecycle()
     val appPickerState by viewModel.appPickerUiState.collectAsStateWithLifecycle()
     val effectiveFillMode = viewportState.fillMode
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     val localView = LocalView.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }

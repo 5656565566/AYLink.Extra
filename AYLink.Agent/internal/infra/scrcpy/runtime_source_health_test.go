@@ -156,6 +156,39 @@ func TestRuntimeReplaysFreshCachedVideoKeyFrame(t *testing.T) {
 	}
 }
 
+func TestRuntimeThrottlesCachedVideoKeyFrameReplay(t *testing.T) {
+	rt := &runtime{
+		done:             make(chan struct{}),
+		videoSubscribers: map[int]chan domainscrcpy.VideoPacket{1: make(chan domainscrcpy.VideoPacket, 4)},
+		latestVideoConfig: cachedVideoPacket{
+			packet: domainscrcpy.VideoPacket{
+				Data:     []byte{0, 0, 0, 1, 0x67},
+				IsConfig: true,
+			},
+			generation: 1,
+			cachedAt:   time.Now(),
+		},
+		latestVideoKeyFrame: cachedVideoPacket{
+			packet: domainscrcpy.VideoPacket{
+				Data:       []byte{0, 0, 0, 1, 0x65},
+				IsKeyFrame: true,
+			},
+			generation: 1,
+			cachedAt:   time.Now(),
+		},
+		health: domainscrcpy.SourceHealthSnapshot{
+			LastKeyFrameReplayAt: time.Now().Add(-videoKeyFrameReplayCooldown / 2),
+		},
+	}
+
+	if rt.ReplayLatestVideoKeyFrame() {
+		t.Fatalf("expected cached key frame replay to be throttled")
+	}
+	if len(rt.videoSubscribers[1]) != 0 {
+		t.Fatalf("expected throttled replay to avoid queueing packets, got %d", len(rt.videoSubscribers[1]))
+	}
+}
+
 func TestRuntimeRefusesStaleCachedVideoKeyFrameReplay(t *testing.T) {
 	rt := &runtime{
 		done:             make(chan struct{}),
@@ -180,6 +213,47 @@ func TestRuntimeRefusesStaleCachedVideoKeyFrameReplay(t *testing.T) {
 
 	if rt.ReplayLatestVideoKeyFrame() {
 		t.Fatalf("expected stale cached key frame replay to be refused")
+	}
+}
+
+func TestRuntimeSubscribeVideoPacketsWarmsOnlyConfigAndKeyFrame(t *testing.T) {
+	rt := &runtime{
+		done:             make(chan struct{}),
+		videoSubscribers: make(map[int]chan domainscrcpy.VideoPacket),
+		latestVideoConfig: cachedVideoPacket{
+			packet: domainscrcpy.VideoPacket{
+				Data:     []byte{0, 0, 0, 1, 0x67},
+				IsConfig: true,
+			},
+			generation: 1,
+			cachedAt:   time.Now(),
+		},
+		latestVideoKeyFrame: cachedVideoPacket{
+			packet: domainscrcpy.VideoPacket{
+				Data:                  []byte{0, 0, 0, 1, 0x65},
+				IsKeyFrame:            true,
+				PresentationTimestamp: 100,
+			},
+			generation: 1,
+			cachedAt:   time.Now(),
+		},
+	}
+
+	ch, unsubscribe := rt.SubscribeVideoPackets()
+	defer unsubscribe()
+
+	first := <-ch
+	second := <-ch
+	if !first.IsConfig {
+		t.Fatalf("expected first warm packet to be config, got %+v", first)
+	}
+	if !second.IsKeyFrame {
+		t.Fatalf("expected second warm packet to be key frame, got %+v", second)
+	}
+	select {
+	case packet := <-ch:
+		t.Fatalf("expected no extra warm packets, got %+v", packet)
+	default:
 	}
 }
 

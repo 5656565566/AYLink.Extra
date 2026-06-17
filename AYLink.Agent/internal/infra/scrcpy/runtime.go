@@ -30,6 +30,7 @@ const (
 	videoRefreshConfirmationWindow               = 12 * time.Second
 	videoRefreshConfirmations                    = 2
 	replayableKeyFrameMaxAge                     = 3 * time.Second
+	videoKeyFrameReplayCooldown                  = 500 * time.Millisecond
 	sourceHealthPacketFreshness                  = 3 * time.Second
 	sourceHealthRecoveryWindow                   = 8 * time.Second
 	sourceHealthRepeatedPTSStallThreshold        = 6
@@ -364,7 +365,8 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 		r.videoMu.Unlock()
 		return false
 	}
-	keyFrameAge := time.Since(keyFramePacket.cachedAt)
+	now := time.Now()
+	keyFrameAge := now.Sub(keyFramePacket.cachedAt)
 	if keyFramePacket.cachedAt.IsZero() || keyFrameAge > replayableKeyFrameMaxAge {
 		r.videoMu.Unlock()
 		if r.logger != nil {
@@ -373,6 +375,19 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 				"generation", keyFramePacket.generation,
 				"keyFrameAge", keyFrameAge.String(),
 				"maxAge", replayableKeyFrameMaxAge.String(),
+			)
+		}
+		return false
+	}
+	lastReplayAt := r.getLastVideoKeyFrameReplayAt()
+	if !lastReplayAt.IsZero() && now.Sub(lastReplayAt) < videoKeyFrameReplayCooldown {
+		r.videoMu.Unlock()
+		if r.logger != nil {
+			r.logger.Info("scrcpy video key frame replay skipped",
+				"reason", "replay_cooldown",
+				"generation", keyFramePacket.generation,
+				"sinceLastReplay", now.Sub(lastReplayAt).String(),
+				"cooldown", videoKeyFrameReplayCooldown.String(),
 			)
 		}
 		return false
@@ -392,6 +407,7 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 	}
 	subscriberCount := len(r.videoSubscribers)
 	generation := keyFramePacket.generation
+	r.markVideoKeyFrameReplayed(now)
 	r.videoMu.Unlock()
 
 	if r.logger != nil {
@@ -401,7 +417,6 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 			"keyFrameAge", keyFrameAge.String(),
 		)
 	}
-	r.markVideoKeyFrameReplayed(time.Now())
 	return true
 }
 
@@ -1124,6 +1139,13 @@ func (r *runtime) markVideoKeyFrameReplayed(now time.Time) {
 	r.healthMu.Lock()
 	r.health.LastKeyFrameReplayAt = now
 	r.healthMu.Unlock()
+}
+
+func (r *runtime) getLastVideoKeyFrameReplayAt() time.Time {
+	r.healthMu.Lock()
+	defer r.healthMu.Unlock()
+
+	return r.health.LastKeyFrameReplayAt
 }
 
 func (r *runtime) markVideoRefreshRequested(now time.Time) {

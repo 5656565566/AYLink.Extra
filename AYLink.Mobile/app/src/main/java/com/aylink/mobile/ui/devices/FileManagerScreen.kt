@@ -163,123 +163,137 @@ fun FileManagerScreen(
             }
         }
 
-        dialogState.selectedFile?.takeIf { dialogState.isActionMenuOpen }?.let { file ->
-            val fullPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
-            
-            AyDialog(
-                title = "操作",
-                onDismissRequest = { viewModel.handleIntent(FileManagerIntent.HideActionMenu) },
-                content = {
-                    Text(
-                        text = file.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
+        FileActionDialog(
+            listState = listState,
+            dialogState = dialogState,
+            onIntent = { viewModel.handleIntent(it) }
+        )
 
-                    if (dialogState.actionLoading) {
-                        Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
-                    } else {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (!file.isDirectory) {
-                                OutlinedButton(
-                                    onClick = { viewModel.handleIntent(FileManagerIntent.OpenFile(fullPath)) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("打开")
-                                }
-                                OutlinedButton(
-                                    onClick = { viewModel.handleIntent(FileManagerIntent.ShareFile(fullPath)) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("分享")
-                                }
-                                OutlinedButton(
-                                    onClick = { viewModel.handleIntent(FileManagerIntent.DownloadFile(fullPath)) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("下载到本地")
-                                }
-                            }
-                            OutlinedButton(
-                                onClick = { viewModel.handleIntent(FileManagerIntent.CopyPath(fullPath)) },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("复制路径")
-                            }
-                            OutlinedButton(
-                                onClick = { viewModel.handleIntent(FileManagerIntent.ShowRenameDialog(file.name)) },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("重命名")
-                            }
-                            OutlinedButton(
-                                onClick = { viewModel.handleIntent(FileManagerIntent.DeleteFile(fullPath)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text("删除")
-                            }
-                        }
+        FileRenameDialog(
+            listState = listState,
+            dialogState = dialogState,
+            onIntent = { viewModel.handleIntent(it) }
+        )
+    }
+}
+
+@Composable
+private fun FileActionDialog(
+    listState: FileManagerListUiState,
+    dialogState: FileManagerDialogUiState,
+    onIntent: (FileManagerIntent) -> Unit
+) {
+    dialogState.selectedFile?.takeIf { dialogState.isActionMenuOpen }?.let { file ->
+        val fullPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
+
+        AyDialog(
+            title = "操作",
+            onDismissRequest = { onIntent(FileManagerIntent.HideActionMenu) },
+            content = {
+                Text(
+                    text = file.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+
+                if (dialogState.actionLoading) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
                     }
-                },
-                footer = {
-                    Button(
-                        onClick = { viewModel.handleIntent(FileManagerIntent.HideActionMenu) },
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("取消")
-                    }
-                }
-            )
-        }
-
-        dialogState.selectedFile?.takeIf { dialogState.isRenameDialogOpen }?.let { file ->
-            val oldPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
-
-            AyDialog(
-                title = "重命名",
-                onDismissRequest = { viewModel.handleIntent(FileManagerIntent.HideRenameDialog) },
-                content = {
-                    OutlinedTextField(
-                        value = dialogState.renameTargetName,
-                        onValueChange = { viewModel.handleIntent(FileManagerIntent.UpdateRenameTargetName(it)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("新名称") },
-                        singleLine = true
-                    )
-                },
-                footer = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                        if (!file.isDirectory) {
+                            OutlinedButton(
+                                onClick = { onIntent(FileManagerIntent.OpenFile(fullPath)) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("打开") }
+                            OutlinedButton(
+                                onClick = { onIntent(FileManagerIntent.ShareFile(fullPath)) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("分享") }
+                            OutlinedButton(
+                                onClick = { onIntent(FileManagerIntent.DownloadFile(fullPath)) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("下载到本地") }
+                        }
                         OutlinedButton(
-                            onClick = { viewModel.handleIntent(FileManagerIntent.HideRenameDialog) },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("取消")
-                        }
-                        Button(
-                            onClick = { viewModel.handleIntent(FileManagerIntent.RenameFile(oldPath, dialogState.renameTargetName)) },
-                            modifier = Modifier.weight(1f),
-                            enabled = dialogState.renameTargetName.isNotBlank() && dialogState.renameTargetName != file.name && !dialogState.actionLoading
-                        ) {
-                            if (dialogState.actionLoading) {
-                                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                            } else {
-                                Text("保存")
-                            }
+                            onClick = { onIntent(FileManagerIntent.CopyPath(fullPath)) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("复制路径") }
+                        OutlinedButton(
+                            onClick = { onIntent(FileManagerIntent.ShowRenameDialog(file.name)) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("重命名") }
+                        OutlinedButton(
+                            onClick = { onIntent(FileManagerIntent.DeleteFile(fullPath)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) { Text("删除") }
+                    }
+                }
+            },
+            footer = {
+                Button(
+                    onClick = { onIntent(FileManagerIntent.HideActionMenu) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("取消") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun FileRenameDialog(
+    listState: FileManagerListUiState,
+    dialogState: FileManagerDialogUiState,
+    onIntent: (FileManagerIntent) -> Unit
+) {
+    dialogState.selectedFile?.takeIf { dialogState.isRenameDialogOpen }?.let { file ->
+        val oldPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
+
+        AyDialog(
+            title = "重命名",
+            onDismissRequest = { onIntent(FileManagerIntent.HideRenameDialog) },
+            content = {
+                OutlinedTextField(
+                    value = dialogState.renameTargetName,
+                    onValueChange = { onIntent(FileManagerIntent.UpdateRenameTargetName(it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("新名称") },
+                    singleLine = true
+                )
+            },
+            footer = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { onIntent(FileManagerIntent.HideRenameDialog) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("取消") }
+                    Button(
+                        onClick = { onIntent(FileManagerIntent.RenameFile(oldPath, dialogState.renameTargetName)) },
+                        modifier = Modifier.weight(1f),
+                        enabled = dialogState.renameTargetName.isNotBlank() && dialogState.renameTargetName != file.name && !dialogState.actionLoading
+                    ) {
+                        if (dialogState.actionLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Text("保存")
                         }
                     }
                 }
-            )
-        }
+            }
+        )
     }
 }
 

@@ -468,7 +468,7 @@ private fun RemoteFloatingControl(
     }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val dismissControlDialog = {
+    val dismissControlDialog: () -> Unit = {
         scope.launch {
             sheetState.hide()
             onToggleControlDialog(false)
@@ -570,165 +570,208 @@ private fun RemoteFloatingControl(
         }
     }
 
-    if (controlState.isControlDialogOpen) {
-        ModalBottomSheet(
-            onDismissRequest = {
-                onToggleControlDialog(false)
-                dockFab(collapsed = true)
-            },
-            sheetState = sheetState
+    RemoteControlSheet(
+        device = device,
+        controlState = controlState,
+        sheetState = sheetState,
+        onDismiss = {
+            onToggleControlDialog(false)
+            dockFab(collapsed = true)
+        },
+        dismissControlDialog = dismissControlDialog,
+        runControlAction = runControlAction,
+        onSendKey = onSendKey,
+        onSetFillMode = onSetFillMode,
+        onReconnectToDevice = onReconnectToDevice,
+        onOpenAppPicker = onOpenAppPicker,
+        onDisconnect = onDisconnect
+    )
+
+    AppPickerSheet(
+        appPickerState = appPickerState,
+        onDismissAppPicker = onDismissAppPicker,
+        onReconnectToApp = onReconnectToApp
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun RemoteControlSheet(
+    device: Device,
+    controlState: RemoteControlUiState,
+    sheetState: SheetState,
+    onDismiss: () -> Unit,
+    dismissControlDialog: () -> Unit,
+    runControlAction: (Boolean, () -> Unit) -> Unit,
+    onSendKey: (String) -> Unit,
+    onSetFillMode: (Boolean) -> Unit,
+    onReconnectToDevice: () -> Unit,
+    onOpenAppPicker: () -> Unit,
+    onDisconnect: () -> Unit
+) {
+    if (!controlState.isControlDialogOpen) return
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-                contentPadding = PaddingValues(bottom = 24.dp)
-            ) {
-                item {
-                    Text("当前设备: ${device.name}", style = MaterialTheme.typography.titleMedium)
-                    Text("连接状态: ${controlState.status}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(24.dp))
+            item {
+                Text("当前设备: ${device.name}", style = MaterialTheme.typography.titleMedium)
+                Text("连接状态: ${controlState.status}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            item {
+                Text("屏幕控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenon") } }) { Text("亮屏") }
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenoff") } }) { Text("息屏") }
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
-                item {
-                    Text("屏幕控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenon") } }) { Text("亮屏") }
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenoff") } }) { Text("息屏") }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
+            item {
+                Text("导航控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("back") } }) { Text("返回") }
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("home") } }) { Text("主页") }
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("recent") } }) { Text("任务") }
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("menu") } }) { Text("菜单") }
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("power") } }) { Text("电源") }
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
-                item {
-                    Text("导航控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("back") } }) { Text("返回") }
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("home") } }) { Text("主页") }
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("recent") } }) { Text("任务") }
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("menu") } }) { Text("菜单") }
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("power") } }) { Text("电源") }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
+            item {
+                Text("音量控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumeup") } }) { Text("音量+") }
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumedown") } }) { Text("音量-") }
+                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("mute") } }) { Text("静音") }
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
-                item {
-                    Text("音量控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumeup") } }) { Text("音量+") }
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumedown") } }) { Text("音量-") }
-                        OutlinedButton(onClick = { runControlAction(false) { onSendKey("mute") } }) { Text("静音") }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
+            item {
+                Text("画面显示", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (controlState.isFlexDisplayEnabled) "自适应显示器已启用，默认保持等比显示"
+                        else "强制拉伸填充全屏",
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = controlState.fillMode,
+                        onCheckedChange = { runControlAction(false) { onSetFillMode(it) } },
+                        enabled = true
+                    )
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
-                item {
-                    Text("画面显示", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            if (controlState.isFlexDisplayEnabled) "自适应显示器已启用，默认保持等比显示"
-                            else "强制拉伸填充全屏",
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = controlState.fillMode,
-                            onCheckedChange = { runControlAction(false) { onSetFillMode(it) } },
-                            enabled = true
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
+            item {
+                Text("投屏模式", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { runControlAction(true, onReconnectToDevice) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("整机投屏") }
 
-                item {
-                    Text("投屏模式", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { runControlAction(true, onReconnectToDevice) },
-                            modifier = Modifier.weight(1f)
-                        ) { Text("整机投屏") }
-
-                        OutlinedButton(
-                            onClick = {
-                                dismissControlDialog()
-                                onOpenAppPicker()
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) { Text("应用投屏") }
-                    }
-                    Spacer(modifier = Modifier.height(24.dp))
-                }
-
-                item {
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             dismissControlDialog()
-                            onDisconnect()
+                            onOpenAppPicker()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("断开连接并返回")
-                    }
+                        modifier = Modifier.weight(1f)
+                    ) { Text("应用投屏") }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            item {
+                Button(
+                    onClick = {
+                        dismissControlDialog()
+                        onDisconnect()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("断开连接并返回")
                 }
             }
         }
     }
+}
 
-    if (appPickerState.isAppSelectDialogOpen) {
-        AyDialog(
-            title = "选择应用",
-            onDismissRequest = onDismissAppPicker,
-            content = {
-                if (appPickerState.isLoadingApps) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                } else if (appPickerState.appError != null) {
-                    Text(appPickerState.appError, color = MaterialTheme.colorScheme.error)
-                } else if (appPickerState.availableApps.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text("未找到应用", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(appPickerState.availableApps) { app ->
-                            OutlinedButton(
-                                onClick = { onReconnectToApp(app) },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(app.name)
-                            }
+@Composable
+private fun AppPickerSheet(
+    appPickerState: RemoteAppPickerUiState,
+    onDismissAppPicker: () -> Unit,
+    onReconnectToApp: (DeviceApp) -> Unit
+) {
+    if (!appPickerState.isAppSelectDialogOpen) return
+
+    AyDialog(
+        title = "选择应用",
+        onDismissRequest = onDismissAppPicker,
+        content = {
+            if (appPickerState.isLoadingApps) {
+                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (appPickerState.appError != null) {
+                Text(appPickerState.appError, color = MaterialTheme.colorScheme.error)
+            } else if (appPickerState.availableApps.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text("未找到应用", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(appPickerState.availableApps) { app ->
+                        OutlinedButton(
+                            onClick = { onReconnectToApp(app) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(app.name)
                         }
                     }
                 }
-            },
-            footer = {
-                Button(onClick = onDismissAppPicker, modifier = Modifier.fillMaxWidth()) {
-                    Text("取消")
-                }
             }
-        )
-    }
+        },
+        footer = {
+            Button(onClick = onDismissAppPicker, modifier = Modifier.fillMaxWidth()) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 private fun sendPointer(

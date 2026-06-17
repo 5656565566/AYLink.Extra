@@ -375,9 +375,7 @@ class RemoteViewModel(
         connectJob = viewModelScope.launch {
             val currentBaseUrl = baseUrl.first()
             token.first() ?: return@launch
-            if (!isActiveConnectionRequest(requestId)) {
-                return@launch
-            }
+            if (!isActiveConnectionRequest(requestId)) return@launch
             _uiState.update {
                 it.copy(
                     status = if (appName.isNullOrBlank()) "正在连接..." else "正在投屏 $appName...",
@@ -386,52 +384,58 @@ class RemoteViewModel(
             }
             suppressReconnect = true
             runCatching {
-                stopHeartbeat()
-                resetPointerControlState()
-                releaseRemoteSessionAsync()
-                hasReleasedSession = false
-                webRtcManager.disconnect()
-                activeWebRtcGeneration = 0
-                signalClient.disconnect()
-                val initialDisplaySize = if (newDisplay) buildAdaptiveDisplaySize() else IntSize.Zero
-                if (newDisplay) {
-                    lastRequestedDisplaySize = initialDisplaySize
-                }
-                val ticket = deviceRepository.createWebRtcTicket(
-                    deviceId = device.id,
-                    sessionId = null,
-                    appPackage = appPackage,
-                    appName = appName,
-                    newDisplay = newDisplay,
-                    newDisplayWidth = if (newDisplay) initialDisplaySize.width.takeIf { it > 0 } else null,
-                    newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
-                    newDisplayDpi = if (newDisplay) localDisplayDpi else null
-                )
-                if (!isActiveConnectionRequest(requestId)) {
-                    releaseTicketSession(ticket.sessionId)
-                    return@runCatching
-                }
-                currentSessionId = ticket.sessionId.takeIf { it.isNotBlank() }
-                signalClient.connect(
-                    SignalClient.ConnectArgs(
-                        baseUrl = currentBaseUrl,
-                        ticket = ticket.ticket
-                    )
-                )
+                setupConnection(requestId, currentBaseUrl, appPackage, appName, newDisplay)
             }.onFailure { error ->
-                if (!isActiveConnectionRequest(requestId)) {
-                    return@launch
-                }
+                if (!isActiveConnectionRequest(requestId)) return@launch
                 _uiState.update { it.copy(status = error.message ?: "连接失败") }
                 suppressReconnect = false
                 scheduleReconnect()
                 return@launch
             }
-            if (!isActiveConnectionRequest(requestId)) {
-                return@launch
-            }
+            if (!isActiveConnectionRequest(requestId)) return@launch
             suppressReconnect = false
         }
+    }
+
+    private suspend fun setupConnection(
+        requestId: Int,
+        currentBaseUrl: String,
+        appPackage: String?,
+        appName: String?,
+        newDisplay: Boolean
+    ) {
+        stopHeartbeat()
+        resetPointerControlState()
+        releaseRemoteSessionAsync()
+        hasReleasedSession = false
+        webRtcManager.disconnect()
+        activeWebRtcGeneration = 0
+        signalClient.disconnect()
+        val initialDisplaySize = if (newDisplay) buildAdaptiveDisplaySize() else IntSize.Zero
+        if (newDisplay) {
+            lastRequestedDisplaySize = initialDisplaySize
+        }
+        val ticket = deviceRepository.createWebRtcTicket(
+            deviceId = device.id,
+            sessionId = null,
+            appPackage = appPackage,
+            appName = appName,
+            newDisplay = newDisplay,
+            newDisplayWidth = if (newDisplay) initialDisplaySize.width.takeIf { it > 0 } else null,
+            newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
+            newDisplayDpi = if (newDisplay) localDisplayDpi else null
+        )
+        if (!isActiveConnectionRequest(requestId)) {
+            releaseTicketSession(ticket.sessionId)
+            return
+        }
+        currentSessionId = ticket.sessionId.takeIf { it.isNotBlank() }
+        signalClient.connect(
+            SignalClient.ConnectArgs(
+                baseUrl = currentBaseUrl,
+                ticket = ticket.ticket
+            )
+        )
     }
 
     private fun scheduleReconnect() {

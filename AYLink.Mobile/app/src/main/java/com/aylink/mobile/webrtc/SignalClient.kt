@@ -1,7 +1,6 @@
 package com.aylink.mobile.webrtc
 
 import android.net.Uri
-import android.util.Log
 import com.aylink.mobile.data.model.RtcAnswerMessage
 import com.aylink.mobile.data.model.RtcCandidateMessage
 import com.aylink.mobile.data.model.RtcOfferMessage
@@ -76,7 +75,6 @@ class SignalClient(
                     return
                 }
                 isSocketOpen = true
-                Log.i(LOG_TAG, "Signaling opened, connectionId=$connectionId")
                 appLogger?.i(LOG_TAG, "Signaling opened, connectionId=$connectionId")
                 _events.tryEmit(Event.Open)
             }
@@ -118,7 +116,6 @@ class SignalClient(
                 }
                 isSocketOpen = false
                 socket = null
-                Log.w(LOG_TAG, "Signaling failed, connectionId=$connectionId, responseCode=${response?.code}", t)
                 appLogger?.w(LOG_TAG, "Signaling failed, connectionId=$connectionId, responseCode=${response?.code}", t)
                 val message = buildString {
                     append(t.message ?: "Signal connection failed")
@@ -137,7 +134,6 @@ class SignalClient(
                 }
                 isSocketOpen = false
                 socket = null
-                Log.i(LOG_TAG, "Signaling closed, connectionId=$connectionId, code=$code, reason=$reason")
                 appLogger?.i(LOG_TAG, "Signaling closed, connectionId=$connectionId, code=$code, reason=$reason")
                 _events.tryEmit(Event.Closed)
             }

@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +32,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.aylink.mobile.data.repo.LocalSettingsStore
 import com.aylink.mobile.data.repo.PointerSamplingRateHz
 import com.aylink.mobile.data.repo.ThemeMode
@@ -46,6 +50,7 @@ fun SettingsScreen(
 ) {
     val settings by settingsStore.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var logActionMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -148,19 +153,24 @@ fun SettingsScreen(
                 Button(
                     modifier = Modifier.weight(1f),
                     onClick = {
-                        runCatching {
-                            logger.i("AYLinkSettings", "Diagnostic log export requested")
-                            context.startActivity(
-                                android.content.Intent.createChooser(
-                                    logExporter.createExportIntent(),
-                                    "导出诊断日志"
+                        coroutineScope.launch {
+                            runCatching {
+                                logger.i("AYLinkSettings", "Diagnostic log export requested")
+                                val shareIntent = withContext(Dispatchers.IO) {
+                                    logExporter.createExportIntent()
+                                }
+                                context.startActivity(
+                                    android.content.Intent.createChooser(
+                                        shareIntent,
+                                        "导出诊断日志"
+                                    )
                                 )
-                            )
-                        }.onSuccess {
-                            logActionMessage = "已打开分享面板"
-                        }.onFailure { error ->
-                            logger.w("AYLinkSettings", "Diagnostic log export failed: ${error.message}", error)
-                            logActionMessage = error.message ?: "导出失败"
+                            }.onSuccess {
+                                logActionMessage = "已打开分享面板"
+                            }.onFailure { error ->
+                                logger.w("AYLinkSettings", "Diagnostic log export failed: ${error.message}", error)
+                                logActionMessage = error.message ?: "导出失败"
+                            }
                         }
                     }
                 ) {

@@ -6,6 +6,7 @@ import android.util.Log
 import com.aylink.mobile.data.model.PointerControlMessage
 import com.aylink.mobile.data.model.RtcCandidateMessage
 import com.aylink.mobile.data.model.RtcOfferMessage
+import com.aylink.mobile.logging.AppLogger
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -36,7 +37,8 @@ import java.nio.ByteOrder
 class WebRtcManager(
     context: Context,
     private val json: Json,
-    private val signalClient: SignalClient
+    private val signalClient: SignalClient,
+    private val appLogger: AppLogger? = null
 ) {
     data class VideoFrameHealthSnapshot(
         val generation: Int,
@@ -171,6 +173,7 @@ class WebRtcManager(
                     return
                 }
                 Log.i(LOG_TAG, "ICE connection state changed, generation=$generation, state=$newState")
+                appLogger?.i(LOG_TAG, "ICE connection state changed, generation=$generation, state=$newState")
                 when (newState) {
                     PeerConnection.IceConnectionState.CONNECTED,
                     PeerConnection.IceConnectionState.COMPLETED -> {
@@ -207,6 +210,7 @@ class WebRtcManager(
             override fun onRemoveStream(stream: MediaStream) = Unit
             override fun onDataChannel(channel: DataChannel) {
                 Log.i(LOG_TAG, "Remote data channel received, generation=$generation, label=${channel.label()}")
+                appLogger?.i(LOG_TAG, "Remote data channel received, generation=$generation, label=${channel.label()}")
                 when (channel.label()) {
                     POINTER_MOVE_CHANNEL_LABEL -> {
                         pointerMoveChannel = channel
@@ -394,11 +398,13 @@ class WebRtcManager(
     }
 
     fun requestVideoKeyFrameReplay(reason: String): Boolean {
-        return sendBinary(
+        val requested = sendBinary(
             selectDedicatedMetaControlChannel(),
             byteArrayOf(LOCAL_META_CONTROL_PREFIX, LOCAL_META_MSG_VIDEO_KEY_FRAME),
             reportFailure = false
         )
+        appLogger?.i(LOG_TAG, "Video key frame replay request result=$requested, reason=$reason, generation=$connectionGeneration")
+        return requested
     }
 
     fun disconnect() {
@@ -573,6 +579,7 @@ class WebRtcManager(
                 }
                 val state = channel.state()
                 Log.i(LOG_TAG, "Data channel state changed, generation=$generation, label=${channel.label()}, state=$state")
+                appLogger?.i(LOG_TAG, "Data channel state changed, generation=$generation, label=${channel.label()}, state=$state")
                 if (state == DataChannel.State.CLOSED) {
                     val wasPrimaryControlChannel = channel.label() == CONTROL_CHANNEL_LABEL
                     when (channel.label()) {

@@ -2,14 +2,15 @@ package com.aylink.mobile.data.repo
 
 import android.content.Context
 import com.aylink.mobile.data.api.AgentApi
+import com.aylink.mobile.logging.AppLogger
+import com.aylink.mobile.logging.DiagnosticHttpLoggingInterceptor
+import com.aylink.mobile.logging.DiagnosticLogExporter
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 
 class AppContainer(context: Context) {
-    private val logging = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BASIC
-    }
+    val appLogger = AppLogger(context)
+    val diagnosticLogExporter = DiagnosticLogExporter(context, appLogger)
 
     val json = Json {
         ignoreUnknownKeys = true
@@ -17,7 +18,7 @@ class AppContainer(context: Context) {
     }
 
     val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .addInterceptor(logging)
+        .addInterceptor(DiagnosticHttpLoggingInterceptor(appLogger))
         .build()
 
     val sessionStore = SessionStore(context)

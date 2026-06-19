@@ -6,6 +6,7 @@ import com.aylink.mobile.data.model.RtcAnswerMessage
 import com.aylink.mobile.data.model.RtcCandidateMessage
 import com.aylink.mobile.data.model.RtcOfferMessage
 import com.aylink.mobile.data.model.RtcSignalErrorMessage
+import com.aylink.mobile.logging.AppLogger
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -21,7 +22,8 @@ import okhttp3.WebSocketListener
 
 class SignalClient(
     private val okHttpClient: OkHttpClient,
-    private val json: Json
+    private val json: Json,
+    private val appLogger: AppLogger? = null
 ) {
     private companion object {
         private const val LOG_TAG = "AYLinkSignal"
@@ -75,6 +77,7 @@ class SignalClient(
                 }
                 isSocketOpen = true
                 Log.i(LOG_TAG, "Signaling opened, connectionId=$connectionId")
+                appLogger?.i(LOG_TAG, "Signaling opened, connectionId=$connectionId")
                 _events.tryEmit(Event.Open)
             }
 
@@ -116,6 +119,7 @@ class SignalClient(
                 isSocketOpen = false
                 socket = null
                 Log.w(LOG_TAG, "Signaling failed, connectionId=$connectionId, responseCode=${response?.code}", t)
+                appLogger?.w(LOG_TAG, "Signaling failed, connectionId=$connectionId, responseCode=${response?.code}", t)
                 val message = buildString {
                     append(t.message ?: "Signal connection failed")
                     if (response != null) {
@@ -134,6 +138,7 @@ class SignalClient(
                 isSocketOpen = false
                 socket = null
                 Log.i(LOG_TAG, "Signaling closed, connectionId=$connectionId, code=$code, reason=$reason")
+                appLogger?.i(LOG_TAG, "Signaling closed, connectionId=$connectionId, code=$code, reason=$reason")
                 _events.tryEmit(Event.Closed)
             }
         })

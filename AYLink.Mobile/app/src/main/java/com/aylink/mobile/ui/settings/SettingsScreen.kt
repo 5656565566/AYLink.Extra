@@ -10,31 +10,43 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aylink.mobile.data.repo.LocalSettingsStore
 import com.aylink.mobile.data.repo.PointerSamplingRateHz
 import com.aylink.mobile.data.repo.ThemeMode
+import com.aylink.mobile.logging.AppLogger
+import com.aylink.mobile.logging.DiagnosticLogExporter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    settingsStore: LocalSettingsStore
+    settingsStore: LocalSettingsStore,
+    logger: AppLogger,
+    logExporter: DiagnosticLogExporter
 ) {
     val settings by settingsStore.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var logActionMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -123,6 +135,55 @@ fun SettingsScreen(
                 enabled = !settings.adaptivePointerSampling,
                 onCheckedChange = settingsStore::updateWeakNetworkMode
             )
+        }
+
+        SettingCard(
+            title = "诊断日志",
+            description = "导出最近的应用日志，便于排查远程连接问题"
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        runCatching {
+                            logger.i("AYLinkSettings", "Diagnostic log export requested")
+                            context.startActivity(
+                                android.content.Intent.createChooser(
+                                    logExporter.createExportIntent(),
+                                    "导出诊断日志"
+                                )
+                            )
+                        }.onSuccess {
+                            logActionMessage = "已打开分享面板"
+                        }.onFailure { error ->
+                            logger.w("AYLinkSettings", "Diagnostic log export failed: ${error.message}", error)
+                            logActionMessage = error.message ?: "导出失败"
+                        }
+                    }
+                ) {
+                    Text("导出日志")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        logger.clear()
+                        logActionMessage = "日志已清空"
+                    }
+                ) {
+                    Text("清空日志")
+                }
+            }
+            logActionMessage?.let { message ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

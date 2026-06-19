@@ -287,7 +287,8 @@ fun AYLinkApp(container: AppContainer) {
                                 sessionStore = container.sessionStore,
                                 localSettingsStore = container.localSettingsStore,
                                 okHttpClient = container.okHttpClient,
-                                json = container.json
+                                json = container.json,
+                                appLogger = container.appLogger
                             )
                         }
                         RemoteScreen(
@@ -405,7 +406,11 @@ fun AYLinkApp(container: AppContainer) {
                             TerminalScreen(viewModel = viewModel)
                         }
                         Screen.Settings -> {
-                            SettingsScreen(settingsStore = container.localSettingsStore)
+                            SettingsScreen(
+                                settingsStore = container.localSettingsStore,
+                                logger = container.appLogger,
+                                logExporter = container.diagnosticLogExporter
+                            )
                         }
                         else -> {}
                     }

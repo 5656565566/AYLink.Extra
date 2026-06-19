@@ -15,6 +15,7 @@ import com.aylink.mobile.data.repo.DeviceRepository
 import com.aylink.mobile.data.repo.LocalSettingsStore
 import com.aylink.mobile.data.repo.PointerSamplingRateHz
 import com.aylink.mobile.data.repo.SessionStore
+import com.aylink.mobile.logging.AppLogger
 import com.aylink.mobile.webrtc.SignalClient
 import com.aylink.mobile.webrtc.WebRtcManager
 import kotlinx.coroutines.Job
@@ -109,7 +110,8 @@ class RemoteViewModel(
     private val sessionStore: SessionStore,
     localSettingsStore: LocalSettingsStore,
     okHttpClient: OkHttpClient,
-    json: Json
+    json: Json,
+    private val appLogger: AppLogger? = null
 ) : ViewModel() {
     companion object {
         private const val POINTER_SAMPLE_INTERVAL_120HZ_MS = 8L
@@ -148,8 +150,8 @@ class RemoteViewModel(
     private val _effect = MutableSharedFlow<RemoteEffect>()
     val effect = _effect.asSharedFlow()
 
-    private val signalClient = SignalClient(okHttpClient, json)
-    val webRtcManager = WebRtcManager(appContext, json, signalClient)
+    private val signalClient = SignalClient(okHttpClient, json, appLogger)
+    val webRtcManager = WebRtcManager(appContext, json, signalClient, appLogger)
     private val baseUrl = sessionStore.baseUrl
     private val token = sessionStore.token
     private val localSettings = localSettingsStore.settings
@@ -286,6 +288,7 @@ class RemoteViewModel(
         }
 
         sessionStore.updateLastRemoteDevice(device)
+        appLogger?.i(LOG_TAG, "RemoteViewModel created, deviceId=${device.id}, appPackage=$initialAppPackage, newDisplay=$initialNewDisplay")
         connect(appPackage = initialAppPackage, appName = initialAppName, newDisplay = initialNewDisplay)
     }
 
@@ -339,6 +342,7 @@ class RemoteViewModel(
     }
 
     private fun connect(appPackage: String?, appName: String?, newDisplay: Boolean) {
+        appLogger?.i(LOG_TAG, "Connect requested, deviceId=${device.id}, appPackage=$appPackage, newDisplay=$newDisplay")
         currentAppPackage = appPackage
         currentAppName = appName
         currentNewDisplay = newDisplay
@@ -386,6 +390,7 @@ class RemoteViewModel(
                 setupConnection(requestId, currentBaseUrl, appPackage, appName, newDisplay)
             }.onFailure { error ->
                 if (!isActiveConnectionRequest(requestId)) return@launch
+                appLogger?.w(LOG_TAG, "Setup connection failed, requestId=$requestId, deviceId=${device.id}: ${error.message}", error)
                 _uiState.update { it.copy(status = error.message ?: "连接失败") }
                 suppressReconnect = false
                 scheduleReconnect()
@@ -429,6 +434,7 @@ class RemoteViewModel(
             return
         }
         currentSessionId = ticket.sessionId.takeIf { it.isNotBlank() }
+        appLogger?.i(LOG_TAG, "WebRTC ticket created, requestId=$requestId, deviceId=${device.id}, sessionId=${currentSessionId.orEmpty()}, newDisplay=$newDisplay")
         signalClient.connect(
             SignalClient.ConnectArgs(
                 baseUrl = currentBaseUrl,
@@ -443,6 +449,7 @@ class RemoteViewModel(
             val delays = longArrayOf(1000L, 2000L, 5000L, 10000L)
             val delayMs = delays[reconnectAttempt.coerceAtMost(delays.lastIndex)]
             reconnectAttempt += 1
+            appLogger?.i(LOG_TAG, "Reconnect scheduled, deviceId=${device.id}, attempt=$reconnectAttempt, delayMs=$delayMs")
             _uiState.update { it.copy(status = "连接中断，正在重连...") }
             delay(delayMs)
             if (!manualDisconnect && isActive) {
@@ -580,7 +587,10 @@ class RemoteViewModel(
                 val sessionId = currentSessionId
                 if (!sessionId.isNullOrBlank()) {
                     runCatching { deviceRepository.heartbeatScrcpySession(device.id, sessionId) }
-                        .onFailure { error -> Log.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error) }
+                        .onFailure { error ->
+                            Log.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
+                            appLogger?.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
+                        }
                 }
                 delay(15_000)
             }
@@ -673,9 +683,11 @@ class RemoteViewModel(
         }
         val requested = webRtcManager.requestVideoKeyFrameReplay(reason)
         if (!requested) {
+            appLogger?.w(LOG_TAG, "Video key frame recovery unavailable, reason=$reason, deviceId=${device.id}")
             return false
         }
 
+        appLogger?.i(LOG_TAG, "Video key frame recovery requested, reason=$reason, deviceId=${device.id}")
         videoRecoveryStage = VideoRecoveryStage.KeyFrameRequested
         stalledVideoObservationCount = 0
         return true
@@ -730,6 +742,7 @@ class RemoteViewModel(
 
         when (videoRecoveryStage) {
             VideoRecoveryStage.Monitoring -> {
+                appLogger?.w(LOG_TAG, "Video stall confirmed, reason=$reason, deviceId=${device.id}, generation=$activeWebRtcGeneration")
                 _uiState.update { it.copy(status = "画面恢复中...") }
                 if (!tryVideoKeyFrameRecovery(reason)) {
                     if (tryIceRecovery("key_frame_unavailable_$reason").not()) {
@@ -742,6 +755,7 @@ class RemoteViewModel(
                 if (stalledVideoObservationCount < observationCount) {
                     return
                 }
+                appLogger?.w(LOG_TAG, "Video key frame recovery failed, reason=$reason, deviceId=${device.id}")
                 if (tryIceRecovery("key_frame_recovery_failed_$reason").not()) {
                     scheduleReconnectNow()
                 }
@@ -751,6 +765,7 @@ class RemoteViewModel(
                 if (stalledVideoObservationCount < observationCount) {
                     return
                 }
+                appLogger?.w(LOG_TAG, "ICE recovery observation expired, reason=$reason, deviceId=${device.id}")
                 scheduleReconnectNow()
             }
         }
@@ -782,6 +797,7 @@ class RemoteViewModel(
         if (manualDisconnect || suppressReconnect || !autoReconnectEnabled) {
             return
         }
+        appLogger?.i(LOG_TAG, "Reconnect requested immediately, deviceId=${device.id}")
         reconnectJob?.cancel()
         reconnectJob = viewModelScope.launch {
             _uiState.update { it.copy(status = "连接恢复失败，正在重新连接...") }

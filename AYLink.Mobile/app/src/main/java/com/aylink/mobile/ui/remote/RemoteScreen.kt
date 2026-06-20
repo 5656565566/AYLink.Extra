@@ -69,6 +69,7 @@ import android.graphics.Rect as AndroidRect
 private const val ORIENTATION_CHANGE_DEBOUNCE_MS = 450L
 private const val ORIENTATION_ASPECT_DEAD_ZONE = 0.08f
 private const val ORIENTATION_OCCUPANCY_THRESHOLD = 0.48f
+private const val TOUCH_RESUME_STABILIZE_MS = 120L
 
 @Composable
 fun AyDialog(
@@ -308,18 +309,48 @@ private fun RemoteVideoSurface(
         }
     }
     val touchPointerState = remember { RemoteTouchPointerState() }
+    var touchEpoch by remember { mutableIntStateOf(touchPointerState.epoch) }
+    var touchReady by remember { mutableStateOf(false) }
+    val touchSurfaceSnapshots = remember { mutableStateMapOf<Int, TouchSurfaceSnapshot>() }
+    val touchSurfaceSnapshot = remember(touchEpoch, viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
+        TouchSurfaceSnapshot(
+            epoch = touchEpoch,
+            viewportSize = viewportSize,
+            videoSize = viewportState.videoSize,
+            fillMode = effectiveFillMode,
+            videoBounds = videoBounds
+        )
+    }
+    SideEffect {
+        if (touchSurfaceSnapshot.isValid()) {
+            touchSurfaceSnapshots[touchSurfaceSnapshot.epoch] = touchSurfaceSnapshot
+        }
+    }
     val latestPointerDispatch by rememberUpdatedState(
         newValue = { event: RemoteTouchPointerEvent ->
+            val isReleasePhase = event.phase == "up" || event.phase == "cancel"
+            val snapshot = touchSurfaceSnapshots[event.epoch]
+            val canSend = snapshot != null && (isReleasePhase || event.epoch == touchEpoch && touchReady)
             sendPointer(
                 viewModel = viewModel,
                 event = event,
-                viewportSize = viewportSize,
-                videoSize = viewportState.videoSize,
-                fillMode = effectiveFillMode,
-                videoBounds = videoBounds
+                snapshot = snapshot.takeIf { canSend }
             )
         }
     )
+
+    LaunchedEffect(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
+        touchPointerState.cancelActivePointers(latestPointerDispatch)
+        touchEpoch = touchPointerState.resetForInputBoundary()
+        touchReady = false
+        touchSurfaceSnapshots.keys.retainAll(setOf(touchEpoch - 1, touchEpoch))
+        if (isValidTouchSurface(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds)) {
+            delay(TOUCH_RESUME_STABILIZE_MS)
+            if (isValidTouchSurface(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds)) {
+                touchReady = true
+            }
+        }
+    }
 
     DisposableEffect(touchPointerState, viewModel) {
         onDispose {
@@ -375,10 +406,17 @@ private fun RemoteVideoSurface(
                         }
                         try {
                             val down = awaitFirstDown(requireUnconsumed = false)
+                            if (!touchReady || !isValidTouchSurface(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds)) {
+                                return@awaitEachGesture
+                            }
                             touchPointerState.beginGesture(down.id.value, down.position, emitPointer)
 
                             do {
                                 val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                                if (!touchReady || touchPointerState.epoch != touchEpoch) {
+                                    touchPointerState.cancelActivePointers(emitPointer)
+                                    return@awaitEachGesture
+                                }
                                 event.changes.forEach { change ->
                                     if (!change.previousPressed && change.pressed) {
                                         touchPointerState.pointerDown(change.id.value, change.position, emitPointer)
@@ -776,20 +814,21 @@ private fun AppPickerSheet(
 private fun sendPointer(
     viewModel: RemoteViewModel,
     event: RemoteTouchPointerEvent,
-    viewportSize: IntSize,
-    videoSize: IntSize,
-    fillMode: Boolean,
-    videoBounds: VideoBounds
+    snapshot: TouchSurfaceSnapshot?
 ) {
-    val bounds = if (fillMode) {
+    val surface = snapshot ?: return
+    if (!surface.isValid()) {
+        return
+    }
+    val bounds = if (surface.fillMode) {
         VideoBounds(
             left = 0f,
             top = 0f,
-            width = viewportSize.width.toFloat().coerceAtLeast(1f),
-            height = viewportSize.height.toFloat().coerceAtLeast(1f)
+            width = surface.viewportSize.width.toFloat(),
+            height = surface.viewportSize.height.toFloat()
         )
     } else {
-        videoBounds
+        surface.videoBounds
     }
     val xRatio = ((event.point.x - bounds.left) / bounds.width).coerceIn(0f, 1f)
     val yRatio = ((event.point.y - bounds.top) / bounds.height).coerceIn(0f, 1f)
@@ -804,13 +843,28 @@ private fun sendPointer(
                 isPrimary = event.isPrimary,
                 xRatio = xRatio,
                 yRatio = yRatio,
-                frameWidth = videoSize.width.coerceAtLeast(1),
-                frameHeight = videoSize.height.coerceAtLeast(1),
+                frameWidth = surface.videoSize.width,
+                frameHeight = surface.videoSize.height,
                 pressure = if (isReleasePhase) 0f else 1f,
                 buttons = if (isReleasePhase) 0 else 1
             )
         )
     )
+}
+
+private fun isValidTouchSurface(
+    viewportSize: IntSize,
+    videoSize: IntSize,
+    fillMode: Boolean,
+    videoBounds: VideoBounds
+): Boolean {
+    if (viewportSize.width <= 0 || viewportSize.height <= 0 || videoSize.width <= 0 || videoSize.height <= 0) {
+        return false
+    }
+    if (fillMode) {
+        return true
+    }
+    return videoBounds.width > 0f && videoBounds.height > 0f
 }
 
 private fun calculateVideoBounds(viewportSize: IntSize, videoSize: IntSize, fillMode: Boolean): VideoBounds {
@@ -915,3 +969,13 @@ private data class VideoBounds(
     val width: Float,
     val height: Float
 )
+
+private data class TouchSurfaceSnapshot(
+    val epoch: Int,
+    val viewportSize: IntSize,
+    val videoSize: IntSize,
+    val fillMode: Boolean,
+    val videoBounds: VideoBounds
+) {
+    fun isValid(): Boolean = isValidTouchSurface(viewportSize, videoSize, fillMode, videoBounds)
+}

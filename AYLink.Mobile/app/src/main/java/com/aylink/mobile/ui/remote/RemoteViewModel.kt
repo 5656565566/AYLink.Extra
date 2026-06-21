@@ -126,6 +126,7 @@ class RemoteViewModel(
         private const val VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS = 3_000L
         private const val VIDEO_ICE_RECOVERY_OBSERVATION_MS = 5_000L
         private const val VIDEO_ACTIVITY_RECOVERY_WINDOW_MS = 15_000L
+        private const val VIDEO_STREAM_STABLE_MS = 20_000L
         private const val LOG_TAG = "AYLinkRemote"
         private const val ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS = 300L
         private const val ADAPTIVE_DISPLAY_RESIZE_MIN_DELTA_PX = 16
@@ -190,6 +191,7 @@ class RemoteViewModel(
     private var connectionRequestSequence = 0
     private var activeConnectionRequestId = 0
     private var videoRecoveryStage = VideoRecoveryStage.Monitoring
+    private val videoStreamStateMachine = VideoStreamStateMachine()
     private var lastVideoHealthSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null
     private var stalledVideoObservationCount = 0
     private var lastVideoRecoveryActivityAtMillis = 0L
@@ -222,6 +224,7 @@ class RemoteViewModel(
                             _uiState.update { it.copy(status = "创建会话...") }
                             startHeartbeat()
                             activeWebRtcGeneration = webRtcManager.createPeerConnection()
+                            markVideoStreamConnecting(videoStreamStateMachine, activeWebRtcGeneration, System.currentTimeMillis())
                             webRtcManager.createOffer(activeWebRtcGeneration)
                         }
                         SignalClient.Event.Closed -> {
@@ -256,6 +259,7 @@ class RemoteViewModel(
                             startVideoRecoveryWatchdog("peer_connected")
                         }
                         is WebRtcManager.Event.Disconnected -> {
+                            resetVideoStreamStateMachine(videoStreamStateMachine)
                             _uiState.update { current ->
                                 current.copy(
                                     status = if (autoReconnectEnabled) "连接断开" else current.status,
@@ -268,6 +272,7 @@ class RemoteViewModel(
                             }
                         }
                         is WebRtcManager.Event.Error -> {
+                            resetVideoStreamStateMachine(videoStreamStateMachine)
                             _uiState.update { it.copy(status = event.message) }
                             stopVideoRecoveryWatchdog()
                             if (autoReconnectEnabled) {
@@ -414,6 +419,7 @@ class RemoteViewModel(
         hasReleasedSession = false
         webRtcManager.disconnect()
         activeWebRtcGeneration = 0
+        resetVideoStreamStateMachine(videoStreamStateMachine)
         signalClient.disconnect()
         val initialDisplaySize = if (newDisplay) buildAdaptiveDisplaySize() else IntSize.Zero
         if (newDisplay) {
@@ -662,6 +668,7 @@ class RemoteViewModel(
     private fun stopVideoRecoveryWatchdog() {
         videoRecoveryJob?.cancel()
         videoRecoveryJob = null
+        resetVideoStreamStateMachine(videoStreamStateMachine)
         resetVideoRecoveryState()
     }
 
@@ -715,6 +722,8 @@ class RemoteViewModel(
 
         val frameAdvanced = previous == null || previous.generation != snapshot.generation || snapshot.frameCount > previous.frameCount
         if (frameAdvanced) {
+            markVideoStreamAdvanced(videoStreamStateMachine, snapshot.generation, System.currentTimeMillis())
+            markVideoStreamStableIfReady(snapshot.generation)
             resetVideoRecoveryState(snapshot)
             if (snapshot.isPeerConnected && hasVideo) {
                 _uiState.update { it.copy(status = "已连接") }
@@ -723,6 +732,7 @@ class RemoteViewModel(
         }
 
         if (!hasRecentVideoRecoveryActivity()) {
+            markVideoStreamStableIfReady(snapshot.generation)
             resetVideoRecoveryState(snapshot)
             _uiState.update { it.copy(status = "已连接") }
             return
@@ -742,6 +752,7 @@ class RemoteViewModel(
 
         when (videoRecoveryStage) {
             VideoRecoveryStage.Monitoring -> {
+                markVideoStreamUnstable(videoStreamStateMachine, activeWebRtcGeneration, System.currentTimeMillis())
                 appLogger?.w(LOG_TAG, "Video stall confirmed, reason=$reason, deviceId=${device.id}, generation=$activeWebRtcGeneration")
                 _uiState.update { it.copy(status = "画面恢复中...") }
                 if (!tryVideoKeyFrameRecovery(reason)) {
@@ -775,6 +786,13 @@ class RemoteViewModel(
         videoRecoveryStage = VideoRecoveryStage.Monitoring
         stalledVideoObservationCount = 0
         lastVideoHealthSnapshot = snapshot
+    }
+
+    private fun markVideoStreamStableIfReady(generation: Int) {
+        val now = System.currentTimeMillis()
+        if (getVideoStreamStableDurationMillis(videoStreamStateMachine, generation, now) >= VIDEO_STREAM_STABLE_MS) {
+            markVideoStreamStable(videoStreamStateMachine, generation)
+        }
     }
 
     private fun observationCountFor(durationMs: Long): Int {

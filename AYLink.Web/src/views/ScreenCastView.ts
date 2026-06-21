@@ -1425,9 +1425,9 @@ export default defineComponent({
 
       lastVideoStreamStallRecoveryAttemptAt = now;
       const signalingAttached = !!ws && ws.readyState === WebSocket.OPEN;
-      const recoveryReason = details.status === 'browser_decode_stalled_confirmed'
-          ? 'browser_decode_stalled'
-          : 'browser_playback_starved';
+      const recoveryReason = details.status === 'client_decode_stalled_confirmed'
+          ? 'client_decode_stalled'
+          : 'client_playback_starved';
       requestVideoKeyFrameReplay(recoveryReason);
       if (!signalingAttached) {
         console.info('[WebRTC] Confirmed video stream stall while signaling websocket is detached; attempting signaling reattach before escalating recovery.', {

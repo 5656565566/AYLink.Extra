@@ -318,7 +318,7 @@ describe('useVideoStreamHealth', () => {
 
     expect(onVideoStreamStalledConfirmed).toHaveBeenCalledTimes(1);
     expect(onVideoStreamStalledConfirmed).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'browser_decode_stalled_confirmed',
+      status: 'client_decode_stalled_confirmed',
       reason: 'test',
       connectionId: 1
     }));

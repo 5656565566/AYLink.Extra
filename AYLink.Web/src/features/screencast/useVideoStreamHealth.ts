@@ -49,10 +49,10 @@ export type VideoStreamHealthStatus =
   | 'within_stall_threshold'
   | 'static_playback_ok'
   | 'source_packet_idle_observed'
-  | 'browser_playback_starved_pending'
-  | 'browser_playback_starved_confirmed'
-  | 'browser_decode_stalled_pending'
-  | 'browser_decode_stalled_confirmed';
+  | 'client_playback_starved_pending'
+  | 'client_playback_starved_confirmed'
+  | 'client_decode_stalled_pending'
+  | 'client_decode_stalled_confirmed';
 
 interface VideoStreamHealthOptions {
   stableDetachMs: number;
@@ -451,8 +451,8 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
         return;
       }
 
-      const stallDetails = buildStallDetails(connectionId, reason, 'browser_decode_stalled_confirmed', inboundVideoStats, playback);
-      markUnstable(connectionId, 'browser_decode_stalled');
+      const stallDetails = buildStallDetails(connectionId, reason, 'client_decode_stalled_confirmed', inboundVideoStats, playback);
+      markUnstable(connectionId, 'client_decode_stalled');
       options.onVideoStreamStalledConfirmed?.(stallDetails);
       if (now - lastVideoStreamDiagnosticAt >= options.diagnosticIntervalMs) {
         lastVideoStreamDiagnosticAt = now;
@@ -524,8 +524,8 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       return;
     }
 
-    const stallDetails = buildStallDetails(connectionId, reason, 'browser_playback_starved_confirmed', inboundVideoStats, playback);
-    markUnstable(connectionId, 'browser_playback_starved');
+    const stallDetails = buildStallDetails(connectionId, reason, 'client_playback_starved_confirmed', inboundVideoStats, playback);
+    markUnstable(connectionId, 'client_playback_starved');
     options.onVideoStreamStalledConfirmed?.(stallDetails);
     if (now - lastVideoStreamDiagnosticAt < options.diagnosticIntervalMs) {
       return;

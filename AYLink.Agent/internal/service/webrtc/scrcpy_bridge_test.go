@@ -86,13 +86,34 @@ func TestRequestScrcpySourceRefreshSkipsStaticButAliveSourceForBackendWatchdog(t
 
 func TestRequestScrcpySourceRefreshSkipsStaticButAliveSourceForFrontendPlaybackHealth(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
-		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthStaticButAlive},
+		health: domainscrcpy.SourceHealthSnapshot{
+			State:  domainscrcpy.SourceHealthStaticButAlive,
+			Reason: "static_packets_alive",
+		},
 	}
 
 	requestScrcpySourceRefresh(nil, runtime, "frontend_playback_health")
 
 	if runtime.refreshCount != 0 {
 		t.Fatalf("expected frontend playback health to skip static-but-alive source, got %d", runtime.refreshCount)
+	}
+}
+
+func TestRequestScrcpySourceRefreshAllowsFrontendPacketIdleSource(t *testing.T) {
+	runtime := &fakeScrcpyRuntime{
+		health: domainscrcpy.SourceHealthSnapshot{
+			State:  domainscrcpy.SourceHealthStaticButAlive,
+			Reason: "holding_last_frame_packet_idle",
+		},
+	}
+
+	requestScrcpySourceRefresh(nil, runtime, "frontend_playback_health")
+
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected frontend playback health to refresh packet-idle source, got %d", runtime.refreshCount)
+	}
+	if len(runtime.lastVideoRefreshOptions) != 1 || !runtime.lastVideoRefreshOptions[0].AllowPacketIdleRefresh {
+		t.Fatalf("expected frontend playback health to allow packet-idle refresh, got %#v", runtime.lastVideoRefreshOptions)
 	}
 }
 
@@ -152,13 +173,31 @@ func TestLocalMetaKeyFrameRequestFallsBackToSourceRefreshWhenReplayFails(t *test
 
 func TestLocalMetaKeyFrameRequestDoesNotRefreshStaticButAliveSource(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
-		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthStaticButAlive},
+		health: domainscrcpy.SourceHealthSnapshot{
+			State:  domainscrcpy.SourceHealthStaticButAlive,
+			Reason: "static_packets_alive",
+		},
 	}
 
 	handleLocalMetaControlPayload(nil, runtime, []byte{localMetaControlPrefix, localMetaMsgVideoKeyFrame})
 
 	if runtime.refreshCount != 0 {
 		t.Fatalf("expected static source to skip keyframe fallback refresh, got %d", runtime.refreshCount)
+	}
+}
+
+func TestLocalMetaKeyFrameRequestRefreshesPacketIdleSource(t *testing.T) {
+	runtime := &fakeScrcpyRuntime{
+		health: domainscrcpy.SourceHealthSnapshot{
+			State:  domainscrcpy.SourceHealthStaticButAlive,
+			Reason: "holding_last_frame_packet_idle",
+		},
+	}
+
+	handleLocalMetaControlPayload(nil, runtime, []byte{localMetaControlPrefix, localMetaMsgVideoKeyFrame})
+
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected packet-idle source to refresh after keyframe replay fails, got %d", runtime.refreshCount)
 	}
 }
 

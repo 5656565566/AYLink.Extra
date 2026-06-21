@@ -108,7 +108,8 @@ type SourceHealthSnapshot struct {
 }
 
 type VideoRefreshOptions struct {
-	BypassConfirmation bool
+	BypassConfirmation     bool
+	AllowPacketIdleRefresh bool
 }
 
 type AudioCodec string

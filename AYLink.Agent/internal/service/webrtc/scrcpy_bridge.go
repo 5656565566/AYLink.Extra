@@ -638,7 +638,7 @@ func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runt
 		"repeatedPTSCount", health.RepeatedPTSCount,
 	}, args...)
 
-	if health.State == domainscrcpy.SourceHealthStaticButAlive {
+	if health.State == domainscrcpy.SourceHealthStaticButAlive && !shouldRequestStaticButAliveRefresh(health, reason) {
 		if logger != nil {
 			logger.Info("scrcpy source refresh skipped",
 				append([]any{
@@ -657,9 +657,13 @@ func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runt
 
 func videoRefreshOptionsForReason(reason string) []domainscrcpy.VideoRefreshOptions {
 	if reason == "frontend_playback_health" {
-		return []domainscrcpy.VideoRefreshOptions{{BypassConfirmation: true}}
+		return []domainscrcpy.VideoRefreshOptions{{BypassConfirmation: true, AllowPacketIdleRefresh: true}}
 	}
 	return nil
+}
+
+func shouldRequestStaticButAliveRefresh(health domainscrcpy.SourceHealthSnapshot, reason string) bool {
+	return reason == "frontend_playback_health" && health.Reason == "holding_last_frame_packet_idle"
 }
 
 func formatSourceHealthAge(value time.Time) string {

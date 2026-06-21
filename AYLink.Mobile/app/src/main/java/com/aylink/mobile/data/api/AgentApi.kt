@@ -14,6 +14,7 @@ import com.aylink.mobile.data.model.LoginResponse
 import com.aylink.mobile.data.model.RefreshTokenRequest
 import com.aylink.mobile.data.model.ScrcpySessionActionRequest
 import com.aylink.mobile.data.model.WebRtcTicketRequest
+import com.aylink.mobile.data.model.VideoStreamHealthSnapshot
 import com.aylink.mobile.data.model.WebRtcTicketResponse
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -237,6 +238,18 @@ class AgentApi(
             .post(body)
             .build()
         client.executeEmpty(request, json)
+    }
+
+    suspend fun getVideoStreamHealth(
+        baseUrl: String,
+        token: String,
+        deviceId: Int,
+        sessionId: String
+    ): VideoStreamHealthSnapshot {
+        val request = authorized("$baseUrl/api/scrcpy-sessions/video-health?deviceId=$deviceId&sessionId=$sessionId", token)
+            .get()
+            .build()
+        return client.executeJson(request, json, VideoStreamHealthSnapshot.serializer())
     }
 
     private fun authorized(url: String, token: String): Request.Builder {

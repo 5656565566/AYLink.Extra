@@ -63,6 +63,10 @@ export interface VideoDebugStatsSnapshot {
   signalingAttached: boolean;
   inboundVideoStats: InboundVideoStatsSnapshot | null;
   playback: VideoPlaybackSnapshot;
+  unifiedState?: string;
+  unifiedOrigin?: string;
+  recoveryAction?: string;
+  recoveryReason?: string;
 }
 
 interface VideoStreamHealthOptions {
@@ -116,6 +120,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     inboundVideoStats: null,
     playback: getEmptyVideoPlaybackSnapshot()
   });
+  let lastUnifiedDecision: { state: string; origin: string; action: string; reason: string } | null = null;
 
   const stopVideoFrameCaptureLoop = () => {
     const videoElement = options.getVideoElement();
@@ -309,7 +314,11 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       peerConnectionState: options.getPeerConnection()?.connectionState ?? null,
       signalingAttached: !!options.getSignalingSocket() && options.getSignalingSocket()?.readyState === WebSocket.OPEN,
       inboundVideoStats,
-      playback: getVideoPlaybackSnapshot()
+      playback: getVideoPlaybackSnapshot(),
+      unifiedState: lastUnifiedDecision?.state,
+      unifiedOrigin: lastUnifiedDecision?.origin,
+      recoveryAction: lastUnifiedDecision?.action,
+      recoveryReason: lastUnifiedDecision?.reason
     };
   };
 
@@ -638,10 +647,16 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     detachedSignalingConnectionId = connectionId;
   };
 
+  const setUnifiedDecision = (decision: { state: string; origin: string; action: string; reason: string }) => {
+    lastUnifiedDecision = decision;
+    updateDebugStatsSnapshot(debugStatsSnapshot.value.inboundVideoStats);
+  };
+
   return {
     stateMachine,
     debugStatsSnapshot: readonly(debugStatsSnapshot),
     refreshDebugStatsSnapshot,
+    setUnifiedDecision,
     start,
     stopVideoFrameCaptureLoop,
     stopWatchdog,

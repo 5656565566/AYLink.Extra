@@ -53,6 +53,35 @@ data class ScrcpySessionActionRequest(
 )
 
 @Serializable
+data class VideoStreamHealthSnapshot(
+    val state: String = "",
+    val origin: String = "",
+    val reason: String = "",
+    val source: VideoSourceDiagnostics? = null,
+    val sender: VideoSenderDiagnostics? = null,
+    val transport: VideoTransportDiagnostics? = null
+)
+
+@Serializable
+data class VideoSourceDiagnostics(
+    val state: String = "",
+    val reason: String = ""
+)
+
+@Serializable
+data class VideoSenderDiagnostics(
+    val state: String = "",
+    val peerConnected: Boolean = false
+)
+
+@Serializable
+data class VideoTransportDiagnostics(
+    val peerConnectionState: String = "",
+    val signalingAttached: Boolean = false,
+    val sessionClosed: Boolean = false
+)
+
+@Serializable
 data class ApiErrorResponse(
     val error: ApiErrorPayload? = null
 )

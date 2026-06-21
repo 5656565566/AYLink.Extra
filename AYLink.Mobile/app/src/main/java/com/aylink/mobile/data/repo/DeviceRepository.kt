@@ -11,6 +11,7 @@ import com.aylink.mobile.data.model.DeviceAppInfo
 import com.aylink.mobile.data.model.DeviceSettingsSummary
 import com.aylink.mobile.data.model.FileListResponse
 import com.aylink.mobile.data.model.LocalFileHandle
+import com.aylink.mobile.data.model.VideoStreamHealthSnapshot
 import com.aylink.mobile.data.model.WebRtcTicketResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -175,6 +176,11 @@ class DeviceRepository(
             agentApi.postScrcpySessionAction(baseUrl, token, "release", deviceId, sessionId)
         }
     }
+
+    suspend fun getVideoStreamHealth(deviceId: Int, sessionId: String): VideoStreamHealthSnapshot =
+        authRepository.withAuthorizedRequest { baseUrl, token ->
+            agentApi.getVideoStreamHealth(baseUrl, token, deviceId, sessionId)
+        }
 
     private suspend fun downloadRemoteFile(
         cacheRoot: File,

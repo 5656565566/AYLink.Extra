@@ -51,7 +51,8 @@ data class RemoteUiState(
     val isNewDisplayMode: Boolean = false,
     val isDebugModeEnabled: Boolean = false,
     val isDebugOverlayVisible: Boolean = false,
-    val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null
+    val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null,
+    val unifiedRecoveryDecision: UnifiedVideoRecoveryDecision? = null
 )
 
 data class RemoteViewportUiState(
@@ -70,7 +71,8 @@ data class RemoteControlUiState(
     val isFlexDisplayEnabled: Boolean = false,
     val isDebugModeEnabled: Boolean = false,
     val isDebugOverlayVisible: Boolean = false,
-    val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null
+    val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null,
+    val unifiedRecoveryDecision: UnifiedVideoRecoveryDecision? = null
 )
 
 data class RemoteAppPickerUiState(
@@ -130,9 +132,9 @@ class RemoteViewModel(
         private const val POINTER_MOVE_BUFFER_PRESSURE_HIGH_RATIO = 0.75
         private const val VIDEO_RECOVERY_POLL_INTERVAL_MS = 2_000L
         private const val VIDEO_STALL_CONFIRMATION_COUNT = 2
+        private const val VIDEO_FRAME_STALL_THRESHOLD_MS = 6_000L
         private const val VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS = 3_000L
         private const val VIDEO_ICE_RECOVERY_OBSERVATION_MS = 5_000L
-        private const val VIDEO_ACTIVITY_RECOVERY_WINDOW_MS = 15_000L
         private const val VIDEO_STREAM_STABLE_MS = 20_000L
         private const val LOG_TAG = "AYLinkRemote"
         private const val ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS = 300L
@@ -148,7 +150,7 @@ class RemoteViewModel(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteViewportUiState())
     val controlUiState: StateFlow<RemoteControlUiState> = _uiState
-        .map { RemoteControlUiState(it.status, it.isControlDialogOpen, it.isControlPanelCollapsed, it.fillMode, it.isFlexDisplayEnabled, it.isDebugModeEnabled, it.isDebugOverlayVisible, it.debugSnapshot) }
+        .map { RemoteControlUiState(it.status, it.isControlDialogOpen, it.isControlPanelCollapsed, it.fillMode, it.isFlexDisplayEnabled, it.isDebugModeEnabled, it.isDebugOverlayVisible, it.debugSnapshot, it.unifiedRecoveryDecision) }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteControlUiState())
     val appPickerUiState: StateFlow<RemoteAppPickerUiState> = _uiState
@@ -202,7 +204,6 @@ class RemoteViewModel(
     private val videoStreamStateMachine = VideoStreamStateMachine()
     private var lastVideoHealthSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null
     private var stalledVideoObservationCount = 0
-    private var lastVideoRecoveryActivityAtMillis = 0L
 
     init {
         viewModelScope.launch {
@@ -494,7 +495,6 @@ class RemoteViewModel(
     }
 
     fun onAppForegrounded() {
-        markVideoRecoveryActivity()
         if (!manualDisconnect && localSettings.value.resumeLastRemote && !webRtcManager.isPeerConnected()) {
             if (tryIceRecovery("foreground_resume").not()) {
                 scheduleReconnectNow()
@@ -728,6 +728,7 @@ class RemoteViewModel(
 
         val previous = lastVideoHealthSnapshot
         lastVideoHealthSnapshot = snapshot
+        val now = System.currentTimeMillis()
 
         val hasVideo = _uiState.value.videoSize != IntSize.Zero && snapshot.hasVideoFrame
         if (!snapshot.isPeerConnected || !hasVideo) {
@@ -737,7 +738,7 @@ class RemoteViewModel(
 
         val frameAdvanced = previous == null || previous.generation != snapshot.generation || snapshot.frameCount > previous.frameCount
         if (frameAdvanced) {
-            markVideoStreamAdvanced(videoStreamStateMachine, snapshot.generation, System.currentTimeMillis())
+            markVideoStreamAdvanced(videoStreamStateMachine, snapshot.generation, now)
             markVideoStreamStableIfReady(snapshot.generation)
             resetVideoRecoveryState(snapshot)
             if (snapshot.isPeerConnected && hasVideo) {
@@ -746,19 +747,21 @@ class RemoteViewModel(
             return
         }
 
-        if (!hasRecentVideoRecoveryActivity()) {
+        val frameStalledForMillis = now - snapshot.lastFrameAtMillis
+        if (snapshot.lastFrameAtMillis <= 0L || frameStalledForMillis < VIDEO_FRAME_STALL_THRESHOLD_MS) {
             markVideoStreamStableIfReady(snapshot.generation)
-            resetVideoRecoveryState(snapshot)
+            stalledVideoObservationCount = 0
             _uiState.update { it.copy(status = "已连接") }
             return
         }
 
         stalledVideoObservationCount += 1
-        recoverVideoIfConfirmed(reason)
+        recoverVideoIfConfirmed(reason, snapshot)
     }
 
     private fun recoverVideoIfConfirmed(
         reason: String,
+        snapshot: WebRtcManager.VideoFrameHealthSnapshot,
         confirmationCount: Int = VIDEO_STALL_CONFIRMATION_COUNT
     ) {
         if (stalledVideoObservationCount < confirmationCount) {
@@ -770,10 +773,23 @@ class RemoteViewModel(
                 markVideoStreamUnstable(videoStreamStateMachine, activeWebRtcGeneration, System.currentTimeMillis())
                 appLogger?.w(LOG_TAG, "Video stall confirmed, reason=$reason, deviceId=${device.id}, generation=$activeWebRtcGeneration")
                 _uiState.update { it.copy(status = "画面恢复中...") }
-                if (!tryVideoKeyFrameRecovery(reason)) {
-                    if (tryIceRecovery("key_frame_unavailable_$reason").not()) {
-                        scheduleReconnectNow()
-                    }
+                viewModelScope.launch {
+                    val agentHealth = runCatching {
+                        currentSessionId?.takeIf { it.isNotBlank() }?.let { sessionId ->
+                            deviceRepository.getVideoStreamHealth(device.id, sessionId)
+                        }
+                    }.getOrNull()
+                    val decision = decideVideoRecovery(
+                        client = ClientVideoHealthSnapshot(
+                            state = "client_playback_stalled_confirmed",
+                            reason = reason,
+                            signalingAttached = signalClient.isOpen,
+                            peerConnected = snapshot.isPeerConnected
+                        ),
+                        agent = agentHealth
+                    )
+                    _uiState.update { it.copy(unifiedRecoveryDecision = decision) }
+                    applyUnifiedVideoRecoveryDecision(decision)
                 }
             }
             VideoRecoveryStage.KeyFrameRequested -> {
@@ -797,6 +813,29 @@ class RemoteViewModel(
         }
     }
 
+    private fun applyUnifiedVideoRecoveryDecision(decision: UnifiedVideoRecoveryDecision) {
+        appLogger?.w(LOG_TAG, "Unified video recovery decision, action=${decision.action}, origin=${decision.origin}, reason=${decision.reason}, deviceId=${device.id}")
+        when (decision.action) {
+            UnifiedVideoRecoveryAction.SourceRefresh,
+            UnifiedVideoRecoveryAction.KeyFrameReplay,
+            UnifiedVideoRecoveryAction.Renegotiate,
+            UnifiedVideoRecoveryAction.SignalingReattach -> {
+                if (!tryVideoKeyFrameRecovery(decision.reason)) {
+                    if (tryIceRecovery("key_frame_unavailable_${decision.reason}").not()) {
+                        scheduleReconnectNow()
+                    }
+                }
+            }
+            UnifiedVideoRecoveryAction.IceRestart -> {
+                if (tryIceRecovery(decision.reason).not()) {
+                    scheduleReconnectNow()
+                }
+            }
+            UnifiedVideoRecoveryAction.Reconnect -> scheduleReconnectNow()
+            UnifiedVideoRecoveryAction.Observe -> Unit
+        }
+    }
+
     private fun resetVideoRecoveryState(snapshot: WebRtcManager.VideoFrameHealthSnapshot? = null) {
         videoRecoveryStage = VideoRecoveryStage.Monitoring
         stalledVideoObservationCount = 0
@@ -812,18 +851,6 @@ class RemoteViewModel(
 
     private fun observationCountFor(durationMs: Long): Int {
         return ((durationMs + VIDEO_RECOVERY_POLL_INTERVAL_MS - 1) / VIDEO_RECOVERY_POLL_INTERVAL_MS).toInt().coerceAtLeast(1)
-    }
-
-    private fun markVideoRecoveryActivity() {
-        lastVideoRecoveryActivityAtMillis = System.currentTimeMillis()
-    }
-
-    private fun hasRecentVideoRecoveryActivity(): Boolean {
-        val lastActivity = lastVideoRecoveryActivityAtMillis
-        if (lastActivity <= 0L) {
-            return false
-        }
-        return System.currentTimeMillis() - lastActivity <= VIDEO_ACTIVITY_RECOVERY_WINDOW_MS
     }
 
     private fun scheduleReconnectNow() {

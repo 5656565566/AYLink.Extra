@@ -51,6 +51,7 @@ import {
   useVideoStreamHealth,
   type VideoStreamStallDetails
 } from '../features/screencast/useVideoStreamHealth';
+import { decideVideoRecovery, type AgentVideoHealthSnapshot, type UnifiedVideoRecoveryDecision } from '../features/screencast/videoRecoveryDecision';
 import { useScreencastMediaTracks } from '../features/screencast/useScreencastMediaTracks';
 import {
   useScrcpyControlChannels,
@@ -545,6 +546,10 @@ export default defineComponent({
         { label: 'ReadyState', value: formatDebugValue(playback.readyState) },
         { label: 'CurrentTime', value: typeof playback.currentTime === 'number' ? playback.currentTime.toFixed(2) : '-' },
         { label: '渲染帧年龄', value: typeof playback.renderedFrameAgeMs === 'number' ? `${Math.round(playback.renderedFrameAgeMs)} ms` : '-' },
+        { label: '统一状态', value: formatDebugValue(snapshot.unifiedState) },
+        { label: '健康来源', value: formatDebugValue(snapshot.unifiedOrigin) },
+        { label: '恢复动作', value: formatDebugValue(snapshot.recoveryAction) },
+        { label: '恢复原因', value: formatDebugValue(snapshot.recoveryReason) },
         { label: 'RTP Packets', value: formatDebugNumber(inbound?.packetsReceived) },
         { label: 'RTP Bytes', value: formatDebugNumber(inbound?.bytesReceived) },
         { label: 'Frames Decoded', value: formatDebugNumber(inbound?.framesDecoded) },
@@ -1463,6 +1468,60 @@ export default defineComponent({
       videoStreamHealth.scheduleSignalingDetach(connectionId);
     };
 
+    const fetchAgentVideoHealth = async (): Promise<AgentVideoHealthSnapshot | null> => {
+      if (!deviceId.value || !currentScrcpySessionId) {
+        return null;
+      }
+      try {
+        const response = await apiFetch(`/api/scrcpy-sessions/video-health?deviceId=${encodeURIComponent(deviceId.value)}&sessionId=${encodeURIComponent(currentScrcpySessionId)}`, {
+          method: 'GET',
+          timeoutMs: 2000,
+          handleForbidden: false
+        });
+        if (!response.ok) {
+          return null;
+        }
+        return await response.json() as AgentVideoHealthSnapshot;
+      } catch (error) {
+        console.warn('[WebRTC] Failed to fetch agent video health snapshot.', error);
+        return null;
+      }
+    };
+
+    const applyUnifiedVideoRecoveryDecision = async (decision: UnifiedVideoRecoveryDecision) => {
+      console.warn('[WebRTC] Applying unified video recovery decision.', decision);
+      switch (decision.action) {
+        case 'source_refresh':
+        case 'keyframe_replay':
+          requestVideoKeyFrameReplay(decision.reason);
+          return;
+        case 'signaling_reattach':
+          if (await tryReattachSignaling(decision.reason)) {
+            return;
+          }
+          requestVideoKeyFrameReplay(decision.reason);
+          return;
+        case 'renegotiate':
+          requestVideoKeyFrameReplay(decision.reason);
+          if (await tryVideoRenegotiation(decision.reason)) {
+            return;
+          }
+          return;
+        case 'ice_restart':
+          if (await tryIceRestart(decision.reason)) {
+            return;
+          }
+          scheduleReconnect(`unified_recovery_${decision.reason}`);
+          return;
+        case 'reconnect':
+          scheduleReconnect(`unified_recovery_${decision.reason}`);
+          return;
+        case 'observe':
+        default:
+          return;
+      }
+    };
+
     const handleConfirmedVideoStreamStall = (details: VideoStreamStallDetails) => {
       if (connectionSchedulerState.suppressAutoReconnect || details.connectionId !== activeConnectionId) {
         return;
@@ -1484,16 +1543,18 @@ export default defineComponent({
       const recoveryReason = details.status === 'client_decode_stalled_confirmed'
           ? 'client_decode_stalled'
           : 'client_playback_starved';
-      requestVideoKeyFrameReplay(recoveryReason);
-      if (!signalingAttached) {
-        console.info('[WebRTC] Confirmed video stream stall while signaling websocket is detached; attempting signaling reattach before escalating recovery.', {
-          ...details,
-          sessionId: currentScrcpySessionId
-        });
-        void tryReattachSignaling(recoveryReason);
-      } else {
-        console.info('[WebRTC] Confirmed video stream stall; entering recovery observation window before escalating recovery.', details);
-      }
+      void (async () => {
+        const agentHealth = await fetchAgentVideoHealth();
+        const decision = decideVideoRecovery({
+          state: details.status,
+          reason: recoveryReason,
+          signalingAttached,
+          peerConnectionState: details.peerConnectionState
+        }, agentHealth);
+        videoStreamHealth.setUnifiedDecision(decision);
+        await applyUnifiedVideoRecoveryDecision(decision);
+      })();
+      console.info('[WebRTC] Confirmed video stream stall; unified recovery decision requested.', details);
 
       pendingVideoStreamStallObservationTimer = window.setTimeout(() => {
         pendingVideoStreamStallObservationTimer = null;

@@ -907,6 +907,10 @@ private fun RemoteDebugOverlay(controlState: RemoteControlUiState) {
             DebugRow("Peer", snapshot?.isPeerConnected?.toString() ?: "-")
             DebugRow("有画面", snapshot?.hasVideoFrame?.toString() ?: "-")
             DebugRow("Generation", snapshot?.generation?.toString() ?: "-")
+            DebugRow("统一状态", controlState.unifiedRecoveryDecision?.state?.name ?: "-")
+            DebugRow("健康来源", controlState.unifiedRecoveryDecision?.origin?.name ?: "-")
+            DebugRow("恢复动作", controlState.unifiedRecoveryDecision?.action?.name ?: "-")
+            DebugRow("恢复原因", controlState.unifiedRecoveryDecision?.reason ?: "-")
         }
     }
 }

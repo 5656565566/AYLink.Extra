@@ -405,7 +405,7 @@ func TestRuntimeVideoRefreshSkipsStaticButAliveAfterMediaPacketIdle(t *testing.T
 	}
 }
 
-func TestRuntimeVideoRefreshKeepsConfirmationForUncertainSource(t *testing.T) {
+func TestRuntimeVideoRefreshSkipsUnhealthyUnknownSource(t *testing.T) {
 	now := time.Now()
 	rt := &runtime{
 		done: make(chan struct{}),
@@ -423,10 +423,10 @@ func TestRuntimeVideoRefreshKeepsConfirmationForUncertainSource(t *testing.T) {
 	rt.refreshMu.Lock()
 	defer rt.refreshMu.Unlock()
 	if !rt.lastRefreshTime.IsZero() {
-		t.Fatalf("expected uncertain source refresh to wait for confirmation")
+		t.Fatalf("expected source without unhealthy state to skip refresh")
 	}
-	if rt.refreshAskCount != 1 {
-		t.Fatalf("expected one pending confirmation, got %d", rt.refreshAskCount)
+	if rt.refreshAskCount != 0 {
+		t.Fatalf("expected confirmation counter to reset, got %d", rt.refreshAskCount)
 	}
 }
 
@@ -449,8 +449,8 @@ func TestRuntimeVideoRefreshBypassOptionSkipsConfirmationForHealthySource(t *tes
 
 	rt.refreshMu.Lock()
 	defer rt.refreshMu.Unlock()
-	if rt.lastRefreshTime.IsZero() {
-		t.Fatalf("expected bypass refresh to dispatch without waiting for confirmation")
+	if !rt.lastRefreshTime.IsZero() {
+		t.Fatalf("expected healthy source refresh to be skipped")
 	}
 	if rt.refreshAskCount != 0 {
 		t.Fatalf("expected confirmation counter to reset, got %d", rt.refreshAskCount)
@@ -503,8 +503,8 @@ func TestRuntimeVideoRefreshAllowsPacketIdleStaticSourceWithOption(t *testing.T)
 
 	rt.refreshMu.Lock()
 	defer rt.refreshMu.Unlock()
-	if rt.lastRefreshTime.IsZero() {
-		t.Fatalf("expected packet-idle static source refresh to dispatch")
+	if !rt.lastRefreshTime.IsZero() {
+		t.Fatalf("expected packet-idle static source refresh to be skipped")
 	}
 	if rt.refreshAskCount != 0 {
 		t.Fatalf("expected confirmation counter to reset, got %d", rt.refreshAskCount)

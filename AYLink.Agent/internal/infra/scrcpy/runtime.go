@@ -442,6 +442,19 @@ func (r *runtime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOption
 	}
 	now := time.Now()
 	health := r.GetSourceHealth()
+	if !shouldRefreshUnhealthyVideoSource(health.State) {
+		r.refreshAskCount = 0
+		r.lastRefreshAskAt = time.Time{}
+		if r.logger != nil {
+			r.logger.Info("scrcpy video refresh skipped",
+				"reason", "source_not_unhealthy",
+				"sourceHealth", string(health.State),
+				"sourceHealthReason", health.Reason,
+			)
+		}
+		r.refreshMu.Unlock()
+		return nil
+	}
 	if health.State == domainscrcpy.SourceHealthStaticButAlive && !shouldRefreshStaticButAliveSource(health, refreshOptions) {
 		r.refreshAskCount = 0
 		r.lastRefreshAskAt = time.Time{}
@@ -514,6 +527,15 @@ func (r *runtime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOption
 
 func shouldRefreshStaticButAliveSource(health domainscrcpy.SourceHealthSnapshot, options domainscrcpy.VideoRefreshOptions) bool {
 	return options.AllowPacketIdleRefresh && health.Reason == "holding_last_frame_packet_idle"
+}
+
+func shouldRefreshUnhealthyVideoSource(state domainscrcpy.SourceHealthState) bool {
+	switch state {
+	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldBypassVideoRefreshConfirmation(state domainscrcpy.SourceHealthState) bool {

@@ -142,12 +142,13 @@ func handleLocalMetaControlPayload(logger logging.Logger, runtime domainscrcpy.R
 		if runtime.ReplayLatestVideoKeyFrame() {
 			return
 		}
-		requestScrcpySourceRefresh(logger, runtime, "frontend_playback_health")
+		if logger != nil {
+			logger.Info("webrtc video key frame replay skipped", "reason", "cached_keyframe_unavailable", "source", "frontend_playback_health")
+		}
 	case localMetaMsgVideoRefresh:
 		if logger != nil {
-			logger.Info("webrtc video refresh requested", "source", "frontend_playback_health")
+			logger.Warn("webrtc video refresh request ignored", "reason", "client_source_reset_forbidden", "source", "frontend_playback_health")
 		}
-		requestScrcpySourceRefresh(logger, runtime, "frontend_playback_health")
 	}
 }
 
@@ -638,11 +639,11 @@ func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runt
 		"repeatedPTSCount", health.RepeatedPTSCount,
 	}, args...)
 
-	if health.State == domainscrcpy.SourceHealthStaticButAlive && !shouldRequestStaticButAliveRefresh(health, reason) {
+	if !isUnhealthySourceForVideoRefresh(health.State) {
 		if logger != nil {
 			logger.Info("scrcpy source refresh skipped",
 				append([]any{
-					"skipReason", "source_static_but_alive",
+					"skipReason", "source_not_unhealthy",
 				}, logArgs...)...,
 			)
 		}
@@ -652,18 +653,7 @@ func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runt
 	if logger != nil {
 		logger.Info("scrcpy source refresh requested", logArgs...)
 	}
-	_ = runtime.RequestVideoRefresh(videoRefreshOptionsForReason(reason)...)
-}
-
-func videoRefreshOptionsForReason(reason string) []domainscrcpy.VideoRefreshOptions {
-	if reason == "frontend_playback_health" {
-		return []domainscrcpy.VideoRefreshOptions{{BypassConfirmation: true, AllowPacketIdleRefresh: true}}
-	}
-	return nil
-}
-
-func shouldRequestStaticButAliveRefresh(health domainscrcpy.SourceHealthSnapshot, reason string) bool {
-	return reason == "frontend_playback_health" && health.Reason == "holding_last_frame_packet_idle"
+	_ = runtime.RequestVideoRefresh()
 }
 
 func formatSourceHealthAge(value time.Time) string {

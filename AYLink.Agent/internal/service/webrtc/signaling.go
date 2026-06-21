@@ -123,7 +123,8 @@ func (s *Service) getOrCreateSignalingSession(ctx context.Context, deviceID stri
 		return nil, err
 	}
 
-	if err := s.attachScrcpyVideo(peerConnection, runtime); err != nil {
+	videoBridge, err := s.attachScrcpyVideo(peerConnection, runtime)
+	if err != nil {
 		_ = peerConnection.Close()
 		return nil, err
 	}
@@ -136,6 +137,7 @@ func (s *Service) getOrCreateSignalingSession(ctx context.Context, deviceID stri
 		sessionID:         sessionID,
 		runtime:           runtime,
 		peerConnection:    peerConnection,
+		videoBridge:       videoBridge,
 		rewriteCandidates: rewriteCandidates,
 		currentPeerState:  pion.PeerConnectionStateNew,
 	}

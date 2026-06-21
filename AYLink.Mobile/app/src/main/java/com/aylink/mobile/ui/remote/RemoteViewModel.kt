@@ -302,18 +302,9 @@ class RemoteViewModel(
             RemoteIntent.LoadApps -> loadApps()
             is RemoteIntent.ReconnectToApp -> reconnectToApp(intent.app)
             RemoteIntent.ReconnectToDevice -> reconnectToDevice()
-            is RemoteIntent.SendPointer -> {
-                markVideoRecoveryActivity()
-                handlePointer(intent.payload)
-            }
-            is RemoteIntent.SendKey -> {
-                markVideoRecoveryActivity()
-                webRtcManager.sendKeyMessage(intent.action)
-            }
-            is RemoteIntent.SendDisplayResize -> {
-                markVideoRecoveryActivity()
-                webRtcManager.sendDisplayResize(intent.width, intent.height)
-            }
+            is RemoteIntent.SendPointer -> handlePointer(intent.payload)
+            is RemoteIntent.SendKey -> webRtcManager.sendKeyMessage(intent.action)
+            is RemoteIntent.SendDisplayResize -> webRtcManager.sendDisplayResize(intent.width, intent.height)
             is RemoteIntent.SetControlDialogOpen -> _uiState.update { it.copy(isControlDialogOpen = intent.isOpen) }
             is RemoteIntent.SetAppSelectDialogOpen -> _uiState.update { it.copy(isAppSelectDialogOpen = intent.isOpen) }
             is RemoteIntent.SetFillMode -> _uiState.update { it.copy(fillMode = intent.fillMode) }

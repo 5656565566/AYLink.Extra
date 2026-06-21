@@ -17,6 +17,7 @@ type signalingSession struct {
 	sessionID         string
 	runtime           domainscrcpy.Runtime
 	peerConnection    *pion.PeerConnection
+	videoBridge       *scrcpyVideoBridge
 	rewriteCandidates func(pion.ICECandidateInit) []pion.ICECandidateInit
 
 	mu                  sync.Mutex

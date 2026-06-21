@@ -34,9 +34,9 @@ const (
 
 var errScrcpyRuntimeUnavailable = errors.New("scrcpy runtime is unavailable")
 
-func (s *Service) attachScrcpyVideo(peerConnection *pion.PeerConnection, runtime domainscrcpy.Runtime) error {
+func (s *Service) attachScrcpyVideo(peerConnection *pion.PeerConnection, runtime domainscrcpy.Runtime) (*scrcpyVideoBridge, error) {
 	if runtime == nil {
-		return errScrcpyRuntimeUnavailable
+		return nil, errScrcpyRuntimeUnavailable
 	}
 
 	track, err := pion.NewTrackLocalStaticSample(pion.RTPCodecCapability{
@@ -44,12 +44,12 @@ func (s *Service) attachScrcpyVideo(peerConnection *pion.PeerConnection, runtime
 		ClockRate: 90000,
 	}, "video", "scrcpy")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	sender, err := peerConnection.AddTrack(track)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	bridge := &scrcpyVideoBridge{
@@ -63,7 +63,7 @@ func (s *Service) attachScrcpyVideo(peerConnection *pion.PeerConnection, runtime
 
 	go bridge.run(peerConnection)
 	go bridge.readRTCP(sender)
-	return nil
+	return bridge, nil
 }
 
 func (s *Service) attachScrcpyAudio(peerConnection *pion.PeerConnection, runtime domainscrcpy.Runtime) error {

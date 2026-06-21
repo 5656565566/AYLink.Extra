@@ -426,6 +426,7 @@ private fun RemoteVideoRenderer(
                 }
             )
             .graphicsLayer {
+                alpha = if (videoSize == IntSize.Zero) 0f else 1f
                 scaleX = stretchScale.scaleX
                 scaleY = stretchScale.scaleY
             }

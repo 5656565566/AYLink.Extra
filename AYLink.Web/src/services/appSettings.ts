@@ -9,6 +9,7 @@ const NEW_DISPLAY_DPI_VALUE_KEY = storageKeys.app.newDisplayDpiValue;
 const POINTER_SAMPLING_RATE_KEY = storageKeys.app.pointerSamplingRateHz;
 const PREVIEW_REFRESH_INTERVAL_KEY = storageKeys.app.previewRefreshInterval;
 const WEAK_NETWORK_MODE_KEY = storageKeys.app.weakNetworkMode;
+const DEBUG_MODE_KEY = storageKeys.app.debugMode;
 
 export type NewDisplayDpiMode = 'disabled' | 'auto' | 'custom';
 export type PointerSamplingRateHz = 120 | 60 | 30;
@@ -20,6 +21,7 @@ const newDisplayDpiValue = ref(loadNewDisplayDpiValue());
 const pointerSamplingRateHz = ref<PointerSamplingRateHz>(loadPointerSamplingRateHz());
 const previewRefreshInterval = ref(loadPreviewRefreshInterval());
 const weakNetworkMode = ref(loadWeakNetworkMode());
+const debugMode = ref(loadDebugMode());
 
 export function useAppSettings() {
   return {
@@ -30,6 +32,7 @@ export function useAppSettings() {
     pointerSamplingRateHz: readonly(pointerSamplingRateHz),
     previewRefreshInterval: readonly(previewRefreshInterval),
     weakNetworkMode: readonly(weakNetworkMode),
+    debugMode: readonly(debugMode),
     setAdaptivePointerSampling,
     setBackgroundMute,
     setNewDisplayDpiMode,
@@ -37,6 +40,7 @@ export function useAppSettings() {
     setPointerSamplingRateHz,
     setPreviewRefreshInterval,
     setWeakNetworkMode,
+    setDebugMode,
   };
 }
 
@@ -117,6 +121,15 @@ function setWeakNetworkMode(enabled: boolean) {
 
 function loadWeakNetworkMode() {
   return readLocalBoolean(WEAK_NETWORK_MODE_KEY, false);
+}
+
+function setDebugMode(enabled: boolean) {
+  debugMode.value = enabled;
+  writeLocalBoolean(DEBUG_MODE_KEY, enabled);
+}
+
+function loadDebugMode() {
+  return readLocalBoolean(DEBUG_MODE_KEY, false);
 }
 
 function normalizeNewDisplayDpiValue(value: number) {

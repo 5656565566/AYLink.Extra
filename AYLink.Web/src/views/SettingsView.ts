@@ -90,13 +90,15 @@ export default defineComponent({
       pointerSamplingRateHz,
       previewRefreshInterval,
       weakNetworkMode,
+      debugMode,
       setAdaptivePointerSampling,
       setBackgroundMute,
       setNewDisplayDpiMode,
       setNewDisplayDpiValue,
       setPointerSamplingRateHz,
       setPreviewRefreshInterval,
-      setWeakNetworkMode
+      setWeakNetworkMode,
+      setDebugMode
     } = useAppSettings();
 
     const router = useRouter();
@@ -390,6 +392,10 @@ export default defineComponent({
 
     function onWeakNetworkModeChange(event: Event) {
       setWeakNetworkMode((event.target as HTMLInputElement).checked);
+    }
+
+    function onDebugModeChange(event: Event) {
+      setDebugMode((event.target as HTMLInputElement).checked);
     }
 
     function formatCapturedInputMappingKey(event: KeyboardEvent) {
@@ -1376,6 +1382,7 @@ export default defineComponent({
       pointerSamplingRateHz,
       previewRefreshInterval,
       weakNetworkMode,
+      debugMode,
       inputMappingMouseCaptureKey,
       inputMappingMouseSensitivity,
       inputMappingToggleHintsKey,
@@ -1388,6 +1395,7 @@ export default defineComponent({
       setPointerSamplingRateHz,
       setPreviewRefreshInterval,
       setWeakNetworkMode,
+      setDebugMode,
       router,
       auth,
       currentUser,
@@ -1469,6 +1477,7 @@ export default defineComponent({
       onPointerSamplingRateChange,
       onPreviewRefreshIntervalChange,
       onWeakNetworkModeChange,
+      onDebugModeChange,
       onInputMappingMouseSensitivityChange,
       startInputMappingKeyCapture,
       handleInputMappingKeyCapture,

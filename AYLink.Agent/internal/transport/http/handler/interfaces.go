@@ -141,6 +141,7 @@ type WebRTCService interface {
 	ReleaseSession(ctx context.Context, deviceID string, sessionID string) error
 	HasActiveSessionLease(deviceID string) bool
 	HasSessionLease(deviceID string, sessionID string) bool
+	GetVideoStreamHealthSnapshot(sessionID string) (domainwebrtc.VideoStreamHealthSnapshot, error)
 	ConsumeTicket(ctx context.Context, value string) (domainwebrtc.Ticket, error)
 	MarkSessionStarted(deviceID string, sessionID string)
 	HandleSignalWebSocket(ctx context.Context, deviceID string, sessionID string, conn *websocket.Conn, settings webrtcservice.SettingsProvider, runtime domainscrcpy.Runtime) error

@@ -21,6 +21,7 @@ export const storageKeys = {
     previewRefreshInterval: 'aylink.settings.previewRefreshInterval',
     themeMode: 'aylink.theme.mode',
     weakNetworkMode: 'aylink.settings.weakNetworkMode',
+    debugMode: 'aylink.settings.debugMode',
     accentColor: 'aylink.theme.accentColor',
   },
   webrtc: {

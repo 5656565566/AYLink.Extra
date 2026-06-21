@@ -271,7 +271,8 @@ export default defineComponent({
       newDisplayDpiMode,
       newDisplayDpiValue,
       pointerSamplingRateHz,
-      weakNetworkMode
+      weakNetworkMode,
+      debugMode
     } = useAppSettings();
 
     const auth = useAuth();
@@ -316,6 +317,8 @@ export default defineComponent({
     const isConnecting = ref(false);
 
     const status = ref(t('Screencast.StatusDisconnected', '未连接'));
+
+    const isVideoStatsOverlayVisible = ref(false);
 
     const lastFrameOverlayUrl = ref('');
 
@@ -495,6 +498,59 @@ export default defineComponent({
       onVideoStreamStalledConfirmed: (details) => {
         handleConfirmedVideoStreamStall(details);
       }
+    });
+
+    const toggleVideoStatsOverlay = () => {
+      if (!debugMode.value) {
+        isVideoStatsOverlayVisible.value = false;
+        return;
+      }
+      isVideoStatsOverlayVisible.value = !isVideoStatsOverlayVisible.value;
+      if (isVideoStatsOverlayVisible.value) {
+        void videoStreamHealth.refreshDebugStatsSnapshot();
+      }
+    };
+
+    const formatDebugValue = (value: string | number | boolean | null | undefined) => {
+      if (value === null || value === undefined || value === '') {
+        return '-';
+      }
+      return String(value);
+    };
+
+    const formatDebugNumber = (value: number | null | undefined) => {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return '-';
+      }
+      return String(Math.round(value));
+    };
+
+    const formatDebugTime = (value: number | null | undefined) => {
+      if (typeof value !== 'number' || value <= 0) {
+        return '-';
+      }
+      return new Date(value).toLocaleTimeString();
+    };
+
+    const videoDebugStatsRows = computed(() => {
+      const snapshot = videoStreamHealth.debugStatsSnapshot.value;
+      const video = videoElement.value;
+      const inbound = snapshot.inboundVideoStats;
+      const playback = snapshot.playback;
+      return [
+        { label: '连接状态', value: formatDebugValue(snapshot.peerConnectionState) },
+        { label: '流状态', value: formatDebugValue(snapshot.state) },
+        { label: '信令连接', value: snapshot.signalingAttached ? 'attached' : 'detached' },
+        { label: '分辨率', value: video?.videoWidth && video?.videoHeight ? `${video.videoWidth} × ${video.videoHeight}` : '-' },
+        { label: 'ReadyState', value: formatDebugValue(playback.readyState) },
+        { label: 'CurrentTime', value: typeof playback.currentTime === 'number' ? playback.currentTime.toFixed(2) : '-' },
+        { label: '渲染帧年龄', value: typeof playback.renderedFrameAgeMs === 'number' ? `${Math.round(playback.renderedFrameAgeMs)} ms` : '-' },
+        { label: 'RTP Packets', value: formatDebugNumber(inbound?.packetsReceived) },
+        { label: 'RTP Bytes', value: formatDebugNumber(inbound?.bytesReceived) },
+        { label: 'Frames Decoded', value: formatDebugNumber(inbound?.framesDecoded) },
+        { label: 'Frames Dropped', value: formatDebugNumber(inbound?.framesDropped) },
+        { label: '更新时间', value: formatDebugTime(snapshot.capturedAt) }
+      ];
     });
 
     const mediaTracks = useScreencastMediaTracks({
@@ -3368,7 +3424,8 @@ export default defineComponent({
         eyeOff: EyeOff20Regular,
         pause: Pause20Regular,
         play: Play20Regular,
-        closeMapping: DismissCircle20Regular
+        closeMapping: DismissCircle20Regular,
+        debug: Flash24Regular
       },
       isMenuExpanded,
       effectiveFillMode,
@@ -3378,6 +3435,8 @@ export default defineComponent({
       isInputMappingHintsVisible,
       isInputMappingEnabled,
       isInputMappingPaused,
+      debugModeEnabled: debugMode,
+      isVideoStatsOverlayVisible,
       ensureMenuInsideStage,
       sendAndroidCommand,
       toggleFillMode,
@@ -3390,7 +3449,8 @@ export default defineComponent({
       enterInputMappingEditMode,
       toggleInputMappingHintsWithNotification,
       toggleInputMappingPausedWithNotification,
-      closeInputMappingWithNotification
+      closeInputMappingWithNotification,
+      toggleVideoStatsOverlay
     });
 
     const pushInputMappingSwipeRecordingPoint = (point: NormalizedPoint) => {
@@ -4119,6 +4179,12 @@ export default defineComponent({
       syncBackgroundMuteState();
     });
 
+    watch(debugMode, (enabled) => {
+      if (!enabled) {
+        isVideoStatsOverlayVisible.value = false;
+      }
+    });
+
     const cleanupCastViewResources = (preserveForBackground: boolean) => {
       rtcConfigRequest.dispose();
       remoteClipboard.dispose();
@@ -4272,6 +4338,7 @@ export default defineComponent({
       KEYBOARD_REPORT_DESC,
       t,
       backgroundMute,
+      debugMode,
       newDisplayDpiMode,
       newDisplayDpiValue,
       auth,
@@ -4332,6 +4399,8 @@ export default defineComponent({
       captureSelectedInputMappingMouseButton,
       inputMappingStickerPaletteItems,
       activeFloatingMenuItems,
+      isVideoStatsOverlayVisible,
+      videoDebugStatsRows,
       isMenuExpanded,
       isDocked,
       isMenuDragActive,

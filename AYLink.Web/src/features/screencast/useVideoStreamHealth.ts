@@ -1,3 +1,4 @@
+import { readonly, ref } from 'vue';
 import {
   createVideoStreamStateMachine,
   getVideoStreamDetachDelay,
@@ -54,6 +55,16 @@ export type VideoStreamHealthStatus =
   | 'client_decode_stalled_pending'
   | 'client_decode_stalled_confirmed';
 
+export interface VideoDebugStatsSnapshot {
+  capturedAt: number;
+  connectionId: number;
+  state: string;
+  peerConnectionState: RTCPeerConnectionState | null;
+  signalingAttached: boolean;
+  inboundVideoStats: InboundVideoStatsSnapshot | null;
+  playback: VideoPlaybackSnapshot;
+}
+
 interface VideoStreamHealthOptions {
   stableDetachMs: number;
   stallThresholdMs: number;
@@ -96,6 +107,15 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   let consecutiveVideoDecodeStallDetections = 0;
   let hasLoggedIdleStaticVideo = false;
   let lastRenderedVideoFrameAt = 0;
+  const debugStatsSnapshot = ref<VideoDebugStatsSnapshot>({
+    capturedAt: 0,
+    connectionId: 0,
+    state: stateMachine.state,
+    peerConnectionState: null,
+    signalingAttached: false,
+    inboundVideoStats: null,
+    playback: getEmptyVideoPlaybackSnapshot()
+  });
 
   const stopVideoFrameCaptureLoop = () => {
     const videoElement = options.getVideoElement();
@@ -179,6 +199,18 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     }
     return playback.renderedFrameAgeMs >= options.stallThresholdMs;
   };
+
+  function getEmptyVideoPlaybackSnapshot(): VideoPlaybackSnapshot {
+    return {
+      readyState: null,
+      paused: null,
+      ended: null,
+      seeking: null,
+      currentTime: null,
+      trackMuted: false,
+      renderedFrameAgeMs: null
+    };
+  }
 
   const getVideoPlaybackSnapshot = (): VideoPlaybackSnapshot => {
     const videoElement = options.getVideoElement();
@@ -267,6 +299,24 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
   const resetStallConfirmations = () => {
     consecutiveVideoStreamStallDetections = 0;
     consecutiveVideoDecodeStallDetections = 0;
+  };
+
+  const updateDebugStatsSnapshot = (inboundVideoStats: InboundVideoStatsSnapshot | null = null) => {
+    debugStatsSnapshot.value = {
+      capturedAt: Date.now(),
+      connectionId: options.getActiveConnectionId(),
+      state: stateMachine.state,
+      peerConnectionState: options.getPeerConnection()?.connectionState ?? null,
+      signalingAttached: !!options.getSignalingSocket() && options.getSignalingSocket()?.readyState === WebSocket.OPEN,
+      inboundVideoStats,
+      playback: getVideoPlaybackSnapshot()
+    };
+  };
+
+  const refreshDebugStatsSnapshot = async () => {
+    const inboundVideoStats = await getInboundVideoStatsSnapshot();
+    updateDebugStatsSnapshot(inboundVideoStats);
+    return debugStatsSnapshot.value;
   };
 
   const buildStallDetails = (
@@ -539,6 +589,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
   const runScheduledWatchdog = async (connectionId: number, reason: string) => {
     await handleWatchdog(connectionId, reason);
+    void refreshDebugStatsSnapshot();
     if (shouldMonitorVideoStream(connectionId)) {
       scheduleWatchdog(connectionId, getNextWatchdogDelay(), 'inbound_rtp_watchdog');
     }
@@ -589,6 +640,8 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
   return {
     stateMachine,
+    debugStatsSnapshot: readonly(debugStatsSnapshot),
+    refreshDebugStatsSnapshot,
     start,
     stopVideoFrameCaptureLoop,
     stopWatchdog,

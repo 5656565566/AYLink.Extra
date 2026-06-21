@@ -25,6 +25,8 @@ type fakeWebRTCService struct {
 	touchErr           error
 	releaseErr         error
 	activeLease        bool
+	healthSnapshot     domainwebrtc.VideoStreamHealthSnapshot
+	healthErr          error
 }
 
 func (f *fakeWebRTCService) CreateTicket(_ context.Context, input webrtcservice.CreateTicketInput) (webrtcservice.CreateTicketResult, error) {
@@ -46,6 +48,10 @@ func (f *fakeWebRTCService) HasActiveSessionLease(string) bool {
 
 func (f *fakeWebRTCService) HasSessionLease(string, string) bool {
 	return f.activeLease
+}
+
+func (f *fakeWebRTCService) GetVideoStreamHealthSnapshot(string) (domainwebrtc.VideoStreamHealthSnapshot, error) {
+	return f.healthSnapshot, f.healthErr
 }
 
 func (f *fakeWebRTCService) ConsumeTicket(context.Context, string) (domainwebrtc.Ticket, error) {
@@ -266,6 +272,63 @@ func TestWebRTCHandlerCreateTicketMapsInternalError(t *testing.T) {
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+}
+
+func TestWebRTCHandlerVideoHealthRequiresDeviceID(t *testing.T) {
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/scrcpy-sessions/video-health?sessionId=abc", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.VideoHealth(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `DEVICE_ID_REQUIRED`) {
+		t.Fatalf("expected device id error, got %s", recorder.Body.String())
+	}
+}
+
+func TestWebRTCHandlerVideoHealthMapsMissingSession(t *testing.T) {
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: false}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/scrcpy-sessions/video-health?deviceId=1&sessionId=missing", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.VideoHealth(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `SESSION_NOT_FOUND`) {
+		t.Fatalf("expected session not found error, got %s", recorder.Body.String())
+	}
+}
+
+func TestWebRTCHandlerVideoHealthReturnsSnapshot(t *testing.T) {
+	handler := NewWebRTCHandler(&fakeWebRTCService{
+		activeLease: true,
+		healthSnapshot: domainwebrtc.VideoStreamHealthSnapshot{
+			State:  domainwebrtc.VideoStreamStateObserving,
+			Origin: domainwebrtc.VideoStreamHealthOriginSender,
+			Reason: "ready",
+			Sender: domainwebrtc.VideoSenderDiagnostics{State: "ready", PeerConnected: true},
+		},
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/scrcpy-sessions/video-health?deviceId=1&sessionId=abc", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.VideoHealth(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"state":"observing"`) || !strings.Contains(body, `"origin":"sender"`) || !strings.Contains(body, `"peerConnected":true`) {
+		t.Fatalf("expected health snapshot payload, got %s", body)
 	}
 }
 

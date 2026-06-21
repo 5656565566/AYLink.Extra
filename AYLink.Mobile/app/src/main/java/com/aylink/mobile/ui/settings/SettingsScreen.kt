@@ -143,9 +143,15 @@ fun SettingsScreen(
         }
 
         SettingCard(
-            title = "诊断日志",
-            description = "导出最近的应用日志，便于排查远程连接问题"
+            title = "诊断",
+            description = "开启调试显示和导出最近的应用日志，便于排查远程连接问题"
         ) {
+            SettingSwitchRow(
+                title = "调试模式",
+                checked = settings.debugMode,
+                onCheckedChange = settingsStore::updateDebugMode
+            )
+            Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)

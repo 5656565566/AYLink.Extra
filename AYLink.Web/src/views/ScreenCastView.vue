@@ -48,6 +48,15 @@
         @contextmenu.prevent
       ></video>
       <audio ref="audioElement" autoplay playsinline style="display: none"></audio>
+      <div v-if="debugMode && isVideoStatsOverlayVisible" class="video-debug-overlay">
+        <div class="video-debug-overlay__title">{{ t('Screencast.VideoStats', '视频统计信息') }}</div>
+        <div class="video-debug-overlay__grid">
+          <template v-for="row in videoDebugStatsRows" :key="row.label">
+            <span class="video-debug-overlay__label">{{ row.label }}</span>
+            <span class="video-debug-overlay__value">{{ row.value }}</span>
+          </template>
+        </div>
+      </div>
       <div
         v-if="isInputMappingEditMode"
         class="input-mapping-edit-scrim"

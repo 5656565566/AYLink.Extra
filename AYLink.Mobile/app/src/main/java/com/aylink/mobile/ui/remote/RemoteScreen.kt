@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUp
@@ -277,9 +278,14 @@ fun RemoteScreen(
             onReconnectToApp = { viewModel.handleIntent(RemoteIntent.ReconnectToApp(it)) },
             onToggleControlDialog = { viewModel.handleIntent(RemoteIntent.SetControlDialogOpen(it)) },
             onToggleControlPanelCollapsed = { viewModel.handleIntent(RemoteIntent.SetControlPanelCollapsed(it)) },
+            onToggleDebugOverlay = { viewModel.handleIntent(RemoteIntent.ToggleDebugOverlay) },
             onDismissAppPicker = { viewModel.handleIntent(RemoteIntent.SetAppSelectDialogOpen(false)) },
             onDisconnect = { viewModel.handleIntent(RemoteIntent.DisconnectAndNavigateBack) }
         )
+
+        if (controlState.isDebugModeEnabled && controlState.isDebugOverlayVisible) {
+            RemoteDebugOverlay(controlState = controlState)
+        }
     }
 }
 
@@ -501,6 +507,7 @@ private fun RemoteFloatingControl(
     onReconnectToApp: (DeviceApp) -> Unit,
     onToggleControlDialog: (Boolean) -> Unit,
     onToggleControlPanelCollapsed: (Boolean) -> Unit,
+    onToggleDebugOverlay: () -> Unit,
     onDismissAppPicker: () -> Unit,
     onDisconnect: () -> Unit
 ) {
@@ -672,6 +679,7 @@ private fun RemoteFloatingControl(
         onSetFillMode = onSetFillMode,
         onReconnectToDevice = onReconnectToDevice,
         onOpenAppPicker = onOpenAppPicker,
+        onToggleDebugOverlay = onToggleDebugOverlay,
         onDisconnect = onDisconnect
     )
 
@@ -695,6 +703,7 @@ private fun RemoteControlSheet(
     onSetFillMode: (Boolean) -> Unit,
     onReconnectToDevice: () -> Unit,
     onOpenAppPicker: () -> Unit,
+    onToggleDebugOverlay: () -> Unit,
     onDisconnect: () -> Unit
 ) {
     if (!controlState.isControlDialogOpen) return
@@ -775,6 +784,17 @@ private fun RemoteControlSheet(
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (controlState.isDebugModeEnabled) {
+                item {
+                    Text("诊断", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(onClick = { runControlAction(false) { onToggleDebugOverlay() } }) {
+                        Text(if (controlState.isDebugOverlayVisible) "隐藏调试信息" else "调试模式")
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
 
             item {
@@ -860,6 +880,62 @@ private fun AppPickerSheet(
             }
         }
     )
+}
+
+@Composable
+private fun RemoteDebugOverlay(controlState: RemoteControlUiState) {
+    val snapshot = controlState.debugSnapshot
+    Surface(
+        modifier = Modifier
+            .padding(14.dp)
+            .widthIn(min = 240.dp, max = 360.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = Color.Black.copy(alpha = 0.76f),
+        tonalElevation = 8.dp,
+        shadowElevation = 8.dp
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "视频诊断",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = Color.White
+            )
+            DebugRow("连接", controlState.status)
+            DebugRow("分辨率", snapshot?.let { if (it.width > 0 && it.height > 0) "${it.width} × ${it.height}" else "-" } ?: "-")
+            DebugRow("帧计数", snapshot?.frameCount?.toString() ?: "-")
+            DebugRow("最后帧", snapshot?.lastFrameAtMillis?.let { formatFrameAge(it) } ?: "-")
+            DebugRow("Peer", snapshot?.isPeerConnected?.toString() ?: "-")
+            DebugRow("有画面", snapshot?.hasVideoFrame?.toString() ?: "-")
+            DebugRow("Generation", snapshot?.generation?.toString() ?: "-")
+        }
+    }
+}
+
+@Composable
+private fun DebugRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = label,
+            modifier = Modifier.width(68.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White.copy(alpha = 0.72f)
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelMedium,
+            fontFamily = FontFamily.Monospace,
+            color = Color.White.copy(alpha = 0.92f)
+        )
+    }
+}
+
+private fun formatFrameAge(lastFrameAtMillis: Long): String {
+    if (lastFrameAtMillis <= 0L) {
+        return "-"
+    }
+    val age = (System.currentTimeMillis() - lastFrameAtMillis).coerceAtLeast(0L)
+    return "${age}ms ago"
 }
 
 private fun sendPointer(

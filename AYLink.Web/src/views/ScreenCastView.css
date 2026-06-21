@@ -179,6 +179,52 @@ video.fill-mode {
   object-fit: fill;
 }
 
+.video-debug-overlay {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 6;
+  min-width: 260px;
+  max-width: min(420px, calc(100% - 28px));
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(24, 24, 26, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  font-size: 12px;
+}
+
+.video-debug-overlay__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.video-debug-overlay__grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 5px 12px;
+  align-items: center;
+}
+
+.video-debug-overlay__label {
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 600;
+  text-align: right;
+}
+
+.video-debug-overlay__value {
+  color: rgba(255, 255, 255, 0.9);
+  font-family: Consolas, 'SFMono-Regular', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .input-mapping-edit-scrim {
   position: absolute;
   inset: 0;

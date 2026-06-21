@@ -118,6 +118,53 @@ func (h *WebRTCHandler) Release(w http.ResponseWriter, r *http.Request) {
 	h.handleSessionAction(w, r, false)
 }
 
+func (h *WebRTCHandler) VideoHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+	sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
+	if deviceID == "" {
+		WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
+		return
+	}
+	if sessionID == "" {
+		WriteError(w, http.StatusBadRequest, "SESSION_ID_REQUIRED", "WebRTC.SessionIdRequired", "sessionId 不能为空")
+		return
+	}
+
+	parsedDeviceID, err := strconv.Atoi(deviceID)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.access, parsedDeviceID); !ok {
+		return
+	}
+	if !h.service.HasSessionLease(deviceID, sessionID) {
+		WriteError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "WebRTC.SessionIdRequired", "sessionId 无效或已过期")
+		return
+	}
+
+	snapshot, err := h.service.GetVideoStreamHealthSnapshot(sessionID)
+	if err != nil {
+		if errors.Is(err, webrtcservice.ErrSessionIDRequired) {
+			WriteError(w, http.StatusBadRequest, "SESSION_ID_REQUIRED", "WebRTC.SessionIdRequired", "sessionId 不能为空")
+			return
+		}
+		if errors.Is(err, webrtcservice.ErrSessionNotFound) {
+			WriteError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "WebRTC.SessionIdRequired", "sessionId 无效或已过期")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "VIDEO_HEALTH_FAILED", "WebRTC.VideoHealthFailed", "读取视频流状态失败")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, snapshot)
+}
+
 func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Request, heartbeat bool) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)

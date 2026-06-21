@@ -47,6 +47,7 @@ export interface ScreencastFloatingActionIcons {
   pause: unknown;
   play: unknown;
   closeMapping: unknown;
+  debug: unknown;
 }
 
 export function useScreencastFloatingActions(options: {
@@ -60,6 +61,8 @@ export function useScreencastFloatingActions(options: {
   isInputMappingHintsVisible: Ref<boolean>;
   isInputMappingEnabled: Ref<boolean>;
   isInputMappingPaused: Ref<boolean>;
+  debugModeEnabled: Ref<boolean>;
+  isVideoStatsOverlayVisible: Ref<boolean>;
   ensureMenuInsideStage: () => void;
   sendAndroidCommand: (command: string) => void;
   toggleFillMode: () => void;
@@ -73,6 +76,7 @@ export function useScreencastFloatingActions(options: {
   toggleInputMappingHintsWithNotification: () => void;
   toggleInputMappingPausedWithNotification: () => void;
   closeInputMappingWithNotification: () => void;
+  toggleVideoStatsOverlay: () => void;
 }) {
   const activeFloatingMenuPage = ref<FloatingMenuPage>('main');
 
@@ -233,12 +237,25 @@ export function useScreencastFloatingActions(options: {
         iconComponent: group.iconComponent,
         action: () => openFloatingMenuPage(group.id)
       }));
-      return mainGroupItems.concat({
-        id: 'remote-clipboard',
-        title: options.t('Screencast.RemoteClipboard', '远端剪贴板'),
-        iconComponent: options.icons.clipboard,
-        action: options.toggleClipboardWindow
-      });
+      const directItems: FloatingMenuActionItem[] = [
+        {
+          id: 'remote-clipboard',
+          title: options.t('Screencast.RemoteClipboard', '远端剪贴板'),
+          iconComponent: options.icons.clipboard,
+          action: options.toggleClipboardWindow
+        }
+      ];
+      if (options.debugModeEnabled.value) {
+        directItems.push({
+          id: 'toggle-video-stats',
+          title: options.isVideoStatsOverlayVisible.value
+            ? options.t('Screencast.HideVideoStats', '隐藏视频统计')
+            : options.t('Screencast.ShowVideoStats', '视频统计信息'),
+          iconComponent: options.icons.debug,
+          action: options.toggleVideoStatsOverlay
+        });
+      }
+      return mainGroupItems.concat(directItems);
     }
 
     return getFloatingMenuGroupItems(activeFloatingMenuPage.value);

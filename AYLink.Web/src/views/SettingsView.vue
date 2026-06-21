@@ -104,6 +104,20 @@
             <span class="toggle-switch__slider"></span>
           </label>
         </SettingItem>
+        <SettingItem
+          :title="t('Settings.DebugMode', '调试模式')"
+          :description="t('Settings.DebugModeDescription', '开启后在投屏悬浮菜单中显示视频统计和诊断入口')"
+        >
+          <label class="toggle-switch" :class="{ active: debugMode }">
+            <input
+              class="toggle-switch__input"
+              type="checkbox"
+              :checked="debugMode"
+              @change="onDebugModeChange"
+            />
+            <span class="toggle-switch__slider"></span>
+          </label>
+        </SettingItem>
       </SettingSection>
 
       <SettingSection :title="t('Settings.Appearance', '外观')">

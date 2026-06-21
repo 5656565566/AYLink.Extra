@@ -30,7 +30,8 @@ data class LocalUiSettings(
     val resumeLastRemote: Boolean = true,
     val adaptivePointerSampling: Boolean = true,
     val pointerSamplingRateHz: PointerSamplingRateHz = PointerSamplingRateHz.HZ_120,
-    val weakNetworkMode: Boolean = false
+    val weakNetworkMode: Boolean = false,
+    val debugMode: Boolean = false
 )
 
 class LocalSettingsStore(context: Context) {
@@ -47,7 +48,8 @@ class LocalSettingsStore(context: Context) {
             pointerSamplingRateHz = PointerSamplingRateHz.fromValue(
                 preferences.getInt(KEY_POINTER_SAMPLING_RATE_HZ, PointerSamplingRateHz.HZ_120.hz)
             ),
-            weakNetworkMode = preferences.getBoolean(KEY_WEAK_NETWORK_MODE, false)
+            weakNetworkMode = preferences.getBoolean(KEY_WEAK_NETWORK_MODE, false),
+            debugMode = preferences.getBoolean(KEY_DEBUG_MODE, false)
         )
     )
 
@@ -83,6 +85,11 @@ class LocalSettingsStore(context: Context) {
         preferences.edit { putBoolean(KEY_WEAK_NETWORK_MODE, enabled) }
     }
 
+    fun updateDebugMode(enabled: Boolean) {
+        _settings.value = _settings.value.copy(debugMode = enabled)
+        preferences.edit { putBoolean(KEY_DEBUG_MODE, enabled) }
+    }
+
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DYNAMIC_COLOR = "dynamic_color"
@@ -90,5 +97,6 @@ class LocalSettingsStore(context: Context) {
         private const val KEY_ADAPTIVE_POINTER_SAMPLING = "adaptive_pointer_sampling"
         private const val KEY_POINTER_SAMPLING_RATE_HZ = "pointer_sampling_rate_hz"
         private const val KEY_WEAK_NETWORK_MODE = "weak_network_mode"
+        private const val KEY_DEBUG_MODE = "debug_mode"
     }
 }

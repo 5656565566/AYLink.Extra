@@ -24,44 +24,44 @@ const (
 )
 
 type VideoStreamHealthSnapshot struct {
-	State      VideoStreamState
-	Origin     VideoStreamHealthOrigin
-	Reason     string
-	CapturedAt time.Time
-	Source     VideoSourceDiagnostics
-	Sender     VideoSenderDiagnostics
-	Transport  VideoTransportDiagnostics
+	State      VideoStreamState          `json:"state"`
+	Origin     VideoStreamHealthOrigin   `json:"origin"`
+	Reason     string                    `json:"reason"`
+	CapturedAt time.Time                 `json:"capturedAt"`
+	Source     VideoSourceDiagnostics    `json:"source"`
+	Sender     VideoSenderDiagnostics    `json:"sender"`
+	Transport  VideoTransportDiagnostics `json:"transport"`
 }
 
 type VideoSourceDiagnostics struct {
-	State                string
-	Reason               string
-	LastPacketAt         time.Time
-	LastNewPTSAt         time.Time
-	LastKeyFrameAt       time.Time
-	LastKeyFrameReplayAt time.Time
-	LastVideoRefreshAt   time.Time
-	LastPTS              int64
-	RepeatedPTSCount     int
-	HasSeenMediaPacket   bool
-	RuntimeClosed        bool
+	State                string    `json:"state"`
+	Reason               string    `json:"reason"`
+	LastPacketAt         time.Time `json:"lastPacketAt"`
+	LastNewPTSAt         time.Time `json:"lastNewPtsAt"`
+	LastKeyFrameAt       time.Time `json:"lastKeyFrameAt"`
+	LastKeyFrameReplayAt time.Time `json:"lastKeyFrameReplayAt"`
+	LastVideoRefreshAt   time.Time `json:"lastVideoRefreshAt"`
+	LastPTS              int64     `json:"lastPts"`
+	RepeatedPTSCount     int       `json:"repeatedPtsCount"`
+	HasSeenMediaPacket   bool      `json:"hasSeenMediaPacket"`
+	RuntimeClosed        bool      `json:"runtimeClosed"`
 }
 
 type VideoSenderDiagnostics struct {
-	State              string
-	Reason             string
-	Generation         uint64
-	PeerConnected      bool
-	HasConfig          bool
-	HasPendingKeyFrame bool
-	LastFrameWriteAt   time.Time
-	LastConfigAt       time.Time
-	LastKeyFrameAt     time.Time
-	StateSince         time.Time
+	State              string    `json:"state"`
+	Reason             string    `json:"reason"`
+	Generation         uint64    `json:"generation"`
+	PeerConnected      bool      `json:"peerConnected"`
+	HasConfig          bool      `json:"hasConfig"`
+	HasPendingKeyFrame bool      `json:"hasPendingKeyFrame"`
+	LastFrameWriteAt   time.Time `json:"lastFrameWriteAt"`
+	LastConfigAt       time.Time `json:"lastConfigAt"`
+	LastKeyFrameAt     time.Time `json:"lastKeyFrameAt"`
+	StateSince         time.Time `json:"stateSince"`
 }
 
 type VideoTransportDiagnostics struct {
-	PeerConnectionState string
-	SignalingAttached   bool
-	SessionClosed       bool
+	PeerConnectionState string `json:"peerConnectionState"`
+	SignalingAttached   bool   `json:"signalingAttached"`
+	SessionClosed       bool   `json:"sessionClosed"`
 }

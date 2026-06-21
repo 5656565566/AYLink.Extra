@@ -48,7 +48,10 @@ data class RemoteUiState(
     val isControlPanelCollapsed: Boolean = false,
     val isFlexDisplayEnabled: Boolean = false,
     val isAppProjectionMode: Boolean = false,
-    val isNewDisplayMode: Boolean = false
+    val isNewDisplayMode: Boolean = false,
+    val isDebugModeEnabled: Boolean = false,
+    val isDebugOverlayVisible: Boolean = false,
+    val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null
 )
 
 data class RemoteViewportUiState(
@@ -64,7 +67,10 @@ data class RemoteControlUiState(
     val isControlDialogOpen: Boolean = false,
     val isControlPanelCollapsed: Boolean = false,
     val fillMode: Boolean = false,
-    val isFlexDisplayEnabled: Boolean = false
+    val isFlexDisplayEnabled: Boolean = false,
+    val isDebugModeEnabled: Boolean = false,
+    val isDebugOverlayVisible: Boolean = false,
+    val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null
 )
 
 data class RemoteAppPickerUiState(
@@ -90,6 +96,7 @@ sealed interface RemoteIntent {
     data class SetFillMode(val fillMode: Boolean) : RemoteIntent
     data class SetControlPanelCollapsed(val isCollapsed: Boolean) : RemoteIntent
     data object ToggleControlPanelCollapsed : RemoteIntent
+    data object ToggleDebugOverlay : RemoteIntent
     data object DisconnectAndNavigateBack : RemoteIntent
     data object DismissAppError : RemoteIntent
 }
@@ -141,7 +148,7 @@ class RemoteViewModel(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteViewportUiState())
     val controlUiState: StateFlow<RemoteControlUiState> = _uiState
-        .map { RemoteControlUiState(it.status, it.isControlDialogOpen, it.isControlPanelCollapsed, it.fillMode, it.isFlexDisplayEnabled) }
+        .map { RemoteControlUiState(it.status, it.isControlDialogOpen, it.isControlPanelCollapsed, it.fillMode, it.isFlexDisplayEnabled, it.isDebugModeEnabled, it.isDebugOverlayVisible, it.debugSnapshot) }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteControlUiState())
     val appPickerUiState: StateFlow<RemoteAppPickerUiState> = _uiState
@@ -163,6 +170,7 @@ class RemoteViewModel(
     private var pointerReleaseRetryJob: Job? = null
     private var videoRecoveryJob: Job? = null
     private var adaptiveDisplayResizeJob: Job? = null
+    private var debugSnapshotJob: Job? = null
     private val sampledPointerMoves = linkedMapOf<Int, PointerControlMessage>()
     private val pendingPointerReleases = linkedMapOf<Int, PointerControlMessage>()
     private var currentAppPackage: String? = null
@@ -290,6 +298,21 @@ class RemoteViewModel(
                     }
                 }
             }
+
+            launch {
+                localSettings.collect { settings ->
+                    _uiState.update {
+                        it.copy(
+                            isDebugModeEnabled = settings.debugMode,
+                            isDebugOverlayVisible = if (settings.debugMode) it.isDebugOverlayVisible else false,
+                            debugSnapshot = if (settings.debugMode) it.debugSnapshot else null
+                        )
+                    }
+                    if (!settings.debugMode) {
+                        stopDebugSnapshotLoop()
+                    }
+                }
+            }
         }
 
         sessionStore.updateLastRemoteDevice(device)
@@ -310,6 +333,7 @@ class RemoteViewModel(
             is RemoteIntent.SetFillMode -> _uiState.update { it.copy(fillMode = intent.fillMode) }
             is RemoteIntent.SetControlPanelCollapsed -> _uiState.update { it.copy(isControlPanelCollapsed = intent.isCollapsed) }
             RemoteIntent.ToggleControlPanelCollapsed -> _uiState.update { it.copy(isControlPanelCollapsed = !it.isControlPanelCollapsed) }
+            RemoteIntent.ToggleDebugOverlay -> toggleDebugOverlay()
             RemoteIntent.DisconnectAndNavigateBack -> disconnectAndNavigateBack()
             RemoteIntent.DismissAppError -> _uiState.update { it.copy(appError = null) }
         }
@@ -814,6 +838,38 @@ class RemoteViewModel(
         }
     }
 
+    private fun toggleDebugOverlay() {
+        if (!_uiState.value.isDebugModeEnabled) {
+            _uiState.update { it.copy(isDebugOverlayVisible = false) }
+            return
+        }
+        val visible = !_uiState.value.isDebugOverlayVisible
+        _uiState.update { it.copy(isDebugOverlayVisible = visible, debugSnapshot = webRtcManager.getVideoFrameHealthSnapshot()) }
+        if (visible) {
+            startDebugSnapshotLoop()
+        } else {
+            stopDebugSnapshotLoop(clearSnapshot = false)
+        }
+    }
+
+    private fun startDebugSnapshotLoop() {
+        debugSnapshotJob?.cancel()
+        debugSnapshotJob = viewModelScope.launch {
+            while (isActive) {
+                _uiState.update { it.copy(debugSnapshot = webRtcManager.getVideoFrameHealthSnapshot()) }
+                delay(1_000L)
+            }
+        }
+    }
+
+    private fun stopDebugSnapshotLoop(clearSnapshot: Boolean = true) {
+        debugSnapshotJob?.cancel()
+        debugSnapshotJob = null
+        if (clearSnapshot) {
+            _uiState.update { it.copy(debugSnapshot = null, isDebugOverlayVisible = false) }
+        }
+    }
+
     private fun refreshFlexDisplayState() {
         if (!currentNewDisplay) {
             _uiState.update { it.copy(isFlexDisplayEnabled = false) }
@@ -861,6 +917,7 @@ class RemoteViewModel(
         stopVideoRecoveryWatchdog()
         adaptiveDisplayResizeJob?.cancel()
         adaptiveDisplayResizeJob = null
+        stopDebugSnapshotLoop()
         activeWebRtcGeneration = 0
         resetPointerControlState()
     }

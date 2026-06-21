@@ -109,6 +109,7 @@ internal class RemoteTouchPointerState {
         if (primarySourcePointerId == sourcePointerId) {
             primarySourcePointerId = activePointers.keys.firstOrNull()
         }
+        resetPointerIdsIfIdle()
     }
 
     private fun releaseOtherPointers(
@@ -127,6 +128,7 @@ internal class RemoteTouchPointerState {
         if (primarySourcePointerId != keptSourcePointerId && activePointers.isEmpty()) {
             primarySourcePointerId = null
         }
+        resetPointerIdsIfIdle()
     }
 
     private fun releaseAll(
@@ -144,6 +146,13 @@ internal class RemoteTouchPointerState {
             emit(pointer.toEvent(phase, pointer.lastPoint, currentEpoch))
         }
         primarySourcePointerId = null
+        resetPointerIdsIfIdle()
+    }
+
+    private fun resetPointerIdsIfIdle() {
+        if (activePointers.isEmpty()) {
+            nextScrcpyPointerId = 0
+        }
     }
 
     private fun ActivePointer.toEvent(phase: String, point: Offset, epoch: Int): RemoteTouchPointerEvent {

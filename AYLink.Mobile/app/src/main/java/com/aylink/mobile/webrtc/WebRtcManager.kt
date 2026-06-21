@@ -99,6 +99,7 @@ class WebRtcManager(
     private var pointerMoveChannel: DataChannel? = null
     private var remoteVideoTrack: VideoTrack? = null
     private var remoteAudioTrack: AudioTrack? = null
+    private val remoteAudioTracks = linkedSetOf<AudioTrack>()
     private var frameSizeSink: VideoSink? = null
     private var renderer: SurfaceViewRenderer? = null
     @Volatile
@@ -238,7 +239,7 @@ class WebRtcManager(
                         remoteVideoTrack = track
                         bindTrackToRenderer()
                     }
-                    is AudioTrack -> remoteAudioTrack = track
+                    is AudioTrack -> replaceRemoteAudioTrack(track)
                 }
             }
         })
@@ -548,7 +549,7 @@ class WebRtcManager(
         metaControlChannel = null
         pointerMoveChannel = null
 
-        remoteAudioTrack?.setEnabled(false)
+        releaseRemoteAudioTracks()
         remoteVideoTrack?.setEnabled(false)
         frameSizeSink?.let { remoteVideoTrack?.removeSink(it) }
         renderer?.let { remoteVideoTrack?.removeSink(it) }
@@ -564,6 +565,23 @@ class WebRtcManager(
         lastVideoHeight = 0
         lastFrameAtMillis = 0L
         videoFrameCount = 0L
+    }
+
+    private fun replaceRemoteAudioTrack(track: AudioTrack) {
+        remoteAudioTracks.forEach { existing ->
+            if (existing !== track) {
+                existing.setEnabled(false)
+            }
+        }
+        remoteAudioTracks.add(track)
+        track.setEnabled(true)
+        remoteAudioTrack = track
+    }
+
+    private fun releaseRemoteAudioTracks() {
+        remoteAudioTracks.forEach { it.setEnabled(false) }
+        remoteAudioTracks.clear()
+        remoteAudioTrack = null
     }
 
     private fun observeDataChannel(channel: DataChannel, generation: Int) {

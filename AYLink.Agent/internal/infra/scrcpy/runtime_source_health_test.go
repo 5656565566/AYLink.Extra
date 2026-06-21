@@ -1,6 +1,7 @@
 package scrcpy
 
 import (
+	"encoding/binary"
 	"net"
 	"testing"
 	"time"
@@ -293,6 +294,65 @@ func TestRuntimeCoalescesQueuedDroppableTouchMoves(t *testing.T) {
 	if string(second) != string([]byte{2, 2, 3}) {
 		t.Fatalf("expected latest move to replace older moves, got %v", second)
 	}
+}
+
+func TestRuntimeReleasesStaleTouchPointerBeforeNewDown(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	rt := &runtime{
+		done:          make(chan struct{}),
+		controlConn:   clientConn,
+		controlWrites: make(chan []byte, 8),
+	}
+
+	firstDown := buildTestTouchPayload(0, 7, 100, 200, 1)
+	secondDown := buildTestTouchPayload(0, 7, 300, 400, 1)
+	if err := rt.SendControl(firstDown); err != nil {
+		t.Fatalf("send first down: %v", err)
+	}
+	if err := rt.SendControl(secondDown); err != nil {
+		t.Fatalf("send second down: %v", err)
+	}
+
+	if len(rt.controlWrites) != 3 {
+		t.Fatalf("expected first down, stale release, and second down, got %d", len(rt.controlWrites))
+	}
+	_ = <-rt.controlWrites
+	release := <-rt.controlWrites
+	down := <-rt.controlWrites
+
+	if release[1] != 1 {
+		t.Fatalf("expected stale pointer release before second down, got action %d", release[1])
+	}
+	if binary.BigEndian.Uint64(release[2:10]) != 7 {
+		t.Fatalf("expected stale release for pointer 7, got %d", binary.BigEndian.Uint64(release[2:10]))
+	}
+	if binary.BigEndian.Uint16(release[22:24]) != 0 {
+		t.Fatalf("expected release pressure to be zero, got %d", binary.BigEndian.Uint16(release[22:24]))
+	}
+	if binary.BigEndian.Uint32(release[28:32]) != 0 {
+		t.Fatalf("expected release buttons to be zero, got %d", binary.BigEndian.Uint32(release[28:32]))
+	}
+	if string(down) != string(secondDown) {
+		t.Fatalf("expected second down to remain queued after stale release")
+	}
+}
+
+func buildTestTouchPayload(action byte, pointerID uint64, x int, y int, buttons uint32) []byte {
+	payload := make([]byte, 32)
+	payload[0] = 2
+	payload[1] = action
+	binary.BigEndian.PutUint64(payload[2:10], pointerID)
+	binary.BigEndian.PutUint32(payload[10:14], uint32(x))
+	binary.BigEndian.PutUint32(payload[14:18], uint32(y))
+	binary.BigEndian.PutUint16(payload[18:20], 1080)
+	binary.BigEndian.PutUint16(payload[20:22], 2400)
+	binary.BigEndian.PutUint16(payload[22:24], 0xffff)
+	binary.BigEndian.PutUint32(payload[24:28], buttons)
+	binary.BigEndian.PutUint32(payload[28:32], buttons)
+	return payload
 }
 
 func TestRuntimeVideoRefreshBypassesConfirmationWhenSourceStalledBeforeMedia(t *testing.T) {

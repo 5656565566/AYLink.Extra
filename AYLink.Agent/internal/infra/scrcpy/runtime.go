@@ -57,12 +57,13 @@ type runtime struct {
 	audioConn   net.Conn
 	controlConn net.Conn
 
-	controlMu        sync.Mutex
-	controlEnqueueMu sync.Mutex
-	closeOnce        sync.Once
-	controlWrites    chan []byte
-	controlReadMu    sync.Mutex
-	controlBuffer    []byte
+	controlMu           sync.Mutex
+	controlEnqueueMu    sync.Mutex
+	closeOnce           sync.Once
+	controlWrites       chan []byte
+	controlReadMu       sync.Mutex
+	controlBuffer       []byte
+	activeTouchPointers map[uint64][]byte
 
 	videoMu             sync.Mutex
 	videoSubscribers    map[int]chan domainscrcpy.VideoPacket
@@ -547,9 +548,23 @@ func (r *runtime) SendControl(payload []byte) error {
 	}
 
 	message := append([]byte(nil), payload...)
-	droppableKind := droppableControlPayloadKindOf(message)
 	r.controlEnqueueMu.Lock()
 	defer r.controlEnqueueMu.Unlock()
+	if release := r.buildTouchReleaseBeforeDownLocked(message); len(release) > 0 {
+		if err := r.enqueueControlMessageLocked(release); err != nil {
+			return err
+		}
+		r.rememberQueuedTouchPayloadLocked(release)
+	}
+	if err := r.enqueueControlMessageLocked(message); err != nil {
+		return err
+	}
+	r.rememberQueuedTouchPayloadLocked(message)
+	return nil
+}
+
+func (r *runtime) enqueueControlMessageLocked(message []byte) error {
+	droppableKind := droppableControlPayloadKindOf(message)
 	if droppableKind != droppableControlPayloadNone {
 		r.dropQueuedControlPayloads(droppableKind)
 	}
@@ -575,6 +590,42 @@ func (r *runtime) SendControl(payload []byte) error {
 		return nil
 	case <-timer.C:
 		return fmt.Errorf("scrcpy control queue is congested")
+	}
+}
+
+func (r *runtime) buildTouchReleaseBeforeDownLocked(payload []byte) []byte {
+	if !isTouchControlPayloadAction(payload, 0) || len(payload) < 32 {
+		return nil
+	}
+	if r.activeTouchPointers == nil {
+		return nil
+	}
+	pointerID := binary.BigEndian.Uint64(payload[2:10])
+	active := r.activeTouchPointers[pointerID]
+	if len(active) < 32 {
+		return nil
+	}
+	release := append([]byte(nil), active...)
+	release[1] = 1
+	binary.BigEndian.PutUint16(release[22:24], 0)
+	binary.BigEndian.PutUint32(release[24:28], 1)
+	binary.BigEndian.PutUint32(release[28:32], 0)
+	return release
+}
+
+func (r *runtime) rememberQueuedTouchPayloadLocked(payload []byte) {
+	if len(payload) < 32 || payload[0] != 2 {
+		return
+	}
+	pointerID := binary.BigEndian.Uint64(payload[2:10])
+	switch payload[1] {
+	case 0, 2:
+		if r.activeTouchPointers == nil {
+			r.activeTouchPointers = make(map[uint64][]byte)
+		}
+		r.activeTouchPointers[pointerID] = append([]byte(nil), payload...)
+	case 1:
+		delete(r.activeTouchPointers, pointerID)
 	}
 }
 
@@ -1514,7 +1565,7 @@ func droppableControlPayloadKindOf(payload []byte) droppableControlPayloadKind {
 
 	switch payload[0] {
 	case 2:
-		if len(payload) > 1 && payload[1] == 2 {
+		if isTouchControlPayloadAction(payload, 2) {
 			return droppableControlPayloadTouchMove
 		}
 	case 13:
@@ -1532,6 +1583,10 @@ func droppableControlPayloadKindOf(payload []byte) droppableControlPayloadKind {
 		return droppableControlPayloadResizeDisplay
 	}
 	return droppableControlPayloadNone
+}
+
+func isTouchControlPayloadAction(payload []byte, action byte) bool {
+	return len(payload) > 1 && payload[0] == 2 && payload[1] == action
 }
 
 func dialLocalPort(ctx context.Context, port int) (net.Conn, error) {

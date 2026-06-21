@@ -293,21 +293,7 @@ private fun RemoteVideoSurface(
     onRendererReady: (SurfaceViewRenderer) -> Unit,
     viewModel: RemoteViewModel
 ) {
-    val density = LocalDensity.current
-    val stretchScaleX = remember(viewportSize, videoBounds, effectiveFillMode) {
-        if (!effectiveFillMode || videoBounds.width <= 0f) {
-            1f
-        } else {
-            viewportSize.width.toFloat().coerceAtLeast(1f) / videoBounds.width
-        }
-    }
-    val stretchScaleY = remember(viewportSize, videoBounds, effectiveFillMode) {
-        if (!effectiveFillMode || videoBounds.height <= 0f) {
-            1f
-        } else {
-            viewportSize.height.toFloat().coerceAtLeast(1f) / videoBounds.height
-        }
-    }
+    val stretchScale = rememberVideoStretchScale(viewportSize, videoBounds, effectiveFillMode)
     val touchPointerState = remember { RemoteTouchPointerState() }
     var touchEpoch by remember { mutableIntStateOf(touchPointerState.epoch) }
     var touchReady by remember { mutableStateOf(false) }
@@ -366,74 +352,138 @@ private fun RemoteVideoSurface(
             .onSizeChanged(onViewportSizeChanged),
         contentAlignment = Alignment.Center
     ) {
-        AndroidView(
-            factory = {
-                SurfaceViewRenderer(it).apply {
-                    onRendererReady(this)
-                    setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
-                    viewModel.webRtcManager.initializeRenderer(this)
-                    viewModel.webRtcManager.bindRemoteVideo(this)
-                }
-            },
-            modifier = Modifier
-                .then(
-                    if (viewportState.videoSize == IntSize.Zero) {
-                        Modifier.fillMaxSize()
-                    } else {
-                        Modifier.size(
-                            width = with(density) { videoBounds.width.toDp() },
-                            height = with(density) { videoBounds.height.toDp() }
-                        )
-                    }
-                )
-                .graphicsLayer {
-                    scaleX = stretchScaleX
-                    scaleY = stretchScaleY
-                }
-                .clipToBounds(),
-            update = { renderer ->
-                renderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
-            }
+        RemoteVideoRenderer(
+            videoSize = viewportState.videoSize,
+            videoBounds = videoBounds,
+            stretchScale = stretchScale,
+            onRendererReady = onRendererReady,
+            viewModel = viewModel
         )
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(touchPointerState) {
-                    awaitEachGesture {
-                        val emitPointer: (RemoteTouchPointerEvent) -> Unit = { event ->
-                            latestPointerDispatch(event)
-                        }
-                        try {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            if (!touchReady || !isValidTouchSurface(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds)) {
-                                return@awaitEachGesture
-                            }
-                            touchPointerState.beginGesture(down.id.value, down.position, emitPointer)
-
-                            do {
-                                val event = awaitPointerEvent(pass = PointerEventPass.Main)
-                                if (!touchReady || touchPointerState.epoch != touchEpoch) {
-                                    touchPointerState.cancelActivePointers(emitPointer)
-                                    return@awaitEachGesture
-                                }
-                                event.changes.forEach { change ->
-                                    if (!change.previousPressed && change.pressed) {
-                                        touchPointerState.pointerDown(change.id.value, change.position, emitPointer)
-                                    } else if (change.changedToUp()) {
-                                        touchPointerState.pointerUp(change.id.value, change.position, emitPointer)
-                                    } else if (change.pressed) {
-                                        touchPointerState.pointerMove(change.id.value, change.position, emitPointer)
-                                    }
-                                }
-                            } while (event.changes.any { it.pressed })
-                        } finally {
-                            touchPointerState.cancelActivePointers(emitPointer)
-                        }
-                    }
-                }
+        RemoteTouchInputLayer(
+            viewportSize = viewportSize,
+            videoSize = viewportState.videoSize,
+            effectiveFillMode = effectiveFillMode,
+            videoBounds = videoBounds,
+            touchPointerState = touchPointerState,
+            touchEpoch = touchEpoch,
+            touchReady = touchReady,
+            onPointerEvent = latestPointerDispatch
         )
     }
+}
+
+@Composable
+private fun rememberVideoStretchScale(
+    viewportSize: IntSize,
+    videoBounds: VideoBounds,
+    fillMode: Boolean
+): ScaleFactor {
+    return remember(viewportSize, videoBounds, fillMode) {
+        ScaleFactor(
+            scaleX = if (!fillMode || videoBounds.width <= 0f) {
+                1f
+            } else {
+                viewportSize.width.toFloat().coerceAtLeast(1f) / videoBounds.width
+            },
+            scaleY = if (!fillMode || videoBounds.height <= 0f) {
+                1f
+            } else {
+                viewportSize.height.toFloat().coerceAtLeast(1f) / videoBounds.height
+            }
+        )
+    }
+}
+
+@Composable
+private fun RemoteVideoRenderer(
+    videoSize: IntSize,
+    videoBounds: VideoBounds,
+    stretchScale: ScaleFactor,
+    onRendererReady: (SurfaceViewRenderer) -> Unit,
+    viewModel: RemoteViewModel
+) {
+    val density = LocalDensity.current
+
+    AndroidView(
+        factory = {
+            SurfaceViewRenderer(it).apply {
+                onRendererReady(this)
+                setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+                viewModel.webRtcManager.initializeRenderer(this)
+                viewModel.webRtcManager.bindRemoteVideo(this)
+            }
+        },
+        modifier = Modifier
+            .then(
+                if (videoSize == IntSize.Zero) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.size(
+                        width = with(density) { videoBounds.width.toDp() },
+                        height = with(density) { videoBounds.height.toDp() }
+                    )
+                }
+            )
+            .graphicsLayer {
+                scaleX = stretchScale.scaleX
+                scaleY = stretchScale.scaleY
+            }
+            .clipToBounds(),
+        update = { renderer ->
+            renderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+        }
+    )
+}
+
+@Composable
+private fun RemoteTouchInputLayer(
+    viewportSize: IntSize,
+    videoSize: IntSize,
+    effectiveFillMode: Boolean,
+    videoBounds: VideoBounds,
+    touchPointerState: RemoteTouchPointerState,
+    touchEpoch: Int,
+    touchReady: Boolean,
+    onPointerEvent: (RemoteTouchPointerEvent) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(touchPointerState, viewportSize, videoSize, effectiveFillMode, videoBounds, touchEpoch, touchReady) {
+                awaitEachGesture {
+                    val emitPointer: (RemoteTouchPointerEvent) -> Unit = { event ->
+                        onPointerEvent(event)
+                    }
+                    try {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (!touchReady || !isValidTouchSurface(viewportSize, videoSize, effectiveFillMode, videoBounds)) {
+                            return@awaitEachGesture
+                        }
+                        touchPointerState.beginGesture(down.id.value, down.position, emitPointer)
+
+                        do {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                            if (!touchReady || touchPointerState.epoch != touchEpoch) {
+                                touchPointerState.cancelActivePointers(emitPointer)
+                                return@awaitEachGesture
+                            }
+                            event.changes.forEach { change ->
+                                if (!change.previousPressed && change.pressed) {
+                                    touchPointerState.pointerDown(change.id.value, change.position, emitPointer)
+                                } else if (change.changedToUp()) {
+                                    touchPointerState.pointerUp(change.id.value, change.position, emitPointer)
+                                } else if (change.pressed) {
+                                    touchPointerState.pointerMove(change.id.value, change.position, emitPointer)
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    } finally {
+                        touchPointerState.cancelActivePointers(emitPointer)
+                    }
+                }
+            }
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -968,6 +1018,11 @@ private data class VideoBounds(
     val top: Float,
     val width: Float,
     val height: Float
+)
+
+private data class ScaleFactor(
+    val scaleX: Float,
+    val scaleY: Float
 )
 
 private data class TouchSurfaceSnapshot(

@@ -783,13 +783,32 @@ func (r *runtime) readVideoLoop() {
 				loggedConfig = true
 				r.logger.Info("scrcpy video config packet", "size", len(packet.Data), "codec", packet.Codec)
 			}
-		} else if !loggedKeyFrame && (packet.IsKeyFrame || packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data)) {
+		} else if !loggedKeyFrame && isVideoKeyFramePacket(packet) {
 			loggedKeyFrame = true
 			r.logger.Info("scrcpy video key frame packet", "size", len(packet.Data), "pts", packet.PresentationTimestamp, "codec", packet.Codec)
 		}
 
 		r.offerLatestVideoPacket(packet)
 	}
+}
+
+func isVideoKeyFramePacket(packet domainscrcpy.VideoPacket) bool {
+	if packet.IsKeyFrame {
+		return true
+	}
+	return packet.Codec == domainscrcpy.VideoCodecH264 && containsH264IDRPacket(packet.Data)
+}
+
+func containsH264IDRPacket(sample []byte) bool {
+	if containsAnnexBIDRPacket(sample) {
+		return true
+	}
+	for _, lengthSize := range []int{4, 3, 2, 1} {
+		if containsLengthPrefixedH264IDRPacket(sample, lengthSize) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsAnnexBIDRPacket(sample []byte) bool {
@@ -810,6 +829,44 @@ func containsAnnexBIDRPacket(sample []byte) bool {
 		}
 	}
 	return false
+}
+
+func containsLengthPrefixedH264IDRPacket(sample []byte, lengthSize int) bool {
+	if lengthSize <= 0 || len(sample) <= lengthSize {
+		return false
+	}
+
+	foundIDR := false
+	offset := 0
+	for offset < len(sample) {
+		if offset+lengthSize > len(sample) {
+			return false
+		}
+
+		nalSize := readH264LengthPrefix(sample[offset:offset+lengthSize], lengthSize)
+		offset += lengthSize
+		if nalSize <= 0 || offset+nalSize > len(sample) {
+			return false
+		}
+		if (sample[offset] & 0x1F) == 5 {
+			foundIDR = true
+		}
+		offset += nalSize
+	}
+	return foundIDR
+}
+
+func readH264LengthPrefix(buffer []byte, lengthSize int) int {
+	switch lengthSize {
+	case 1:
+		return int(buffer[0])
+	case 2:
+		return int(binary.BigEndian.Uint16(buffer))
+	case 3:
+		return int(buffer[0])<<16 | int(buffer[1])<<8 | int(buffer[2])
+	default:
+		return int(binary.BigEndian.Uint32(buffer))
+	}
 }
 
 func (r *runtime) readAudioLoop() {
@@ -1165,7 +1222,7 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 		r.videoGeneration++
 		r.latestVideoConfig = cloneVideoPacketForCache(packet, r.videoGeneration)
 		r.latestVideoKeyFrame = cachedVideoPacket{}
-	} else if packet.IsKeyFrame || packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data) {
+	} else if isVideoKeyFramePacket(packet) {
 		r.latestVideoKeyFrame = cloneVideoPacketForCache(packet, r.videoGeneration)
 	}
 
@@ -1210,7 +1267,7 @@ func (r *runtime) recordVideoPacketHealth(packet domainscrcpy.VideoPacket) {
 		r.health.RepeatedPTSCount++
 	}
 
-	if packet.IsKeyFrame || packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data) {
+	if isVideoKeyFramePacket(packet) {
 		r.health.LastKeyFrameAt = now
 	}
 }
@@ -1368,7 +1425,7 @@ func isCriticalVideoPacket(packet domainscrcpy.VideoPacket) bool {
 		return true
 	}
 
-	return packet.Codec == domainscrcpy.VideoCodecH264 && containsAnnexBIDRPacket(packet.Data)
+	return packet.Codec == domainscrcpy.VideoCodecH264 && containsH264IDRPacket(packet.Data)
 }
 
 func offerLatestAudioPacketToSubscriber(sub chan domainscrcpy.AudioPacket, packet domainscrcpy.AudioPacket) {

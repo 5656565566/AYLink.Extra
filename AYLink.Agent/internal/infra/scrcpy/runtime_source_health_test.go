@@ -258,6 +258,47 @@ func TestRuntimeSubscribeVideoPacketsWarmsOnlyConfigAndKeyFrame(t *testing.T) {
 	}
 }
 
+func TestRuntimeCachesLengthPrefixedH264IDRAsKeyFrame(t *testing.T) {
+	rt := &runtime{
+		done:             make(chan struct{}),
+		videoSubscribers: make(map[int]chan domainscrcpy.VideoPacket),
+	}
+
+	rt.offerLatestVideoPacket(domainscrcpy.VideoPacket{
+		Data:     []byte{0, 0, 0, 1, 0x67},
+		Buffer:   []byte{0, 0, 0, 1, 0x67},
+		IsConfig: true,
+		Codec:    domainscrcpy.VideoCodecH264,
+	})
+	rt.offerLatestVideoPacket(domainscrcpy.VideoPacket{
+		Data:                  []byte{0, 0, 0, 2, 0x65, 0x88},
+		Buffer:                []byte{0, 0, 0, 2, 0x65, 0x88},
+		Codec:                 domainscrcpy.VideoCodecH264,
+		PresentationTimestamp: 100,
+	})
+
+	if rt.latestVideoKeyFrame.generation != 1 {
+		t.Fatalf("expected length-prefixed IDR to update key frame cache, got generation %d", rt.latestVideoKeyFrame.generation)
+	}
+	if rt.latestVideoKeyFrame.cachedAt.IsZero() {
+		t.Fatalf("expected cached key frame timestamp")
+	}
+	if rt.GetSourceHealth().LastKeyFrameAt.IsZero() {
+		t.Fatalf("expected source health to record length-prefixed IDR")
+	}
+}
+
+func TestRuntimeDoesNotTreatLengthPrefixedH264PFrameAsCritical(t *testing.T) {
+	packet := domainscrcpy.VideoPacket{
+		Data:  []byte{0, 0, 0, 2, 0x41, 0x88},
+		Codec: domainscrcpy.VideoCodecH264,
+	}
+
+	if isCriticalVideoPacket(packet) {
+		t.Fatalf("expected length-prefixed P-frame to remain non-critical")
+	}
+}
+
 func TestRuntimeCoalescesQueuedDroppableTouchMoves(t *testing.T) {
 	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()

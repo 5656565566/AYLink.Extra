@@ -1542,7 +1542,9 @@ export default defineComponent({
       const signalingAttached = !!ws && ws.readyState === WebSocket.OPEN;
       const recoveryReason = details.status === 'client_decode_stalled_confirmed'
           ? 'client_decode_stalled'
-          : 'client_playback_starved';
+          : details.status === 'client_render_stalled_confirmed'
+            ? 'client_render_stalled'
+            : 'client_playback_starved';
       void (async () => {
         const agentHealth = await fetchAgentVideoHealth();
         const decision = decideVideoRecovery({

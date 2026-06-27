@@ -63,7 +63,18 @@ export function decideVideoRecovery(
 ): UnifiedVideoRecoveryDecision {
   const agentOrigin = normalizeOrigin(agent?.origin);
   const agentState = String(agent?.state || '').toLowerCase();
+  const sourceState = String(agent?.source?.state || '').toLowerCase();
   const agentReason = String(agent?.reason || agent?.source?.reason || agent?.source?.state || '').trim();
+  const clientDecodeOrRenderStalled = client.state === 'client_decode_stalled_confirmed' || client.state === 'client_render_stalled_confirmed';
+
+  if (clientDecodeOrRenderStalled && sourceState === 'static_but_alive') {
+    return {
+      state: 'observing',
+      origin: 'source',
+      action: 'observe',
+      reason: agentReason || client.reason
+    };
+  }
 
   if (agentOrigin === 'source' || agentState === 'stalled') {
     return {
@@ -71,6 +82,15 @@ export function decideVideoRecovery(
       origin: 'source',
       action: 'source_refresh',
       reason: agentReason || client.reason
+    };
+  }
+
+  if (clientDecodeOrRenderStalled) {
+    return {
+      state: 'stalled',
+      origin: 'client',
+      action: 'renegotiate',
+      reason: client.reason
     };
   }
 
@@ -98,15 +118,6 @@ export function decideVideoRecovery(
       origin: 'sender',
       action: 'keyframe_replay',
       reason: agentReason || client.reason
-    };
-  }
-
-  if (client.state === 'client_decode_stalled_confirmed') {
-    return {
-      state: 'stalled',
-      origin: 'client',
-      action: 'renegotiate',
-      reason: client.reason
     };
   }
 

@@ -53,7 +53,9 @@ export type VideoStreamHealthStatus =
   | 'client_playback_starved_pending'
   | 'client_playback_starved_confirmed'
   | 'client_decode_stalled_pending'
-  | 'client_decode_stalled_confirmed';
+  | 'client_decode_stalled_confirmed'
+  | 'client_render_stalled_pending'
+  | 'client_render_stalled_confirmed';
 
 export interface VideoDebugStatsSnapshot {
   capturedAt: number;
@@ -192,10 +194,7 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
     return videoElement.readyState < haveCurrentData;
   };
 
-  const isVideoDecodeRenderStalled = (playback: VideoPlaybackSnapshot, framesDecodedStalled: boolean) => {
-    if (!framesDecodedStalled) {
-      return false;
-    }
+  const isVideoDecodeRenderStalled = (playback: VideoPlaybackSnapshot) => {
     if (playback.paused || playback.ended || playback.seeking || playback.trackMuted) {
       return false;
     }
@@ -477,9 +476,10 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
 
     const inboundObservation = observeInboundVideoStream(inboundVideoStats);
     const playback = getVideoPlaybackSnapshot();
-    const decodeRenderStalled = inboundObservation.hasBaseline && inboundObservation.hasAdvanced && isVideoDecodeRenderStalled(playback, inboundObservation.framesDecodedStalled);
+    const decodeRenderStalled = inboundObservation.hasBaseline && inboundObservation.hasAdvanced && inboundObservation.framesDecodedStalled && isVideoDecodeRenderStalled(playback);
+    const renderStalled = inboundObservation.hasBaseline && inboundObservation.hasAdvanced && !inboundObservation.framesDecodedStalled && isVideoDecodeRenderStalled(playback);
 
-    if (inboundObservation.hasAdvanced && !decodeRenderStalled) {
+    if (inboundObservation.hasAdvanced && !decodeRenderStalled && !renderStalled) {
       markVideoStreamAdvanced(stateMachine, connectionId, now);
       lastVideoStreamPacketAt = now;
       lastVideoStreamDiagnosticAt = 0;
@@ -489,14 +489,16 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
       return;
     }
 
-    if (decodeRenderStalled) {
+    if (decodeRenderStalled || renderStalled) {
       const playbackStarved = isVideoPlaybackStarved();
       consecutiveVideoDecodeStallDetections += 1;
       consecutiveVideoStreamStallDetections = consecutiveVideoDecodeStallDetections;
-      if (consecutiveVideoDecodeStallDetections < options.stallConfirmationCount || !playbackStarved) {
-        const message = playbackStarved
-          ? '[WebRTC] Inbound video RTP is advancing but browser decoded/rendered frames are not advancing, waiting for consecutive confirmation.'
-          : '[WebRTC] Inbound video RTP is advancing while rendered frames are unchanged; treating as possible static content unless playback becomes starved.';
+      if (consecutiveVideoDecodeStallDetections < options.stallConfirmationCount) {
+        const message = renderStalled
+          ? '[WebRTC] Browser decoded frames are advancing while rendered frames are unchanged, waiting for consecutive confirmation.'
+          : playbackStarved
+            ? '[WebRTC] Inbound video RTP is advancing but browser decoded/rendered frames are not advancing, waiting for consecutive confirmation.'
+            : '[WebRTC] Inbound video RTP is advancing while rendered frames are unchanged; treating as possible static content unless playback remains stalled.';
         logger.debug(message, {
           reason,
           deviceId: options.getDeviceId(),
@@ -510,12 +512,17 @@ export function useVideoStreamHealth(options: VideoStreamHealthOptions) {
         return;
       }
 
-      const stallDetails = buildStallDetails(connectionId, reason, 'client_decode_stalled_confirmed', inboundVideoStats, playback);
-      markUnstable(connectionId, 'client_decode_stalled');
+      const status: VideoStreamHealthStatus = renderStalled ? 'client_render_stalled_confirmed' : 'client_decode_stalled_confirmed';
+      const unstableReason = renderStalled ? 'client_render_stalled' : 'client_decode_stalled';
+      const stallDetails = buildStallDetails(connectionId, reason, status, inboundVideoStats, playback);
+      markUnstable(connectionId, unstableReason);
       options.onVideoStreamStalledConfirmed?.(stallDetails);
       if (now - lastVideoStreamDiagnosticAt >= options.diagnosticIntervalMs) {
         lastVideoStreamDiagnosticAt = now;
-        logger.debug('[WebRTC] Browser decode/render appears stalled while inbound video RTP is still advancing.', {
+        const message = renderStalled
+          ? '[WebRTC] Browser render appears stalled while inbound video RTP and decoded frames are still advancing.'
+          : '[WebRTC] Browser decode/render appears stalled while inbound video RTP is still advancing.';
+        logger.debug(message, {
           ...stallDetails
         });
       }

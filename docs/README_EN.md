@@ -191,6 +191,22 @@ This generates Agent executables for:
 - Linux `amd64 / arm64 / loong64 ...`
 - macOS `amd64 / arm64`
 
+### Agent API Documentation
+
+```bash
+make make api-docs
+make api-docs-serve
+```
+
+Then visit http://127.0.0.1:18080/ to read the documentation.
+You can change the backend address with:
+
+```bash
+make api-docs-serve API_DOCS_ARGS="-api-base-url http://127.0.0.1:5502"
+```
+
+The default backend address uses the local `5501` port.
+
 ## 📦 Dependencies and Credits
 
 This project is built with help from the following open source projects:

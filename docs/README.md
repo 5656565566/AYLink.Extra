@@ -196,6 +196,22 @@ make agent
 
 平台的 Agent 可执行文件。
 
+### Agent API 文档
+
+```bash
+make make api-docs
+make api-docs-serve
+```
+
+然后访问 http://127.0.0.1:18080/ 查阅文档
+可以通过
+
+```bash
+make api-docs-serve API_DOCS_ARGS="-api-base-url http://127.0.0.1:5502"
+```
+
+来改变后端的地址，默认为本地 5501 端口
+
 ## 📦 依赖与致谢
 
 本项目的实现离不开以下开源项目：

@@ -20,16 +20,25 @@ func NewAuthHandler(service AuthService) *AuthHandler {
 	return &AuthHandler{service: service}
 }
 
+// Login 用户登录
+// @Summary 用户登录
+// @Description 使用用户名和密码登录，返回访问令牌、刷新令牌、当前用户和权限。
+// @Tags 认证
+// @Accept json
+// @Produce json
+// @Param body body LoginRequest true "登录参数"
+// @Success 200 {object} LoginResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/login [post]
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
 		return
 	}
 
-	var payload struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
+	var payload LoginRequest
 
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
@@ -45,15 +54,25 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, result)
 }
 
+// Refresh 刷新登录状态
+// @Summary 刷新登录状态
+// @Description 使用刷新令牌获取新的访问令牌和刷新令牌。
+// @Tags 认证
+// @Accept json
+// @Produce json
+// @Param body body RefreshRequest true "刷新令牌"
+// @Success 200 {object} LoginResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/auth/refresh [post]
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
 		return
 	}
 
-	var payload struct {
-		RefreshToken string `json:"refreshToken"`
-	}
+	var payload RefreshRequest
 
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
@@ -69,6 +88,16 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, result)
 }
 
+// Me 获取当前用户
+// @Summary 获取当前用户
+// @Description 返回当前访问令牌对应的用户信息和权限列表。
+// @Tags 认证
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} CurrentUserResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/auth/me [get]
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -87,21 +116,30 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"user":        user,
-		"permissions": user.Permissions,
+	WriteJSON(w, http.StatusOK, CurrentUserResponse{
+		User:        user,
+		Permissions: user.Permissions,
 	})
 }
 
+// Logout 退出登录
+// @Summary 退出登录
+// @Description 注销当前访问令牌，并可同时撤销指定刷新令牌。
+// @Tags 认证
+// @Accept json
+// @Produce json
+// @Param body body LogoutRequest false "退出登录参数"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/logout [post]
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
 		return
 	}
 
-	var payload struct {
-		RefreshToken string `json:"refreshToken"`
-	}
+	var payload LogoutRequest
 
 	if err := decodeOptionalJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
@@ -113,11 +151,23 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "LOGOUT_FAILED", "Errors.LogoutFailed", "退出登录失败")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-	})
+	WriteJSON(w, http.StatusOK, SuccessResponse{Success: true})
 }
 
+// ChangePassword 修改当前用户密码
+// @Summary 修改当前用户密码
+// @Description 修改当前登录用户自己的密码。
+// @Tags 认证
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body ChangePasswordRequest true "密码参数"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/auth/change-password [post]
 func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -130,10 +180,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		CurrentPassword string `json:"currentPassword"`
-		NewPassword     string `json:"newPassword"`
-	}
+	var payload ChangePasswordRequest
 
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
@@ -145,9 +192,19 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+	WriteJSON(w, http.StatusOK, SuccessResponse{Success: true})
 }
 
+// LogoutAll 退出全部会话
+// @Summary 退出全部会话
+// @Description 撤销当前用户的全部登录会话。
+// @Tags 认证
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} SuccessResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/logout-all [post]
 func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -164,9 +221,20 @@ func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "LOGOUT_ALL_FAILED", "Errors.LogoutAllFailed", "退出全部会话失败")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+	WriteJSON(w, http.StatusOK, SuccessResponse{Success: true})
 }
 
+// GetUsers 获取用户列表
+// @Summary 获取用户列表
+// @Description 返回用户、角色和可用权限，用于账户管理页面。
+// @Tags 账户管理
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} UsersResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/users [get]
 func (h *AuthHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -196,25 +264,34 @@ func (h *AuthHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 		availablePermissions = make([]domainauth.PermissionDescriptor, 0)
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"users":                users,
-		"roles":                roles,
-		"availablePermissions": availablePermissions,
+	WriteJSON(w, http.StatusOK, UsersResponse{
+		Users:                users,
+		Roles:                roles,
+		AvailablePermissions: availablePermissions,
 	})
 }
 
+// CreateUser 创建用户
+// @Summary 创建用户
+// @Description 创建一个新用户，并设置角色和可访问设备分组。
+// @Tags 账户管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body CreateUserRequest true "用户参数"
+// @Success 200 {object} UserResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/users [post]
 func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
 		return
 	}
 
-	var payload struct {
-		Username       string `json:"username"`
-		Password       string `json:"password"`
-		RoleIds        []int  `json:"roleIds"`
-		DeviceGroupIds []int  `json:"deviceGroupIds"`
-	}
+	var payload CreateUserRequest
 
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
@@ -227,9 +304,26 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "user": user})
+	WriteJSON(w, http.StatusOK, UserResponse{Success: true, User: user})
 }
 
+// UpdateUser 更新用户
+// @Summary 更新用户
+// @Description 更新用户名称、启用状态、角色和可访问设备分组。
+// @Tags 账户管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "用户 ID"
+// @Param body body UpdateUserRequest true "用户参数"
+// @Success 200 {object} UserResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/users/{id} [put]
 func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		WriteMethodNotAllowed(w, http.MethodPut)
@@ -242,12 +336,7 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Username       string `json:"username"`
-		IsActive       *bool  `json:"isActive"`
-		RoleIds        []int  `json:"roleIds"`
-		DeviceGroupIds []int  `json:"deviceGroupIds"`
-	}
+	var payload UpdateUserRequest
 
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
@@ -270,9 +359,24 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "user": user})
+	WriteJSON(w, http.StatusOK, UserResponse{Success: true, User: user})
 }
 
+// DeleteUser 删除用户
+// @Summary 删除用户
+// @Description 删除指定用户。
+// @Tags 账户管理
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "用户 ID"
+// @Success 204 "删除成功"
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/users/{id} [delete]
 func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		WriteMethodNotAllowed(w, http.MethodDelete)
@@ -298,6 +402,22 @@ func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ResetPassword 重置用户密码
+// @Summary 重置用户密码
+// @Description 重置指定用户密码，并返回最终密码。
+// @Tags 账户管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "用户 ID"
+// @Param body body ResetPasswordRequest true "密码参数"
+// @Success 200 {object} ResetPasswordResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/users/{id}/reset-password [post]
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -316,9 +436,7 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		NewPassword string `json:"newPassword"`
-	}
+	var payload ResetPasswordRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
 		return
@@ -330,9 +448,25 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "password": password})
+	WriteJSON(w, http.StatusOK, ResetPasswordResponse{Success: true, Password: password})
 }
 
+// SetUserActive 设置用户启用状态
+// @Summary 设置用户启用状态
+// @Description 启用或禁用指定用户。
+// @Tags 账户管理
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "用户 ID"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/users/{id}/activate [post]
+// @Router /api/accounts/users/{id}/deactivate [post]
 func (h *AuthHandler) SetUserActive(w http.ResponseWriter, r *http.Request, isActive bool) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -360,9 +494,20 @@ func (h *AuthHandler) SetUserActive(w http.ResponseWriter, r *http.Request, isAc
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true})
+	WriteJSON(w, http.StatusOK, SuccessResponse{Success: true})
 }
 
+// GetRoles 获取角色列表
+// @Summary 获取角色列表
+// @Description 返回角色和可用权限，用于账户管理页面。
+// @Tags 账户管理
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} RolesResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/roles [get]
 func (h *AuthHandler) GetRoles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -383,24 +528,33 @@ func (h *AuthHandler) GetRoles(w http.ResponseWriter, r *http.Request) {
 		availablePermissions = make([]domainauth.PermissionDescriptor, 0)
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"roles":                roles,
-		"availablePermissions": availablePermissions,
+	WriteJSON(w, http.StatusOK, RolesResponse{
+		Roles:                roles,
+		AvailablePermissions: availablePermissions,
 	})
 }
 
+// CreateRole 创建角色
+// @Summary 创建角色
+// @Description 创建角色并设置权限和可访问设备分组。
+// @Tags 账户管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body CreateRoleRequest true "角色参数"
+// @Success 200 {object} RoleResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/roles [post]
 func (h *AuthHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
 		return
 	}
 
-	var payload struct {
-		Name           string   `json:"name"`
-		Description    string   `json:"description"`
-		Permissions    []string `json:"permissions"`
-		DeviceGroupIds []int    `json:"deviceGroupIds"`
-	}
+	var payload CreateRoleRequest
 
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
@@ -413,9 +567,25 @@ func (h *AuthHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "role": role})
+	WriteJSON(w, http.StatusOK, RoleResponse{Success: true, Role: role})
 }
 
+// UpdateRole 更新角色
+// @Summary 更新角色
+// @Description 更新角色名称、说明、权限和可访问设备分组。
+// @Tags 账户管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "角色 ID"
+// @Param body body UpdateRoleRequest true "角色参数"
+// @Success 200 {object} RoleResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/roles/{id} [put]
 func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		WriteMethodNotAllowed(w, http.MethodPut)
@@ -428,12 +598,7 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Name           string   `json:"name"`
-		Description    string   `json:"description"`
-		Permissions    []string `json:"permissions"`
-		DeviceGroupIds []int    `json:"deviceGroupIds"`
-	}
+	var payload UpdateRoleRequest
 
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
@@ -446,7 +611,7 @@ func (h *AuthHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "role": role})
+	WriteJSON(w, http.StatusOK, RoleResponse{Success: true, Role: role})
 }
 
 func getIdentity(r *http.Request) *domainauth.Identity {

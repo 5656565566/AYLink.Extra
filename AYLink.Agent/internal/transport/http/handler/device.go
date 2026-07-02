@@ -38,6 +38,17 @@ func NewDeviceHandler(service DeviceService, accessService DeviceAccessService, 
 	}
 }
 
+// List 获取设备列表
+// @Summary 获取设备列表
+// @Description 返回当前用户可访问的设备列表。
+// @Tags 设备
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} Device
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices [get]
 func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -73,6 +84,23 @@ func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, devices)
 }
 
+// Preview 获取设备预览
+// @Summary 获取设备预览
+// @Description 获取设备屏幕预览图片。
+// @Tags 设备
+// @Produce jpeg
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param width query int false "预览宽度"
+// @Success 200 {file} binary
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /api/devices/{id}/preview [get]
 func (h *DeviceHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -109,6 +137,20 @@ func (h *DeviceHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(payload)
 }
 
+// Create 创建设备
+// @Summary 创建设备
+// @Description 添加一个设备记录。
+// @Tags 设备
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body CreateDeviceRequest true "设备参数"
+// @Success 200 {object} Device
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices [post]
 func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -135,6 +177,20 @@ func (h *DeviceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, device)
 }
 
+// Delete 删除设备
+// @Summary 删除设备
+// @Description 删除指定设备。
+// @Tags 设备
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 204 "删除成功"
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id} [delete]
 func (h *DeviceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		WriteMethodNotAllowed(w, http.MethodDelete)
@@ -159,6 +215,20 @@ func (h *DeviceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Connect 连接设备
+// @Summary 连接设备
+// @Description 对指定设备发起网络连接。
+// @Tags 设备
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {object} Device
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/connect/{id} [post]
 func (h *DeviceHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -199,6 +269,22 @@ func (h *DeviceHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, device)
 }
 
+// Rename 重命名设备
+// @Summary 重命名设备
+// @Description 修改指定设备名称。
+// @Tags 设备
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body RenameDeviceRequest true "设备名称"
+// @Success 200 {object} Device
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/rename [put]
 func (h *DeviceHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		WriteMethodNotAllowed(w, http.MethodPut)
@@ -214,9 +300,7 @@ func (h *DeviceHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Name string `json:"Name"`
-	}
+	var payload RenameDeviceRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteInvalidJSON(w)
 		return
@@ -238,6 +322,20 @@ func (h *DeviceHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, device)
 }
 
+// GetSettings 获取设备投屏设置
+// @Summary 获取设备投屏设置
+// @Description 返回指定设备的投屏设置。
+// @Tags 设备设置
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {object} DeviceSettingsProfile
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/settings [get]
 func (h *DeviceHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -259,6 +357,22 @@ func (h *DeviceHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, settings)
 }
 
+// SaveSettings 保存设备投屏设置
+// @Summary 保存设备投屏设置
+// @Description 保存指定设备的投屏设置。
+// @Tags 设备设置
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body DeviceSettingsProfile true "投屏设置"
+// @Success 200 {object} DeviceSettingsProfile
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/settings [put]
 func (h *DeviceHandler) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		WriteMethodNotAllowed(w, http.MethodPut)
@@ -285,6 +399,20 @@ func (h *DeviceHandler) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, settings)
 }
 
+// ResetSettings 重置设备投屏设置
+// @Summary 重置设备投屏设置
+// @Description 将指定设备投屏设置恢复为默认值。
+// @Tags 设备设置
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {object} DeviceSettingsProfile
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/settings [delete]
 func (h *DeviceHandler) ResetSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		WriteMethodNotAllowed(w, http.MethodDelete)
@@ -306,6 +434,21 @@ func (h *DeviceHandler) ResetSettings(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, settings)
 }
 
+// ListEncoders 获取编码器列表
+// @Summary 获取编码器列表
+// @Description 返回指定设备可用的视频编码器列表。
+// @Tags 设备
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {array} string
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /api/devices/{id}/encoders [get]
 func (h *DeviceHandler) ListEncoders(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -327,6 +470,21 @@ func (h *DeviceHandler) ListEncoders(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, encoders)
 }
 
+// ListApps 获取应用列表
+// @Summary 获取应用列表
+// @Description 返回指定设备安装的应用列表。
+// @Tags 应用管理
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {array} ScrcpyAppInfo
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/apps [get]
 func (h *DeviceHandler) ListApps(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -348,6 +506,23 @@ func (h *DeviceHandler) ListApps(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, apps)
 }
 
+// LaunchApp 启动应用
+// @Summary 启动应用
+// @Description 在指定设备上启动应用。
+// @Tags 应用管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body AppPackageRequest true "应用包名"
+// @Success 200 {object} OKResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/apps/launch [post]
 func (h *DeviceHandler) LaunchApp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -362,9 +537,7 @@ func (h *DeviceHandler) LaunchApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		PackageName string `json:"packageName"`
-	}
+	var payload AppPackageRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -375,9 +548,26 @@ func (h *DeviceHandler) LaunchApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{OK: true})
 }
 
+// DownloadApp 下载应用 APK
+// @Summary 下载应用 APK
+// @Description 下载指定设备上应用的 APK 文件。
+// @Tags 应用管理
+// @Accept json
+// @Produce application/vnd.android.package-archive
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body AppPackageRequest true "应用包名"
+// @Success 200 {file} binary
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/apps/download [post]
 func (h *DeviceHandler) DownloadApp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -392,9 +582,7 @@ func (h *DeviceHandler) DownloadApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		PackageName string `json:"packageName"`
-	}
+	var payload AppPackageRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -413,6 +601,23 @@ func (h *DeviceHandler) DownloadApp(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, result.Reader)
 }
 
+// UninstallApp 卸载应用
+// @Summary 卸载应用
+// @Description 从指定设备卸载应用。
+// @Tags 应用管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body AppPackageRequest true "应用包名"
+// @Success 200 {object} OKResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/apps/uninstall [post]
 func (h *DeviceHandler) UninstallApp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -427,9 +632,7 @@ func (h *DeviceHandler) UninstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		PackageName string `json:"packageName"`
-	}
+	var payload AppPackageRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -440,9 +643,26 @@ func (h *DeviceHandler) UninstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{OK: true})
 }
 
+// AppInfo 获取应用详情
+// @Summary 获取应用详情
+// @Description 返回指定应用的版本、安装时间和 APK 路径等信息。
+// @Tags 应用管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body AppPackageRequest true "应用包名"
+// @Success 200 {object} AppInfoResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/apps/info [post]
 func (h *DeviceHandler) AppInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -457,9 +677,7 @@ func (h *DeviceHandler) AppInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		PackageName string `json:"packageName"`
-	}
+	var payload AppPackageRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -474,6 +692,23 @@ func (h *DeviceHandler) AppInfo(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, result)
 }
 
+// InstallApp 安装应用
+// @Summary 安装应用
+// @Description 上传 APK 并安装到指定设备。
+// @Tags 应用管理
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param file formData file true "APK 文件"
+// @Success 200 {object} OKResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/apps/install [post]
 func (h *DeviceHandler) InstallApp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -505,9 +740,26 @@ func (h *DeviceHandler) InstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{OK: true})
 }
 
+// ListFiles 获取文件列表
+// @Summary 获取文件列表
+// @Description 返回指定设备上目录内容。
+// @Tags 文件管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body FilePathRequest true "目录路径"
+// @Success 200 {object} FileListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/files/list [post]
 func (h *DeviceHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -522,9 +774,7 @@ func (h *DeviceHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Path string `json:"path"`
-	}
+	var payload FilePathRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -548,6 +798,23 @@ func (h *DeviceHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, result)
 }
 
+// DownloadFile 下载文件
+// @Summary 下载文件
+// @Description 从指定设备下载文件。
+// @Tags 文件管理
+// @Accept json
+// @Produce octet-stream
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body FilePathRequest true "文件路径"
+// @Success 200 {file} binary
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/files/download [post]
 func (h *DeviceHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -562,9 +829,7 @@ func (h *DeviceHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Path string `json:"path"`
-	}
+	var payload FilePathRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -592,6 +857,23 @@ func (h *DeviceHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, result.Reader)
 }
 
+// RenameFile 重命名文件
+// @Summary 重命名文件
+// @Description 重命名指定设备上的文件或目录。
+// @Tags 文件管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body RenameFileRequest true "重命名参数"
+// @Success 200 {object} OKResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/files/rename [post]
 func (h *DeviceHandler) RenameFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -606,10 +888,7 @@ func (h *DeviceHandler) RenameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Path    string `json:"path"`
-		NewName string `json:"newName"`
-	}
+	var payload RenameFileRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -633,9 +912,22 @@ func (h *DeviceHandler) RenameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{OK: true})
 }
 
+// GetGroups 获取设备分组绑定
+// @Summary 获取设备分组绑定
+// @Description 返回指定设备所属分组。
+// @Tags 设备分组
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {object} DeviceGroupsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/groups [get]
 func (h *DeviceHandler) GetGroups(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -656,9 +948,24 @@ func (h *DeviceHandler) GetGroups(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "DEVICE_GROUPS_LOAD_FAILED", "Errors.DeviceUpdateFailed", "加载设备分组失败")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"groups": groups})
+	WriteJSON(w, http.StatusOK, DeviceGroupsResponse{Groups: groups})
 }
 
+// SaveGroups 保存设备分组绑定
+// @Summary 保存设备分组绑定
+// @Description 保存指定设备所属分组。
+// @Tags 设备分组
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body SaveDeviceGroupsRequest true "设备分组绑定"
+// @Success 200 {object} SaveDeviceGroupsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/groups [put]
 func (h *DeviceHandler) SaveGroups(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		WriteMethodNotAllowed(w, http.MethodPut)
@@ -674,9 +981,7 @@ func (h *DeviceHandler) SaveGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		GroupIDs []int `json:"groupIds"`
-	}
+	var payload SaveDeviceGroupsRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -693,12 +998,29 @@ func (h *DeviceHandler) SaveGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"groups":  groups,
+	WriteJSON(w, http.StatusOK, SaveDeviceGroupsResponse{
+		Success: true,
+		Groups:  groups,
 	})
 }
 
+// DeleteFile 删除文件
+// @Summary 删除文件
+// @Description 删除指定设备上的文件或目录。
+// @Tags 文件管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body FilePathRequest true "文件路径"
+// @Success 200 {object} OKResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/files/delete [post]
 func (h *DeviceHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -713,9 +1035,7 @@ func (h *DeviceHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Path string `json:"path"`
-	}
+	var payload FilePathRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -737,7 +1057,7 @@ func (h *DeviceHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{OK: true})
 }
 
 func (h *DeviceHandler) writeDeviceSettingsError(w http.ResponseWriter, err error) {

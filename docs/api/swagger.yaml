@@ -1,0 +1,3315 @@
+basePath: /
+definitions:
+  adb.Device:
+    properties:
+      serial:
+        type: string
+      state:
+        type: string
+    type: object
+  adb.DirectoryEntry:
+    properties:
+      IsDirectory:
+        type: boolean
+      Name:
+        type: string
+      Size:
+        type: integer
+    type: object
+  adb.ResolvedBinary:
+    properties:
+      path:
+        type: string
+      source:
+        type: string
+    type: object
+  auth.PermissionDescriptor:
+    properties:
+      Code:
+        type: string
+      Description:
+        type: string
+    type: object
+  auth.Role:
+    properties:
+      Description:
+        type: string
+      DeviceGroups:
+        items:
+          $ref: '#/definitions/device.GroupSummary'
+        type: array
+      Id:
+        type: integer
+      IsInternal:
+        type: boolean
+      Name:
+        type: string
+      Permissions:
+        items:
+          type: string
+        type: array
+    type: object
+  auth.RoleSummary:
+    properties:
+      Description:
+        type: string
+      Id:
+        type: integer
+      Name:
+        type: string
+    type: object
+  auth.User:
+    properties:
+      CreatedAt:
+        type: string
+      DirectDeviceGroups:
+        items:
+          $ref: '#/definitions/device.GroupSummary'
+        type: array
+      EffectiveDeviceCount:
+        type: integer
+      EffectiveDeviceGroupCount:
+        type: integer
+      EffectiveDeviceGroups:
+        items:
+          $ref: '#/definitions/device.GroupSummary'
+        type: array
+      Id:
+        type: integer
+      IsActive:
+        type: boolean
+      LastLoginAt:
+        type: string
+      Permissions:
+        items:
+          type: string
+        type: array
+      Roles:
+        items:
+          $ref: '#/definitions/auth.RoleSummary'
+        type: array
+      UpdatedAt:
+        type: string
+      Username:
+        type: string
+    type: object
+  device.Group:
+    properties:
+      CreatedAt:
+        type: string
+      Description:
+        type: string
+      DeviceCount:
+        type: integer
+      Id:
+        type: integer
+      IsInternal:
+        type: boolean
+      Name:
+        type: string
+      RoleCount:
+        type: integer
+      UpdatedAt:
+        type: string
+      UserCount:
+        type: integer
+    type: object
+  device.GroupSummary:
+    properties:
+      Description:
+        type: string
+      DeviceCount:
+        type: integer
+      Id:
+        type: integer
+      IsInternal:
+        type: boolean
+      Name:
+        type: string
+    type: object
+  handler.ADBPairRequest:
+    properties:
+      host:
+        type: string
+      pairingCode:
+        type: string
+      pairingPort:
+        type: integer
+    type: object
+  handler.ADBPairResponse:
+    properties:
+      host:
+        type: string
+      pairingPort:
+        type: integer
+      success:
+        type: boolean
+    type: object
+  handler.ADBStatusResponse:
+    properties:
+      binary:
+        $ref: '#/definitions/adb.ResolvedBinary'
+      devices:
+        items:
+          $ref: '#/definitions/adb.Device'
+        type: array
+      serverAddress:
+        type: string
+    type: object
+  handler.AgentStatusResponse:
+    properties:
+      Mode:
+        type: string
+      Status:
+        type: string
+      Timestamp:
+        type: string
+      adb:
+        $ref: '#/definitions/status.ADBStatus'
+      devices:
+        items:
+          $ref: '#/definitions/adb.Device'
+        type: array
+    type: object
+  handler.AppInfoResponse:
+    properties:
+      apkPaths:
+        items:
+          type: string
+        type: array
+      firstInstallTime:
+        type: string
+      installerPackageName:
+        type: string
+      lastUpdateTime:
+        type: string
+      packageName:
+        type: string
+      primaryApkPath:
+        type: string
+      versionCode:
+        type: string
+      versionName:
+        type: string
+    type: object
+  handler.AppPackageRequest:
+    properties:
+      packageName:
+        type: string
+    type: object
+  handler.ChangePasswordRequest:
+    properties:
+      currentPassword:
+        type: string
+      newPassword:
+        type: string
+    type: object
+  handler.ClipboardResponse:
+    properties:
+      cached:
+        type: boolean
+      text:
+        type: string
+    type: object
+  handler.ClipboardWriteRequest:
+    properties:
+      text:
+        type: string
+    type: object
+  handler.ClipboardWriteResponse:
+    properties:
+      paste:
+        type: boolean
+      success:
+        type: boolean
+      text:
+        type: string
+    type: object
+  handler.CreateDeviceRequest:
+    properties:
+      Name:
+        type: string
+      PairingCode:
+        type: string
+      PairingPort:
+        type: integer
+      Serial:
+        type: string
+    type: object
+  handler.CreateRoleRequest:
+    properties:
+      description:
+        type: string
+      deviceGroupIds:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+      permissions:
+        items:
+          type: string
+        type: array
+    type: object
+  handler.CreateTicketRequest:
+    properties:
+      appName:
+        type: string
+      appPackage:
+        type: string
+      deviceId:
+        type: string
+      newDisplay:
+        type: boolean
+      newDisplayDpi:
+        type: integer
+      newDisplayHeight:
+        type: integer
+      newDisplayWidth:
+        type: integer
+      sessionId:
+        type: string
+    type: object
+  handler.CreateTicketResponse:
+    properties:
+      expiresInSeconds:
+        type: integer
+      sessionId:
+        type: string
+      ticket:
+        type: string
+    type: object
+  handler.CreateUserRequest:
+    properties:
+      deviceGroupIds:
+        items:
+          type: integer
+        type: array
+      password:
+        type: string
+      roleIds:
+        items:
+          type: integer
+        type: array
+      username:
+        type: string
+    type: object
+  handler.CurrentUserResponse:
+    properties:
+      permissions:
+        items:
+          type: string
+        type: array
+      user:
+        $ref: '#/definitions/auth.User'
+    type: object
+  handler.Device:
+    properties:
+      CreatedAt:
+        type: string
+      Groups:
+        items:
+          $ref: '#/definitions/device.GroupSummary'
+        type: array
+      Id:
+        type: integer
+      IpAddress:
+        type: string
+      LastSeen:
+        type: string
+      Name:
+        type: string
+      Port:
+        type: integer
+      Serial:
+        type: string
+      Status:
+        type: string
+      UpdatedAt:
+        type: string
+    type: object
+  handler.DeviceGroupListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/device.Group'
+        type: array
+    type: object
+  handler.DeviceGroupOptionsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/device.GroupSummary'
+        type: array
+    type: object
+  handler.DeviceGroupResponse:
+    properties:
+      group:
+        $ref: '#/definitions/device.Group'
+      success:
+        type: boolean
+    type: object
+  handler.DeviceGroupsResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/device.GroupSummary'
+        type: array
+    type: object
+  handler.DeviceSettingsProfile:
+    properties:
+      Audio:
+        type: boolean
+      AudioBitRate:
+        type: integer
+      AudioCodec:
+        type: string
+      AudioDup:
+        type: boolean
+      AudioEncoder:
+        type: string
+      AudioSource:
+        type: string
+      CameraFacing:
+        type: string
+      CameraFps:
+        type: string
+      CameraHighSpeed:
+        type: boolean
+      CameraId:
+        type: string
+      CameraSize:
+        type: string
+      CodecOptions:
+        type: string
+      Control:
+        type: boolean
+      FlexDisplay:
+        type: boolean
+      HidKeyboard:
+        type: boolean
+      HidMouse:
+        type: boolean
+      MaxFps:
+        type: number
+      MaxSize:
+        type: integer
+      NewDisplay:
+        type: string
+      PowerOffOnClose:
+        type: boolean
+      PowerOn:
+        type: boolean
+      ScreenOffTimeout:
+        type: integer
+      ShowTouches:
+        type: boolean
+      StayAwake:
+        type: boolean
+      VdDestroyContent:
+        type: boolean
+      VdSystemDecorations:
+        type: boolean
+      Video:
+        type: boolean
+      VideoBitRate:
+        type: integer
+      VideoCodec:
+        type: string
+      VideoEncoder:
+        type: string
+      VideoSource:
+        type: string
+    type: object
+  handler.ErrorPayload:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+      messageKey:
+        type: string
+    type: object
+  handler.ErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/handler.ErrorPayload'
+    type: object
+  handler.FileListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/adb.DirectoryEntry'
+        type: array
+      path:
+        type: string
+    type: object
+  handler.FilePathRequest:
+    properties:
+      path:
+        type: string
+    type: object
+  handler.LanguageOption:
+    properties:
+      locale:
+        type: string
+      name:
+        type: string
+    type: object
+  handler.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  handler.LoginResponse:
+    properties:
+      accessToken:
+        type: string
+      accessTokenExpiresAt:
+        type: string
+      permissions:
+        items:
+          type: string
+        type: array
+      refreshToken:
+        type: string
+      refreshTokenExpiresAt:
+        type: string
+      success:
+        type: boolean
+      user:
+        $ref: '#/definitions/auth.User'
+    type: object
+  handler.LogoutRequest:
+    properties:
+      refreshToken:
+        type: string
+    type: object
+  handler.OKResponse:
+    properties:
+      ok:
+        type: boolean
+    type: object
+  handler.RefreshRequest:
+    properties:
+      refreshToken:
+        type: string
+    type: object
+  handler.RenameDeviceRequest:
+    properties:
+      Name:
+        type: string
+    type: object
+  handler.RenameFileRequest:
+    properties:
+      newName:
+        type: string
+      path:
+        type: string
+    type: object
+  handler.ResetPasswordRequest:
+    properties:
+      newPassword:
+        type: string
+    type: object
+  handler.ResetPasswordResponse:
+    properties:
+      password:
+        type: string
+      success:
+        type: boolean
+    type: object
+  handler.RoleResponse:
+    properties:
+      role:
+        $ref: '#/definitions/auth.Role'
+      success:
+        type: boolean
+    type: object
+  handler.RolesResponse:
+    properties:
+      availablePermissions:
+        items:
+          $ref: '#/definitions/auth.PermissionDescriptor'
+        type: array
+      roles:
+        items:
+          $ref: '#/definitions/auth.Role'
+        type: array
+    type: object
+  handler.SaveDeviceGroupRequest:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  handler.SaveDeviceGroupsRequest:
+    properties:
+      groupIds:
+        items:
+          type: integer
+        type: array
+    type: object
+  handler.SaveDeviceGroupsResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/device.GroupSummary'
+        type: array
+      success:
+        type: boolean
+    type: object
+  handler.ScrcpyAppInfo:
+    properties:
+      Name:
+        type: string
+      PackageName:
+        type: string
+    type: object
+  handler.ServerLanguageRequest:
+    properties:
+      locale:
+        type: string
+    type: object
+  handler.ServerLanguageResponse:
+    properties:
+      locale:
+        type: string
+    type: object
+  handler.SessionActionRequest:
+    properties:
+      deviceId:
+        type: string
+      sessionId:
+        type: string
+    type: object
+  handler.SessionActionResponse:
+    properties:
+      success:
+        type: boolean
+    type: object
+  handler.SuccessResponse:
+    properties:
+      success:
+        type: boolean
+    type: object
+  handler.UpdateRoleRequest:
+    properties:
+      description:
+        type: string
+      deviceGroupIds:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+      permissions:
+        items:
+          type: string
+        type: array
+    type: object
+  handler.UpdateUserRequest:
+    properties:
+      deviceGroupIds:
+        items:
+          type: integer
+        type: array
+      isActive:
+        type: boolean
+      roleIds:
+        items:
+          type: integer
+        type: array
+      username:
+        type: string
+    type: object
+  handler.UserResponse:
+    properties:
+      success:
+        type: boolean
+      user:
+        $ref: '#/definitions/auth.User'
+    type: object
+  handler.UsersResponse:
+    properties:
+      availablePermissions:
+        items:
+          $ref: '#/definitions/auth.PermissionDescriptor'
+        type: array
+      roles:
+        items:
+          $ref: '#/definitions/auth.Role'
+        type: array
+      users:
+        items:
+          $ref: '#/definitions/auth.User'
+        type: array
+    type: object
+  handler.VersionResponse:
+    properties:
+      agentVersion:
+        type: string
+      latestReleaseUrl:
+        type: string
+      releaseTag:
+        type: string
+      repositoryUrl:
+        type: string
+      version:
+        type: string
+      webVersion:
+        type: string
+    type: object
+  handler.VideoStreamHealthResponse:
+    properties:
+      capturedAt:
+        type: string
+      origin:
+        $ref: '#/definitions/webrtc.VideoStreamHealthOrigin'
+      reason:
+        type: string
+      sender:
+        $ref: '#/definitions/webrtc.VideoSenderDiagnostics'
+      source:
+        $ref: '#/definitions/webrtc.VideoSourceDiagnostics'
+      state:
+        $ref: '#/definitions/webrtc.VideoStreamState'
+      transport:
+        $ref: '#/definitions/webrtc.VideoTransportDiagnostics'
+    type: object
+  handler.WebRtcNetworkSettings:
+    properties:
+      FallbackLocale:
+        type: string
+      HostCandidateOverrideEnabled:
+        type: boolean
+      HostCandidateOverrideIPs:
+        items:
+          type: string
+        type: array
+      HostCandidatePortMax:
+        type: integer
+      HostCandidatePortMin:
+        type: integer
+      IceServers:
+        items:
+          $ref: '#/definitions/settings.WebRtcIceServer'
+        type: array
+      IceTransportPolicy:
+        type: string
+      SinglePortMuxBindPort:
+        type: integer
+      SinglePortMuxEnabled:
+        type: boolean
+      SinglePortMuxPublishPort:
+        type: integer
+    type: object
+  settings.WebRtcIceServer:
+    properties:
+      Credential:
+        type: string
+      Urls:
+        items:
+          type: string
+        type: array
+      Username:
+        type: string
+    type: object
+  status.ADBStatus:
+    properties:
+      path:
+        type: string
+      serverAddress:
+        type: string
+      source:
+        type: string
+    type: object
+  webrtc.VideoSenderDiagnostics:
+    properties:
+      generation:
+        type: integer
+      hasConfig:
+        type: boolean
+      hasPendingKeyFrame:
+        type: boolean
+      lastConfigAt:
+        type: string
+      lastFrameWriteAt:
+        type: string
+      lastKeyFrameAt:
+        type: string
+      peerConnected:
+        type: boolean
+      reason:
+        type: string
+      state:
+        type: string
+      stateSince:
+        type: string
+    type: object
+  webrtc.VideoSourceDiagnostics:
+    properties:
+      hasSeenMediaPacket:
+        type: boolean
+      lastKeyFrameAt:
+        type: string
+      lastKeyFrameReplayAt:
+        type: string
+      lastNewPtsAt:
+        type: string
+      lastPacketAt:
+        type: string
+      lastPts:
+        type: integer
+      lastVideoRefreshAt:
+        type: string
+      reason:
+        type: string
+      repeatedPtsCount:
+        type: integer
+      runtimeClosed:
+        type: boolean
+      state:
+        type: string
+    type: object
+  webrtc.VideoStreamHealthOrigin:
+    enum:
+    - unknown
+    - source
+    - sender
+    - transport
+    - client
+    type: string
+    x-enum-varnames:
+    - VideoStreamHealthOriginUnknown
+    - VideoStreamHealthOriginSource
+    - VideoStreamHealthOriginSender
+    - VideoStreamHealthOriginTransport
+    - VideoStreamHealthOriginClient
+  webrtc.VideoStreamState:
+    enum:
+    - idle
+    - connecting
+    - observing
+    - stable
+    - stalled
+    - detached
+    type: string
+    x-enum-varnames:
+    - VideoStreamStateIdle
+    - VideoStreamStateConnecting
+    - VideoStreamStateObserving
+    - VideoStreamStateStable
+    - VideoStreamStateStalled
+    - VideoStreamStateDetached
+  webrtc.VideoTransportDiagnostics:
+    properties:
+      peerConnectionState:
+        type: string
+      sessionClosed:
+        type: boolean
+      signalingAttached:
+        type: boolean
+    type: object
+info:
+  contact: {}
+  description: AYLink Agent 的 HTTP API 文档。
+  title: AYLink Agent API
+  version: "1.0"
+paths:
+  /api/accounts/roles:
+    get:
+      description: 返回角色和可用权限，用于账户管理页面。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.RolesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取角色列表
+      tags:
+      - 账户管理
+    post:
+      consumes:
+      - application/json
+      description: 创建角色并设置权限和可访问设备分组。
+      parameters:
+      - description: 角色参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.RoleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建角色
+      tags:
+      - 账户管理
+  /api/accounts/roles/{id}:
+    put:
+      consumes:
+      - application/json
+      description: 更新角色名称、说明、权限和可访问设备分组。
+      parameters:
+      - description: 角色 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 角色参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.RoleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新角色
+      tags:
+      - 账户管理
+  /api/accounts/users:
+    get:
+      description: 返回用户、角色和可用权限，用于账户管理页面。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.UsersResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取用户列表
+      tags:
+      - 账户管理
+    post:
+      consumes:
+      - application/json
+      description: 创建一个新用户，并设置角色和可访问设备分组。
+      parameters:
+      - description: 用户参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建用户
+      tags:
+      - 账户管理
+  /api/accounts/users/{id}:
+    delete:
+      description: 删除指定用户。
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 删除成功
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除用户
+      tags:
+      - 账户管理
+    put:
+      consumes:
+      - application/json
+      description: 更新用户名称、启用状态、角色和可访问设备分组。
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 用户参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新用户
+      tags:
+      - 账户管理
+  /api/accounts/users/{id}/activate:
+    post:
+      description: 启用或禁用指定用户。
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 设置用户启用状态
+      tags:
+      - 账户管理
+  /api/accounts/users/{id}/deactivate:
+    post:
+      description: 启用或禁用指定用户。
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 设置用户启用状态
+      tags:
+      - 账户管理
+  /api/accounts/users/{id}/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: 重置指定用户密码，并返回最终密码。
+      parameters:
+      - description: 用户 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 密码参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ResetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ResetPasswordResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 重置用户密码
+      tags:
+      - 账户管理
+  /api/adb/pair:
+    post:
+      consumes:
+      - application/json
+      description: 使用 Android 无线调试配对地址、端口和配对码完成 ADB 配对。
+      parameters:
+      - description: 配对参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ADBPairRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ADBPairResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 配对无线调试设备
+      tags:
+      - ADB
+  /api/adb/server/kill:
+    post:
+      description: 关闭本机 ADB server。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 关闭 ADB 服务
+      tags:
+      - ADB
+  /api/adb/server/start:
+    post:
+      description: 启动本机 ADB server。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 启动 ADB 服务
+      tags:
+      - ADB
+  /api/adb/status:
+    get:
+      description: 返回 ADB 服务地址、已解析的 ADB 可执行文件和当前设备列表。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ADBStatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取 ADB 状态
+      tags:
+      - ADB
+  /api/app/version:
+    get:
+      description: 返回 Agent、Web 和发布相关版本信息。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.VersionResponse'
+        "405":
+          description: Method Not Allowed
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: 获取应用版本
+      tags:
+      - 状态
+  /api/auth/change-password:
+    post:
+      consumes:
+      - application/json
+      description: 修改当前登录用户自己的密码。
+      parameters:
+      - description: 密码参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 修改当前用户密码
+      tags:
+      - 认证
+  /api/auth/me:
+    get:
+      description: 返回当前访问令牌对应的用户信息和权限列表。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.CurrentUserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取当前用户
+      tags:
+      - 认证
+  /api/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: 使用刷新令牌获取新的访问令牌和刷新令牌。
+      parameters:
+      - description: 刷新令牌
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.RefreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: 刷新登录状态
+      tags:
+      - 认证
+  /api/control/webrtc-network:
+    get:
+      description: 返回 WebRTC ICE 策略和 ICE server 设置。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.WebRtcNetworkSettings'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取 WebRTC 网络设置
+      tags:
+      - 设置
+  /api/device-groups:
+    get:
+      description: 返回设备分组列表，可按关键字过滤。
+      parameters:
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceGroupListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取设备分组列表
+      tags:
+      - 设备分组
+    post:
+      consumes:
+      - application/json
+      description: 创建一个设备分组。
+      parameters:
+      - description: 设备分组参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.SaveDeviceGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceGroupResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建设备分组
+      tags:
+      - 设备分组
+  /api/device-groups/{id}:
+    delete:
+      description: 删除指定设备分组。
+      parameters:
+      - description: 设备分组 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 删除成功
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除设备分组
+      tags:
+      - 设备分组
+    put:
+      consumes:
+      - application/json
+      description: 更新指定设备分组。
+      parameters:
+      - description: 设备分组 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 设备分组参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.SaveDeviceGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceGroupResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新设备分组
+      tags:
+      - 设备分组
+  /api/device-groups/options:
+    get:
+      description: 返回当前用户可见的设备分组选项，可按关键字过滤。
+      parameters:
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceGroupOptionsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取可选设备分组
+      tags:
+      - 设备分组
+  /api/devices:
+    get:
+      description: 返回当前用户可访问的设备列表。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.Device'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取设备列表
+      tags:
+      - 设备
+    post:
+      consumes:
+      - application/json
+      description: 添加一个设备记录。
+      parameters:
+      - description: 设备参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateDeviceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.Device'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建设备
+      tags:
+      - 设备
+  /api/devices/{id}:
+    delete:
+      description: 删除指定设备。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 删除成功
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除设备
+      tags:
+      - 设备
+  /api/devices/{id}/apps:
+    get:
+      description: 返回指定设备安装的应用列表。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.ScrcpyAppInfo'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取应用列表
+      tags:
+      - 应用管理
+  /api/devices/{id}/apps/download:
+    post:
+      consumes:
+      - application/json
+      description: 下载指定设备上应用的 APK 文件。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 应用包名
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.AppPackageRequest'
+      produces:
+      - application/vnd.android.package-archive
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 下载应用 APK
+      tags:
+      - 应用管理
+  /api/devices/{id}/apps/info:
+    post:
+      consumes:
+      - application/json
+      description: 返回指定应用的版本、安装时间和 APK 路径等信息。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 应用包名
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.AppPackageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.AppInfoResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取应用详情
+      tags:
+      - 应用管理
+  /api/devices/{id}/apps/install:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传 APK 并安装到指定设备。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: APK 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OKResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 安装应用
+      tags:
+      - 应用管理
+  /api/devices/{id}/apps/launch:
+    post:
+      consumes:
+      - application/json
+      description: 在指定设备上启动应用。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 应用包名
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.AppPackageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OKResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 启动应用
+      tags:
+      - 应用管理
+  /api/devices/{id}/apps/uninstall:
+    post:
+      consumes:
+      - application/json
+      description: 从指定设备卸载应用。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 应用包名
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.AppPackageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OKResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 卸载应用
+      tags:
+      - 应用管理
+  /api/devices/{id}/clipboard:
+    get:
+      description: 读取指定设备当前投屏会话的远端剪贴板文本。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ClipboardResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 读取远端剪贴板
+      tags:
+      - 剪贴板
+    post:
+      consumes:
+      - application/json
+      description: PUT 同步远端剪贴板文本，POST 同步并触发远端粘贴。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 剪贴板文本
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ClipboardWriteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ClipboardWriteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 写入远端剪贴板
+      tags:
+      - 剪贴板
+    put:
+      consumes:
+      - application/json
+      description: PUT 同步远端剪贴板文本，POST 同步并触发远端粘贴。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 剪贴板文本
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ClipboardWriteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ClipboardWriteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 写入远端剪贴板
+      tags:
+      - 剪贴板
+  /api/devices/{id}/encoders:
+    get:
+      description: 返回指定设备可用的视频编码器列表。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取编码器列表
+      tags:
+      - 设备
+  /api/devices/{id}/files/delete:
+    post:
+      consumes:
+      - application/json
+      description: 删除指定设备上的文件或目录。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 文件路径
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.FilePathRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OKResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除文件
+      tags:
+      - 文件管理
+  /api/devices/{id}/files/download:
+    post:
+      consumes:
+      - application/json
+      description: 从指定设备下载文件。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 文件路径
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.FilePathRequest'
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 下载文件
+      tags:
+      - 文件管理
+  /api/devices/{id}/files/list:
+    post:
+      consumes:
+      - application/json
+      description: 返回指定设备上目录内容。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 目录路径
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.FilePathRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.FileListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取文件列表
+      tags:
+      - 文件管理
+  /api/devices/{id}/files/rename:
+    post:
+      consumes:
+      - application/json
+      description: 重命名指定设备上的文件或目录。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 重命名参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.RenameFileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OKResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 重命名文件
+      tags:
+      - 文件管理
+  /api/devices/{id}/groups:
+    get:
+      description: 返回指定设备所属分组。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceGroupsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取设备分组绑定
+      tags:
+      - 设备分组
+    put:
+      consumes:
+      - application/json
+      description: 保存指定设备所属分组。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 设备分组绑定
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.SaveDeviceGroupsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SaveDeviceGroupsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 保存设备分组绑定
+      tags:
+      - 设备分组
+  /api/devices/{id}/preview:
+    get:
+      description: 获取设备屏幕预览图片。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 预览宽度
+        in: query
+        name: width
+        type: integer
+      produces:
+      - image/jpeg
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取设备预览
+      tags:
+      - 设备
+  /api/devices/{id}/rename:
+    put:
+      consumes:
+      - application/json
+      description: 修改指定设备名称。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 设备名称
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.RenameDeviceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.Device'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 重命名设备
+      tags:
+      - 设备
+  /api/devices/{id}/settings:
+    delete:
+      description: 将指定设备投屏设置恢复为默认值。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceSettingsProfile'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 重置设备投屏设置
+      tags:
+      - 设备设置
+    get:
+      description: 返回指定设备的投屏设置。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceSettingsProfile'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取设备投屏设置
+      tags:
+      - 设备设置
+    put:
+      consumes:
+      - application/json
+      description: 保存指定设备的投屏设置。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 投屏设置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.DeviceSettingsProfile'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.DeviceSettingsProfile'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 保存设备投屏设置
+      tags:
+      - 设备设置
+  /api/devices/connect/{id}:
+    post:
+      description: 对指定设备发起网络连接。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.Device'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 连接设备
+      tags:
+      - 设备
+  /api/i18n/{locale}:
+    get:
+      description: 返回指定语言区域的语言包，不存在时回退到服务端语言设置。
+      parameters:
+      - description: 语言区域代码
+        in: path
+        name: locale
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: 获取语言包
+      tags:
+      - 国际化
+  /api/i18n/languages:
+    get:
+      description: 返回 Agent 支持的语言列表。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.LanguageOption'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: 获取语言列表
+      tags:
+      - 国际化
+  /api/login:
+    post:
+      consumes:
+      - application/json
+      description: 使用用户名和密码登录，返回访问令牌、刷新令牌、当前用户和权限。
+      parameters:
+      - description: 登录参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: 用户登录
+      tags:
+      - 认证
+  /api/logout:
+    post:
+      consumes:
+      - application/json
+      description: 注销当前访问令牌，并可同时撤销指定刷新令牌。
+      parameters:
+      - description: 退出登录参数
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/handler.LogoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: 退出登录
+      tags:
+      - 认证
+  /api/logout-all:
+    post:
+      description: 撤销当前用户的全部登录会话。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 退出全部会话
+      tags:
+      - 认证
+  /api/scrcpy-sessions/heartbeat:
+    post:
+      consumes:
+      - application/json
+      description: 刷新投屏会话租约，保持当前 scrcpy/WebRTC 会话存活。
+      parameters:
+      - description: 会话参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.SessionActionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SessionActionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 刷新投屏会话
+      tags:
+      - 投屏
+  /api/scrcpy-sessions/release:
+    post:
+      consumes:
+      - application/json
+      description: 释放投屏会话租约，并在没有活动引用时关闭运行时。
+      parameters:
+      - description: 会话参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.SessionActionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SessionActionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 释放投屏会话
+      tags:
+      - 投屏
+  /api/scrcpy-sessions/video-health:
+    get:
+      description: 返回指定投屏会话的视频流健康快照。
+      parameters:
+      - description: 设备 ID
+        in: query
+        name: deviceId
+        required: true
+        type: string
+      - description: 会话 ID
+        in: query
+        name: sessionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.VideoStreamHealthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取视频流健康状态
+      tags:
+      - 投屏
+  /api/settings/language:
+    get:
+      description: 返回当前服务端语言设置。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ServerLanguageResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取服务端语言
+      tags:
+      - 设置
+    put:
+      consumes:
+      - application/json
+      description: 保存服务端语言设置。
+      parameters:
+      - description: 语言设置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ServerLanguageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.ServerLanguageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 保存服务端语言
+      tags:
+      - 设置
+  /api/settings/webrtc-network:
+    get:
+      description: 返回 WebRTC ICE 策略和 ICE server 设置。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.WebRtcNetworkSettings'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取 WebRTC 网络设置
+      tags:
+      - 设置
+    put:
+      consumes:
+      - application/json
+      description: 保存 WebRTC ICE 策略和 ICE server 设置。
+      parameters:
+      - description: WebRTC 网络设置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.WebRtcNetworkSettings'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.WebRtcNetworkSettings'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 保存 WebRTC 网络设置
+      tags:
+      - 设置
+  /api/status:
+    get:
+      description: 返回 Agent 运行状态、ADB 状态和当前设备列表。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.AgentStatusResponse'
+      summary: 获取 Agent 状态
+      tags:
+      - 状态
+  /api/webrtc-ticket:
+    post:
+      consumes:
+      - application/json
+      description: 创建一次性 WebRTC 信令票据，用于后续建立投屏信令 WebSocket。
+      parameters:
+      - description: 投屏票据参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.CreateTicketResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建 WebRTC 信令票据
+      tags:
+      - 投屏
+securityDefinitions:
+  BearerAuth:
+    description: 使用 Bearer 访问令牌，例如：Bearer {accessToken}
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

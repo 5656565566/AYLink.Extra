@@ -10,6 +10,7 @@ BUILD_PATH   := ./bin
 # 源文件路径
 AGENT_PATH      := ./AYLink.Agent
 WEB_PATH        := ./AYLink.Web
+API_DOCS_PATH   := ./docs/api
 
 # 可执行文件名称
 AGENT_BINARY_NAME := AYLink-Agent
@@ -24,9 +25,11 @@ APP_RELEASE_TAG ?= v$(APP_VERSION)
 # =============================================================================
 GO := go
 NPM := npm
+SWAG_CMD := $(GO) run github.com/swaggo/swag/cmd/swag@latest
 
 # 编译模式 release (默认 优化大小) debug (包含调试信息)
 BUILD_MODE ?= release
+API_DOCS_ARGS ?=
 
 
 # =============================================================================
@@ -56,7 +59,7 @@ LDFLAGS := -ldflags="$(LDFLAGS_VALUES) $(LDFLAGS_VERSION)"
 PLATFORMS_EXE := windows/amd64 windows/arm64 linux/amd64 linux/amd64/v2 linux/amd64/v3 linux/arm64 linux/riscv64 linux/ppc64le linux/s390x linux/386 linux/loong64 linux/arm/v7 linux/arm/v6 darwin/amd64 darwin/arm64
 
 
-.PHONY: all build web agent clean run help
+.PHONY: all build web agent api-docs api-docs-serve clean run help
 
 # =============================================================================
 #  主要构建目标
@@ -79,6 +82,17 @@ agent: web
 	@$(foreach platform, $(PLATFORMS_EXE), $(call build_exe_platform, $(platform), $(AGENT_PATH)/cmd/agent, $(AGENT_BINARY_NAME)))
 	@echo "==> Agent executables build complete."
 
+api-docs:
+	@echo "==> Generating Swagger API docs..."
+	@mkdir -p $(API_DOCS_PATH)
+	@cd $(AGENT_PATH) && $(SWAG_CMD) init -g ./cmd/agent/main.go -o ../docs/api --parseDependency --parseInternal
+	@rm -f $(API_DOCS_PATH)/docs.go
+	@echo "==> Swagger API docs generated in $(API_DOCS_PATH)"
+
+api-docs-serve:
+	@echo "==> Serving Swagger API docs..."
+	@cd $(AGENT_PATH) && $(GO) run ./cmd/api-docs $(API_DOCS_ARGS)
+
 
 # =============================================================================
 #  辅助目标
@@ -99,10 +113,12 @@ help:
 	@echo "Usage: make [target] [BUILD_MODE=release|debug]"
 	@echo ""
 	@echo "Main Targets:"
-	@echo "  all          (Default) Build Web and Agent executables for all platforms."
-	@echo "  build        Alias for 'all'."
-	@echo "  web          Build frontend Web project and copy to Agent embedded directory."
-	@echo "  agent        Build Agent executables for all target platforms (depends on web)."
+	@echo "  all           (Default) Build Web and Agent executables for all platforms."
+	@echo "  build          Alias for 'all'."
+	@echo "  web            Build frontend Web project and copy to Agent embedded directory."
+	@echo "  agent          Build Agent executables for all target platforms (depends on web)."
+	@echo "  api-docs       Generate developer Swagger docs into docs/api."
+	@echo "  api-docs-serve Serve generated Swagger docs locally."
 	@echo ""
 	@echo "Auxiliary Targets:"
 	@echo "  run          Compile and run the Agent locally."
@@ -110,6 +126,7 @@ help:
 	@echo ""
 	@echo "Options:"
 	@echo "  BUILD_MODE   Set to 'release' (default) for smaller files or 'debug' for debug info."
+	@echo "  API_DOCS_ARGS Extra arguments for api-docs-serve, for example: API_DOCS_ARGS='-api-base-url http://127.0.0.1:5501'."
 	@echo ""
 	@echo "Example:"
 	@echo "  make agent                    # Build all agent executables with release optimization."

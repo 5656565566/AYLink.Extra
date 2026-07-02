@@ -66,6 +66,20 @@ func NewWebRTCHandler(service WebRTCService, settings SettingsService, scrcpy Sc
 	return handler
 }
 
+// CreateTicket 创建 WebRTC 信令票据
+// @Summary 创建 WebRTC 信令票据
+// @Description 创建一次性 WebRTC 信令票据，用于后续建立投屏信令 WebSocket。
+// @Tags 投屏
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body CreateTicketRequest true "投屏票据参数"
+// @Success 200 {object} CreateTicketResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/webrtc-ticket [post]
 func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
@@ -110,14 +124,55 @@ func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, result)
 }
 
+// Heartbeat 刷新投屏会话
+// @Summary 刷新投屏会话
+// @Description 刷新投屏会话租约，保持当前 scrcpy/WebRTC 会话存活。
+// @Tags 投屏
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body SessionActionRequest true "会话参数"
+// @Success 200 {object} SessionActionResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Router /api/scrcpy-sessions/heartbeat [post]
 func (h *WebRTCHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	h.handleSessionAction(w, r, true)
 }
 
+// Release 释放投屏会话
+// @Summary 释放投屏会话
+// @Description 释放投屏会话租约，并在没有活动引用时关闭运行时。
+// @Tags 投屏
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body SessionActionRequest true "会话参数"
+// @Success 200 {object} SessionActionResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Router /api/scrcpy-sessions/release [post]
 func (h *WebRTCHandler) Release(w http.ResponseWriter, r *http.Request) {
 	h.handleSessionAction(w, r, false)
 }
 
+// VideoHealth 获取视频流健康状态
+// @Summary 获取视频流健康状态
+// @Description 返回指定投屏会话的视频流健康快照。
+// @Tags 投屏
+// @Produce json
+// @Security BearerAuth
+// @Param deviceId query string true "设备 ID"
+// @Param sessionId query string true "会话 ID"
+// @Success 200 {object} VideoStreamHealthResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/scrcpy-sessions/video-health [get]
 func (h *WebRTCHandler) VideoHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -171,10 +226,7 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var payload struct {
-		DeviceID  string `json:"deviceId"`
-		SessionID string `json:"sessionId"`
-	}
+	var payload SessionActionRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -192,7 +244,7 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 			WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"success": success})
+		WriteJSON(w, http.StatusOK, SessionActionResponse{Success: success})
 		return
 	}
 
@@ -208,9 +260,23 @@ func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Reque
 		h.forceCloseRuntime(payload.DeviceID)
 	}
 	h.cleanupIdleRuntimes()
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true})
+	WriteJSON(w, http.StatusOK, SessionActionResponse{Success: true})
 }
 
+// GetClipboard 读取远端剪贴板
+// @Summary 读取远端剪贴板
+// @Description 读取指定设备当前投屏会话的远端剪贴板文本。
+// @Tags 剪贴板
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {object} ClipboardResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
+// @Router /api/devices/{id}/clipboard [get]
 func (h *WebRTCHandler) GetClipboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -234,9 +300,9 @@ func (h *WebRTCHandler) GetClipboard(w http.ResponseWriter, r *http.Request) {
 	defer release()
 
 	if cachedText, ok := runtime.GetClipboardCached(); ok {
-		WriteJSON(w, http.StatusOK, map[string]any{
-			"text":   cachedText,
-			"cached": true,
+		WriteJSON(w, http.StatusOK, ClipboardResponse{
+			Text:   cachedText,
+			Cached: true,
 		})
 		return
 	}
@@ -247,9 +313,9 @@ func (h *WebRTCHandler) GetClipboard(w http.ResponseWriter, r *http.Request) {
 	text, err := runtime.GetClipboard(ctx)
 	if err != nil {
 		if cachedText, ok := runtime.GetClipboardCached(); ok {
-			WriteJSON(w, http.StatusOK, map[string]any{
-				"text":   cachedText,
-				"cached": true,
+			WriteJSON(w, http.StatusOK, ClipboardResponse{
+				Text:   cachedText,
+				Cached: true,
 			})
 			return
 		}
@@ -258,12 +324,29 @@ func (h *WebRTCHandler) GetClipboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"text":   text,
-		"cached": false,
+	WriteJSON(w, http.StatusOK, ClipboardResponse{
+		Text:   text,
+		Cached: false,
 	})
 }
 
+// SetClipboard 写入远端剪贴板
+// @Summary 写入远端剪贴板
+// @Description PUT 同步远端剪贴板文本，POST 同步并触发远端粘贴。
+// @Tags 剪贴板
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body ClipboardWriteRequest true "剪贴板文本"
+// @Success 200 {object} ClipboardWriteResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
+// @Router /api/devices/{id}/clipboard [put]
+// @Router /api/devices/{id}/clipboard [post]
 func (h *WebRTCHandler) SetClipboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPut+", "+http.MethodPost)
@@ -279,9 +362,7 @@ func (h *WebRTCHandler) SetClipboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Text string `json:"text"`
-	}
+	var payload ClipboardWriteRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -302,10 +383,10 @@ func (h *WebRTCHandler) SetClipboard(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusBadGateway, "DEVICE_CLIPBOARD_PASTE_FAILED", "Devices.ClipboardPasteFailed", "远端粘贴失败")
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{
-			"success": true,
-			"text":    payload.Text,
-			"paste":   true,
+		WriteJSON(w, http.StatusOK, ClipboardWriteResponse{
+			Success: true,
+			Text:    payload.Text,
+			Paste:   true,
 		})
 		return
 	}
@@ -315,9 +396,9 @@ func (h *WebRTCHandler) SetClipboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"text":    payload.Text,
+	WriteJSON(w, http.StatusOK, ClipboardWriteResponse{
+		Success: true,
+		Text:    payload.Text,
 	})
 }
 

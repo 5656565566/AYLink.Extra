@@ -18,6 +18,18 @@ func NewDeviceGroupHandler(service DeviceGroupService) *DeviceGroupHandler {
 	return &DeviceGroupHandler{service: service}
 }
 
+// List 获取设备分组列表
+// @Summary 获取设备分组列表
+// @Description 返回设备分组列表，可按关键字过滤。
+// @Tags 设备分组
+// @Produce json
+// @Security BearerAuth
+// @Param keyword query string false "关键字"
+// @Success 200 {object} DeviceGroupListResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/device-groups [get]
 func (h *DeviceGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -37,12 +49,24 @@ func (h *DeviceGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 				filtered = append(filtered, item)
 			}
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"items": filtered})
+		WriteJSON(w, http.StatusOK, DeviceGroupListResponse{Items: filtered})
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	WriteJSON(w, http.StatusOK, DeviceGroupListResponse{Items: items})
 }
 
+// ListOptions 获取可选设备分组
+// @Summary 获取可选设备分组
+// @Description 返回当前用户可见的设备分组选项，可按关键字过滤。
+// @Tags 设备分组
+// @Produce json
+// @Security BearerAuth
+// @Param keyword query string false "关键字"
+// @Success 200 {object} DeviceGroupOptionsResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/device-groups/options [get]
 func (h *DeviceGroupHandler) ListOptions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -60,19 +84,30 @@ func (h *DeviceGroupHandler) ListOptions(w http.ResponseWriter, r *http.Request)
 		WriteError(w, http.StatusInternalServerError, "DEVICE_GROUPS_LIST_FAILED", "Errors.DevicesListFailed", "加载设备分组选项失败")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	WriteJSON(w, http.StatusOK, DeviceGroupOptionsResponse{Items: items})
 }
 
+// Create 创建设备分组
+// @Summary 创建设备分组
+// @Description 创建一个设备分组。
+// @Tags 设备分组
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body SaveDeviceGroupRequest true "设备分组参数"
+// @Success 200 {object} DeviceGroupResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/device-groups [post]
 func (h *DeviceGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteMethodNotAllowed(w, http.MethodPost)
 		return
 	}
 
-	var payload struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
+	var payload SaveDeviceGroupRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -83,9 +118,25 @@ func (h *DeviceGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeGroupError(w, err, "CREATE_DEVICE_GROUP_FAILED", "创建设备分组失败")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "group": group})
+	WriteJSON(w, http.StatusOK, DeviceGroupResponse{Success: true, Group: group})
 }
 
+// Update 更新设备分组
+// @Summary 更新设备分组
+// @Description 更新指定设备分组。
+// @Tags 设备分组
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备分组 ID"
+// @Param body body SaveDeviceGroupRequest true "设备分组参数"
+// @Success 200 {object} DeviceGroupResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/device-groups/{id} [put]
 func (h *DeviceGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		WriteMethodNotAllowed(w, http.MethodPut)
@@ -98,10 +149,7 @@ func (h *DeviceGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
+	var payload SaveDeviceGroupRequest
 	if err := decodeJSONBody(r, &payload); err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
 		return
@@ -112,9 +160,23 @@ func (h *DeviceGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.writeGroupError(w, err, "UPDATE_DEVICE_GROUP_FAILED", "更新设备分组失败")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "group": group})
+	WriteJSON(w, http.StatusOK, DeviceGroupResponse{Success: true, Group: group})
 }
 
+// Delete 删除设备分组
+// @Summary 删除设备分组
+// @Description 删除指定设备分组。
+// @Tags 设备分组
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备分组 ID"
+// @Success 204 "删除成功"
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/device-groups/{id} [delete]
 func (h *DeviceGroupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		WriteMethodNotAllowed(w, http.MethodDelete)

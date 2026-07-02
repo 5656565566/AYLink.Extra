@@ -15,6 +15,18 @@ func NewSettingsHandler(service SettingsService, i18n I18NService) *SettingsHand
 	return &SettingsHandler{service: service, i18n: i18n}
 }
 
+// GetWebRtcNetwork 获取 WebRTC 网络设置
+// @Summary 获取 WebRTC 网络设置
+// @Description 返回 WebRTC ICE 策略和 ICE server 设置。
+// @Tags 设置
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} WebRtcNetworkSettings
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/settings/webrtc-network [get]
+// @Router /api/control/webrtc-network [get]
 func (h *SettingsHandler) GetWebRtcNetwork(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteMethodNotAllowed(w, http.MethodGet)
@@ -30,6 +42,20 @@ func (h *SettingsHandler) GetWebRtcNetwork(w http.ResponseWriter, r *http.Reques
 	WriteJSON(w, http.StatusOK, payload)
 }
 
+// SaveWebRtcNetwork 保存 WebRTC 网络设置
+// @Summary 保存 WebRTC 网络设置
+// @Description 保存 WebRTC ICE 策略和 ICE server 设置。
+// @Tags 设置
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body WebRtcNetworkSettings true "WebRTC 网络设置"
+// @Success 200 {object} WebRtcNetworkSettings
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/settings/webrtc-network [put]
 func (h *SettingsHandler) SaveWebRtcNetwork(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		WriteMethodNotAllowed(w, http.MethodPut)

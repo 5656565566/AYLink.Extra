@@ -7,6 +7,8 @@ import (
 	"time"
 
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
+
+	pion "github.com/pion/webrtc/v4"
 )
 
 type fakeScrcpyRuntime struct {
@@ -251,5 +253,43 @@ func TestVideoTimestampResyncAdvancesAfterStaticIdle(t *testing.T) {
 	want := 20*time.Second - defaultVideoSampleDuration
 	if got != want {
 		t.Fatalf("expected static idle timestamp resync %s, got %s", want, got)
+	}
+}
+
+func TestVideoBridgeKeepsDisconnectedPeerDuringGrace(t *testing.T) {
+	bridge := &scrcpyVideoBridge{peerConnected: true}
+
+	if bridge.handlePeerConnectionStateLocked(pion.PeerConnectionStateDisconnected) {
+		t.Fatalf("expected disconnected peer to stay alive during grace")
+	}
+	if bridge.peerConnected {
+		t.Fatalf("expected disconnected peer to stop accepting writes")
+	}
+	if bridge.disconnectedAt.IsZero() {
+		t.Fatalf("expected disconnected timestamp to be recorded")
+	}
+}
+
+func TestVideoBridgeStopsDisconnectedPeerAfterGrace(t *testing.T) {
+	bridge := &scrcpyVideoBridge{
+		disconnectedAt: time.Now().Add(-peerDisconnectedGrace - time.Millisecond),
+	}
+
+	if !bridge.handlePeerConnectionStateLocked(pion.PeerConnectionStateDisconnected) {
+		t.Fatalf("expected disconnected peer to stop after grace")
+	}
+}
+
+func TestVideoBridgeConnectedClearsDisconnectedGrace(t *testing.T) {
+	bridge := &scrcpyVideoBridge{
+		disconnectedAt: time.Now().Add(-time.Second),
+		peerConnected:  true,
+	}
+
+	if bridge.handlePeerConnectionStateLocked(pion.PeerConnectionStateConnected) {
+		t.Fatalf("expected connected peer to stay alive")
+	}
+	if !bridge.disconnectedAt.IsZero() {
+		t.Fatalf("expected connected peer to clear disconnected timestamp")
 	}
 }

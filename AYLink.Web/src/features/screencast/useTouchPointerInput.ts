@@ -17,6 +17,7 @@ interface TouchPointerInputOptions {
   getCurrentPointerMoveSampleIntervalMs: () => number;
   flushPendingPointerControlPayloads: () => void;
   enqueuePointerPayloadBuffers: (payloads: Uint8Array[], onLastSent?: () => void) => boolean;
+  onPointerMoveSendFailed?: (channel: RTCDataChannel) => void;
   mouseCompatSuppressionMs: number;
 }
 
@@ -48,7 +49,8 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
     getScrcpyPointerId,
     releasePointer: (pointerId, phase) => {
       releasePointer(pointerId, phase);
-    }
+    },
+    onPointerMoveSendFailed: (channel) => options.onPointerMoveSendFailed?.(channel)
   });
 
   const {

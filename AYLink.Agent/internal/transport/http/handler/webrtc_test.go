@@ -396,3 +396,19 @@ func TestWebRTCHandlerAcquireRuntimeReusesIdleRuntimeForSameLeasedSession(t *tes
 		t.Fatalf("expected no new runtime start, got %d", scrcpyService.startCount)
 	}
 }
+
+func TestWebRTCHandlerAcquireRuntimeStopsWaitingWhenContextCancels(t *testing.T) {
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, &countingScrcpyRuntimeService{}, nil)
+	handler.runtimes["1"] = &managedRuntime{
+		deviceID: "1",
+		starting: true,
+		ready:    make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := handler.acquireRuntime(ctx, "1", "session-1", 1, scrcpyservice.WebRTCRuntimeOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled while waiting for runtime start, got %v", err)
+	}
+}

@@ -403,7 +403,11 @@ func (h *WebRTCHandler) acquireRuntime(
 			if entry.starting {
 				ready := entry.ready
 				h.runtimeMu.Unlock()
-				<-ready
+				select {
+				case <-ready:
+				case <-ctx.Done():
+					return nil, false, ctx.Err()
+				}
 				continue
 			}
 

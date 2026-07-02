@@ -39,13 +39,44 @@ export function bindBackgroundRemoteTrack(persisted: PersistedCastConnection, ev
 
 export function wireBackgroundPersistedConnectionHandlers(
   persisted: PersistedCastConnection,
-  disposePersistedConnection: (tabKey: string) => void
+  disposePersistedConnection: (tabKey: string) => void,
+  disconnectedGraceMs = 12000
 ) {
+  let disconnectedDisposeTimer: number | null = null;
+
+  const clearDisconnectedDisposeTimer = () => {
+    if (disconnectedDisposeTimer !== null) {
+      window.clearTimeout(disconnectedDisposeTimer);
+      disconnectedDisposeTimer = null;
+    }
+  };
+
   persisted.peerConnection.ontrack = (event) => {
     bindBackgroundRemoteTrack(persisted, event);
   };
   persisted.peerConnection.onconnectionstatechange = () => {
-    if (persisted.peerConnection.connectionState === 'closed' || persisted.peerConnection.connectionState === 'failed') {
+    const state = persisted.peerConnection.connectionState;
+    if (state === 'connected') {
+      persisted.disconnectedAt = undefined;
+      clearDisconnectedDisposeTimer();
+      return;
+    }
+
+    if (state === 'disconnected') {
+      persisted.disconnectedAt = persisted.disconnectedAt ?? Date.now();
+      if (disconnectedDisposeTimer === null) {
+        disconnectedDisposeTimer = window.setTimeout(() => {
+          disconnectedDisposeTimer = null;
+          if (persisted.peerConnection.connectionState === 'disconnected') {
+            disposePersistedConnection(persisted.tabKey);
+          }
+        }, disconnectedGraceMs);
+      }
+      return;
+    }
+
+    clearDisconnectedDisposeTimer();
+    if (state === 'closed' || state === 'failed') {
       disposePersistedConnection(persisted.tabKey);
     }
   };

@@ -135,6 +135,7 @@ class RemoteViewModel(
         private const val VIDEO_FRAME_STALL_THRESHOLD_MS = 6_000L
         private const val VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS = 3_000L
         private const val VIDEO_ICE_RECOVERY_OBSERVATION_MS = 5_000L
+        private const val PEER_DISCONNECTED_GRACE_MS = 12_000L
         private const val VIDEO_STREAM_STABLE_MS = 20_000L
         private const val LOG_TAG = "AYLinkRemote"
         private const val ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS = 300L
@@ -171,6 +172,7 @@ class RemoteViewModel(
     private var pointerSamplingJob: Job? = null
     private var pointerReleaseRetryJob: Job? = null
     private var videoRecoveryJob: Job? = null
+    private var peerDisconnectedRecoveryJob: Job? = null
     private var adaptiveDisplayResizeJob: Job? = null
     private var debugSnapshotJob: Job? = null
     private val sampledPointerMoves = linkedMapOf<Int, PointerControlMessage>()
@@ -264,10 +266,15 @@ class RemoteViewModel(
                         is WebRtcManager.Event.Connected -> {
                             reconnectAttempt = 0
                             stopReconnect()
+                            stopPeerDisconnectedRecovery()
                             _uiState.update { it.copy(status = "已连接") }
                             startVideoRecoveryWatchdog("peer_connected")
                         }
+                        is WebRtcManager.Event.IceDisconnected -> {
+                            handleIceDisconnected(event.generation)
+                        }
                         is WebRtcManager.Event.Disconnected -> {
+                            stopPeerDisconnectedRecovery()
                             resetVideoStreamStateMachine(videoStreamStateMachine)
                             _uiState.update { current ->
                                 current.copy(
@@ -281,6 +288,7 @@ class RemoteViewModel(
                             }
                         }
                         is WebRtcManager.Event.Error -> {
+                            stopPeerDisconnectedRecovery()
                             resetVideoStreamStateMachine(videoStreamStateMachine)
                             _uiState.update { it.copy(status = event.message) }
                             stopVideoRecoveryWatchdog()
@@ -386,6 +394,7 @@ class RemoteViewModel(
         hasReleasedSession = false
         reconnectAttempt = 0
         stopReconnect()
+        stopPeerDisconnectedRecovery()
         stopVideoRecoveryWatchdog()
         sessionStore.updateLastRemoteDevice(device)
         refreshFlexDisplayState()
@@ -431,8 +440,6 @@ class RemoteViewModel(
     ) {
         stopHeartbeat()
         resetPointerControlState()
-        releaseRemoteSessionAsync()
-        hasReleasedSession = false
         webRtcManager.disconnect()
         activeWebRtcGeneration = 0
         resetVideoStreamStateMachine(videoStreamStateMachine)
@@ -441,16 +448,30 @@ class RemoteViewModel(
         if (newDisplay) {
             lastRequestedDisplaySize = initialDisplaySize
         }
-        val ticket = deviceRepository.createWebRtcTicket(
-            deviceId = device.id,
-            sessionId = null,
-            appPackage = appPackage,
-            appName = appName,
-            newDisplay = newDisplay,
-            newDisplayWidth = if (newDisplay) initialDisplaySize.width.takeIf { it > 0 } else null,
-            newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
-            newDisplayDpi = if (newDisplay) localDisplayDpi else null
-        )
+        val reusableSessionId = currentSessionId?.takeIf { it.isNotBlank() }
+        val ticket = runCatching {
+            createWebRtcTicketForConnection(
+                sessionId = reusableSessionId,
+                appPackage = appPackage,
+                appName = appName,
+                newDisplay = newDisplay,
+                initialDisplaySize = initialDisplaySize
+            )
+        }.recoverCatching { error ->
+            if (reusableSessionId == null) {
+                throw error
+            }
+            appLogger?.w(LOG_TAG, "Reusable WebRTC session rejected, sessionId=$reusableSessionId, deviceId=${device.id}: ${error.message}", error)
+            currentSessionId = null
+            hasReleasedSession = false
+            createWebRtcTicketForConnection(
+                sessionId = null,
+                appPackage = appPackage,
+                appName = appName,
+                newDisplay = newDisplay,
+                initialDisplaySize = initialDisplaySize
+            )
+        }.getOrThrow()
         if (!isActiveConnectionRequest(requestId)) {
             releaseTicketSession(ticket.sessionId)
             return
@@ -465,8 +486,26 @@ class RemoteViewModel(
         )
     }
 
+    private suspend fun createWebRtcTicketForConnection(
+        sessionId: String?,
+        appPackage: String?,
+        appName: String?,
+        newDisplay: Boolean,
+        initialDisplaySize: IntSize
+    ) = deviceRepository.createWebRtcTicket(
+        deviceId = device.id,
+        sessionId = sessionId,
+        appPackage = appPackage,
+        appName = appName,
+        newDisplay = newDisplay,
+        newDisplayWidth = if (newDisplay) initialDisplaySize.width.takeIf { it > 0 } else null,
+        newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
+        newDisplayDpi = if (newDisplay) localDisplayDpi else null
+    )
+
     private fun scheduleReconnect() {
         if (manualDisconnect || suppressReconnect || !autoReconnectEnabled || reconnectJob?.isActive == true) return
+        stopPeerDisconnectedRecovery()
         reconnectJob = viewModelScope.launch {
             val delays = longArrayOf(1000L, 2000L, 5000L, 10000L)
             val delayMs = delays[reconnectAttempt.coerceAtMost(delays.lastIndex)]
@@ -483,6 +522,39 @@ class RemoteViewModel(
     private fun stopReconnect() {
         reconnectJob?.cancel()
         reconnectJob = null
+    }
+
+    private fun handleIceDisconnected(generation: Int) {
+        if (manualDisconnect || suppressReconnect || !autoReconnectEnabled || generation != activeWebRtcGeneration) {
+            return
+        }
+        markVideoStreamUnstable(videoStreamStateMachine, generation, System.currentTimeMillis())
+        _uiState.update { current ->
+            current.copy(status = if (current.videoSize != IntSize.Zero) "网络波动，等待媒体恢复..." else "网络波动，正在恢复连接...")
+        }
+        if (peerDisconnectedRecoveryJob?.isActive == true) {
+            return
+        }
+        peerDisconnectedRecoveryJob = viewModelScope.launch {
+            delay(PEER_DISCONNECTED_GRACE_MS)
+            peerDisconnectedRecoveryJob = null
+            if (manualDisconnect || suppressReconnect || !autoReconnectEnabled || generation != activeWebRtcGeneration) {
+                return@launch
+            }
+            if (webRtcManager.isPeerConnected()) {
+                _uiState.update { it.copy(status = "已连接") }
+                return@launch
+            }
+            appLogger?.w(LOG_TAG, "ICE disconnected grace expired, deviceId=${device.id}, generation=$generation")
+            if (tryIceRecovery("ice_disconnected_grace_expired").not()) {
+                scheduleReconnectNow()
+            }
+        }
+    }
+
+    private fun stopPeerDisconnectedRecovery() {
+        peerDisconnectedRecoveryJob?.cancel()
+        peerDisconnectedRecoveryJob = null
     }
 
     fun onViewportSizeChanged(viewportSize: IntSize) {
@@ -858,6 +930,7 @@ class RemoteViewModel(
             return
         }
         appLogger?.i(LOG_TAG, "Reconnect requested immediately, deviceId=${device.id}")
+        stopPeerDisconnectedRecovery()
         reconnectJob?.cancel()
         reconnectJob = viewModelScope.launch {
             _uiState.update { it.copy(status = "连接恢复失败，正在重新连接...") }
@@ -940,6 +1013,7 @@ class RemoteViewModel(
         connectJob?.cancel()
         connectJob = null
         stopReconnect()
+        stopPeerDisconnectedRecovery()
         stopHeartbeat()
         stopVideoRecoveryWatchdog()
         adaptiveDisplayResizeJob?.cancel()

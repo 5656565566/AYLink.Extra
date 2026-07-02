@@ -106,10 +106,20 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
       : controlChannel;
 
   const getPointerMoveSendChannel = () => {
-    if (pointerMoveChannel) {
-      return pointerMoveChannel.readyState === 'open' ? pointerMoveChannel : null;
+    if (pointerMoveChannel?.readyState === 'open') {
+      return pointerMoveChannel;
     }
     return controlChannel;
+  };
+
+  const markPointerMoveChannelUnhealthy = (channel: RTCDataChannel | null) => {
+    if (!channel || pointerMoveChannel !== channel) {
+      return;
+    }
+
+    pointerMoveChannel = null;
+    options.onPointerMoveChannelChanged(null);
+    options.onPersistConnection();
   };
 
   const sendBinaryControlMessage = (payload: Uint8Array, channel = controlChannel) => {
@@ -214,6 +224,7 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
     getPointerMoveChannel: () => pointerMoveChannel,
     getHighFrequencyControlChannel,
     getPointerMoveSendChannel,
+    markPointerMoveChannelUnhealthy,
     setupControlChannel,
     setupMetaControlChannel,
     setupPointerMoveChannel,

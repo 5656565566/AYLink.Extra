@@ -131,7 +131,7 @@ describe('useScrcpyControlChannels', () => {
     expect(harness.onPointerMoveChannelOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('does not fall back to the reliable control channel while pointer move channel is connecting', () => {
+  it('falls back to the reliable control channel while pointer move channel is connecting', () => {
     const harness = createHarness();
     const controlChannel = new TestDataChannel();
     const pointerMoveChannel = new TestDataChannel();
@@ -141,7 +141,23 @@ describe('useScrcpyControlChannels', () => {
     harness.controlChannels.setupPointerMoveChannel(pointerMoveChannel as unknown as RTCDataChannel);
 
     expect(harness.controlChannels.getHighFrequencyControlChannel()).toBe(controlChannel);
-    expect(harness.controlChannels.getPointerMoveSendChannel()).toBeNull();
+    expect(harness.controlChannels.getPointerMoveSendChannel()).toBe(controlChannel);
+  });
+
+  it('clears an unhealthy pointer move channel so moves can fall back to control', () => {
+    const harness = createHarness();
+    const controlChannel = new TestDataChannel();
+    const pointerMoveChannel = new TestDataChannel();
+
+    harness.controlChannels.setupControlChannel(controlChannel as unknown as RTCDataChannel);
+    harness.controlChannels.setupPointerMoveChannel(pointerMoveChannel as unknown as RTCDataChannel);
+
+    harness.controlChannels.markPointerMoveChannelUnhealthy(pointerMoveChannel as unknown as RTCDataChannel);
+
+    expect(harness.controlChannels.getPointerMoveChannel()).toBeNull();
+    expect(harness.controlChannels.getPointerMoveSendChannel()).toBe(controlChannel);
+    expect(harness.onPointerMoveChannelChanged).toHaveBeenLastCalledWith(null);
+    expect(harness.onPersistConnection).toHaveBeenCalled();
   });
 
   it('falls back to the control channel when meta or pointer channels are unavailable', () => {

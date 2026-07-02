@@ -9,6 +9,7 @@ interface PointerControlQueuesOptions {
   getCurrentPointerMoveSampleIntervalMs: () => number;
   getScrcpyPointerId: (pointerId: number) => bigint | null;
   releasePointer: (pointerId: number, phase: PendingPointerReleasePhase) => void;
+  onPointerMoveSendFailed?: (channel: RTCDataChannel) => void;
   now?: () => number;
   logger?: Pick<Console, 'warn'>;
 }
@@ -123,6 +124,7 @@ export function usePointerControlQueues(options: PointerControlQueuesOptions) {
       } catch (error) {
         logger.warn('Pointer move send failed:', error);
         pendingPointerMoves.set(move.pointerId, move);
+        options.onPointerMoveSendFailed?.(channel);
         schedulePointerMoveFlush();
         return;
       }

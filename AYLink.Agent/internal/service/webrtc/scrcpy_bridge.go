@@ -22,6 +22,7 @@ const (
 	defaultVideoSampleDuration = 33 * time.Millisecond
 	defaultAudioSampleDuration = 20 * time.Millisecond
 	videoReadyTimeout          = 5 * time.Second
+	peerDisconnectedGrace      = 12 * time.Second
 	videoStallThreshold        = 3 * time.Second
 	videoTimestampResyncGap    = 500 * time.Millisecond
 	videoStallConfirmations    = 2
@@ -177,11 +178,13 @@ func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
 	defer unsubscribeErrors()
 	stateCheck := time.NewTicker(500 * time.Millisecond)
 	defer stateCheck.Stop()
+	var disconnectedAt time.Time
 
 	for {
 		select {
 		case <-stateCheck.C:
-			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+			if shouldStopPeerMediaBridge(peerConnection.ConnectionState(), &disconnectedAt) {
+				_ = peerConnection.Close()
 				return
 			}
 		case packet, ok := <-audioPackets:
@@ -206,7 +209,8 @@ func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
 			if packet.Release != nil {
 				packet.Release()
 			}
-			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+			if shouldStopPeerMediaBridge(peerConnection.ConnectionState(), &disconnectedAt) {
+				_ = peerConnection.Close()
 				return
 			}
 		case err, ok := <-errorsCh:
@@ -234,6 +238,7 @@ type scrcpyVideoBridge struct {
 	peerConnected     bool
 	lastFrameWriteAt  time.Time
 	generation        uint64
+	disconnectedAt    time.Time
 	state             videoBridgeState
 	stateSince        time.Time
 	lastConfigAt      time.Time
@@ -275,8 +280,8 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 	for {
 		select {
 		case <-stateCheck.C:
-			b.handlePeerConnectionState(peerConnection.ConnectionState())
-			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+			if b.handlePeerConnectionState(peerConnection.ConnectionState()) {
+				_ = peerConnection.Close()
 				return
 			}
 		case packet, ok := <-videoPackets:
@@ -287,7 +292,8 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 			if packet.Release != nil {
 				packet.Release()
 			}
-			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+			if b.handlePeerConnectionState(peerConnection.ConnectionState()) {
+				_ = peerConnection.Close()
 				return
 			}
 			if b.hasAnyReadyFrame() && !videoReady.Stop() {
@@ -302,7 +308,8 @@ func (b *scrcpyVideoBridge) run(peerConnection *pion.PeerConnection) {
 			}
 			return
 		case <-videoReady.C:
-			if isTerminalPeerConnectionState(peerConnection.ConnectionState()) {
+			if b.handlePeerConnectionState(peerConnection.ConnectionState()) {
+				_ = peerConnection.Close()
 				return
 			}
 			b.requestRefresh("video_ready_timeout")
@@ -472,11 +479,19 @@ func (b *scrcpyVideoBridge) handlePeerConnectionState(state pion.PeerConnectionS
 func (b *scrcpyVideoBridge) handlePeerConnectionStateLocked(state pion.PeerConnectionState) bool {
 	switch state {
 	case pion.PeerConnectionStateConnected:
+		b.disconnectedAt = time.Time{}
 		if !b.peerConnected {
 			b.peerConnected = true
 			b.flushPendingLocked()
 		}
-	case pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed, pion.PeerConnectionStateDisconnected:
+	case pion.PeerConnectionStateDisconnected:
+		b.peerConnected = false
+		if b.disconnectedAt.IsZero() {
+			b.disconnectedAt = time.Now()
+			return false
+		}
+		return time.Since(b.disconnectedAt) >= peerDisconnectedGrace
+	case pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed:
 		return true
 	}
 
@@ -930,8 +945,30 @@ func containsH264IDR(sample []byte) bool {
 
 func isTerminalPeerConnectionState(state pion.PeerConnectionState) bool {
 	return state == pion.PeerConnectionStateClosed ||
-		state == pion.PeerConnectionStateFailed ||
-		state == pion.PeerConnectionStateDisconnected
+		state == pion.PeerConnectionStateFailed
+}
+
+func shouldStopPeerMediaBridge(state pion.PeerConnectionState, disconnectedAt *time.Time) bool {
+	switch state {
+	case pion.PeerConnectionStateConnected:
+		if disconnectedAt != nil {
+			*disconnectedAt = time.Time{}
+		}
+		return false
+	case pion.PeerConnectionStateDisconnected:
+		if disconnectedAt == nil {
+			return true
+		}
+		if disconnectedAt.IsZero() {
+			*disconnectedAt = time.Now()
+			return false
+		}
+		return time.Since(*disconnectedAt) >= peerDisconnectedGrace
+	case pion.PeerConnectionStateClosed, pion.PeerConnectionStateFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneBytes(value []byte) []byte {

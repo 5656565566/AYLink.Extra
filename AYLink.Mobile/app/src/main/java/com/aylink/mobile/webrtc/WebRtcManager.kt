@@ -79,6 +79,7 @@ class WebRtcManager(
         val generation: Int
 
         data class Connected(override val generation: Int) : Event
+        data class IceDisconnected(override val generation: Int) : Event
         data class Disconnected(override val generation: Int) : Event
         data class VideoSizeChanged(override val generation: Int, val width: Int, val height: Int) : Event
         data class Error(override val generation: Int, val message: String) : Event
@@ -179,7 +180,11 @@ class WebRtcManager(
                         isIceConnected = true
                         emitConnectedIfReady(generation)
                     }
-                    PeerConnection.IceConnectionState.DISCONNECTED,
+                    PeerConnection.IceConnectionState.DISCONNECTED -> {
+                        isIceConnected = false
+                        hasEmittedConnected = false
+                        _events.tryEmit(Event.IceDisconnected(generation))
+                    }
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED -> {
                         resetConnectionReadyState()
@@ -244,11 +249,17 @@ class WebRtcManager(
             }
         })
 
-        peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, recvOnlyInit())
-        peerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnlyInit())
-        dataChannel = peerConnection?.createDataChannel(CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
-        metaControlChannel = peerConnection?.createDataChannel(META_CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
-        pointerMoveChannel = peerConnection?.createDataChannel(
+        val connection = peerConnection
+        if (connection == null) {
+            _events.tryEmit(Event.Error(generation, "创建 WebRTC 连接失败"))
+            return generation
+        }
+
+        connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, recvOnlyInit())
+        connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnlyInit())
+        dataChannel = connection.createDataChannel(CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
+        metaControlChannel = connection.createDataChannel(META_CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
+        pointerMoveChannel = connection.createDataChannel(
             POINTER_MOVE_CHANNEL_LABEL,
             DataChannel.Init().apply {
                 ordered = false
@@ -344,6 +355,9 @@ class WebRtcManager(
 
     fun setRemoteAnswer(type: String, sdp: String, generation: Int = connectionGeneration) {
         val connection = peerConnection ?: return
+        if (!isCurrentConnection(connection, generation)) {
+            return
+        }
         val description = SessionDescription(
             if (type.equals("answer", ignoreCase = true)) SessionDescription.Type.ANSWER else SessionDescription.Type.OFFER,
             sdp

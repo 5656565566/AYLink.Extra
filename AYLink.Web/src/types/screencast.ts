@@ -17,6 +17,7 @@ export interface PersistedCastConnection {
   newDisplay: boolean;
   sessionId: string;
   persistedAt: number;
+  disconnectedAt?: number;
   peerConnection: RTCPeerConnection;
   ws: WebSocket | null;
   dataChannel: RTCDataChannel | null;

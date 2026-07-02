@@ -76,6 +76,7 @@ describe('persistedConnectionTracks', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -134,6 +135,39 @@ describe('persistedConnectionTracks', () => {
     persisted.peerConnection.onconnectionstatechange?.(new Event('connectionstatechange'));
 
     expect(disposePersistedConnection).toHaveBeenCalledWith('tab-1');
+  });
+
+  it('disposes disconnected background connections after the grace window', () => {
+    vi.useFakeTimers();
+    const disposePersistedConnection = vi.fn();
+    const persisted = createPersistedConnection();
+
+    wireBackgroundPersistedConnectionHandlers(persisted, disposePersistedConnection, 1000);
+    Object.defineProperty(persisted.peerConnection, 'connectionState', { value: 'disconnected', configurable: true });
+    persisted.peerConnection.onconnectionstatechange?.(new Event('connectionstatechange'));
+
+    expect(persisted.disconnectedAt).toBeTypeOf('number');
+    vi.advanceTimersByTime(999);
+    expect(disposePersistedConnection).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+
+    expect(disposePersistedConnection).toHaveBeenCalledWith('tab-1');
+  });
+
+  it('keeps disconnected background connections that reconnect during grace', () => {
+    vi.useFakeTimers();
+    const disposePersistedConnection = vi.fn();
+    const persisted = createPersistedConnection();
+
+    wireBackgroundPersistedConnectionHandlers(persisted, disposePersistedConnection, 1000);
+    Object.defineProperty(persisted.peerConnection, 'connectionState', { value: 'disconnected', configurable: true });
+    persisted.peerConnection.onconnectionstatechange?.(new Event('connectionstatechange'));
+    Object.defineProperty(persisted.peerConnection, 'connectionState', { value: 'connected', configurable: true });
+    persisted.peerConnection.onconnectionstatechange?.(new Event('connectionstatechange'));
+    vi.advanceTimersByTime(1000);
+
+    expect(persisted.disconnectedAt).toBeUndefined();
+    expect(disposePersistedConnection).not.toHaveBeenCalled();
   });
 
   it('ignores unsupported background track kinds', () => {

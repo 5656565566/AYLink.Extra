@@ -72,6 +72,38 @@ describe('usePointerControlQueues', () => {
     expect(queues.pendingPointerReleases.has(2)).toBe(true);
   });
 
+  it('reports pointer move send failures so callers can fall back', () => {
+    const channel = createOpenChannel(vi.fn(() => {
+      throw new Error('send failed');
+    }));
+    const onPointerMoveSendFailed = vi.fn();
+    const queues = usePointerControlQueues({
+      flushPendingPointerControlPayloads: vi.fn(),
+      getPointerMoveSendChannel: () => channel,
+      getCurrentPointerMoveBufferLimit: () => 1024,
+      getCurrentPointerMoveSampleIntervalMs: () => 8,
+      getScrcpyPointerId: () => 3n,
+      releasePointer: vi.fn(),
+      onPointerMoveSendFailed,
+      logger: { warn: vi.fn() }
+    });
+
+    queues.pendingPointerMoves.set(1, {
+      pointerId: 1,
+      xRatio: 0.5,
+      yRatio: 0.25,
+      frameWidth: 1000,
+      frameHeight: 800,
+      pressure: 1
+    });
+
+    queues.flushPendingPointerMoves();
+
+    expect(onPointerMoveSendFailed).toHaveBeenCalledWith(channel);
+    expect(queues.pendingPointerMoves.size).toBe(1);
+    queues.stopPointerMoveFlushLoop();
+  });
+
   it('clears queued state for one pointer or all pointers', () => {
     const queues = usePointerControlQueues({
       flushPendingPointerControlPayloads: vi.fn(),

@@ -215,6 +215,8 @@ export default defineComponent({
 
     const SIGNALING_STABLE_DETACH_MS = 20000;
 
+    const PERSISTED_DISCONNECTED_GRACE_MS = 12000;
+
     const VIDEO_RECOVERY_TIMEOUT_MS = 8000;
 
     const VIDEO_STREAM_STALL_THRESHOLD_MS = 3000;
@@ -642,6 +644,7 @@ export default defineComponent({
       getCurrentPointerMoveSampleIntervalMs: () => getCurrentPointerMoveSampleIntervalMs(),
       flushPendingPointerControlPayloads: () => flushPendingPointerControlPayloads(),
       enqueuePointerPayloadBuffers: (payloads, onLastSent) => enqueuePointerPayloadBuffers(payloads, onLastSent),
+      onPointerMoveSendFailed: (channel) => controlChannels.markPointerMoveChannelUnhealthy(channel),
       mouseCompatSuppressionMs: MOUSE_COMPAT_SUPPRESSION_MS
     });
 
@@ -1167,6 +1170,8 @@ export default defineComponent({
         return;
       }
 
+      const previousSnapshot = getPersistedConnection(tabKey);
+      const connectionState = peerConnection.connectionState;
       const snapshot: PersistedCastConnection = {
         tabKey,
         deviceId: deviceId.value,
@@ -1175,6 +1180,9 @@ export default defineComponent({
         newDisplay: isNewDisplayMode.value,
         sessionId: currentScrcpySessionId,
         persistedAt: Date.now(),
+        disconnectedAt: connectionState === 'disconnected'
+          ? previousSnapshot?.disconnectedAt ?? Date.now()
+          : undefined,
         peerConnection,
         ws,
         dataChannel,
@@ -1186,7 +1194,7 @@ export default defineComponent({
         pendingCandidates: [...pendingCandidates]
       };
       if (options.wireBackgroundHandlers) {
-        wireBackgroundPersistedConnectionHandlers(snapshot, disposePersistedConnection);
+        wireBackgroundPersistedConnectionHandlers(snapshot, disposePersistedConnection, PERSISTED_DISCONNECTED_GRACE_MS);
       }
 
       persistCastConnectionSnapshot(tabKey, snapshot, options);
@@ -1201,7 +1209,9 @@ export default defineComponent({
       const persistedPeerConnectionState = persisted.peerConnection.connectionState;
       if ((persisted.ws && persisted.ws.readyState >= WebSocket.CLOSING)
         || persistedPeerConnectionState === 'closed'
-        || persistedPeerConnectionState === 'failed') {
+        || persistedPeerConnectionState === 'failed'
+        || (persistedPeerConnectionState === 'disconnected'
+          && Date.now() - (persisted.disconnectedAt ?? persisted.persistedAt) >= PERSISTED_DISCONNECTED_GRACE_MS)) {
         console.warn('[WebRTC] Discarding stale persisted connection snapshot.', {
           tabKey,
           deviceId: persisted.deviceId,

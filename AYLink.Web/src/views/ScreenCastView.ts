@@ -101,7 +101,6 @@ import { normalizeIceCandidate } from '../features/screencast/iceCandidate';
 import { buildSignalTicketRequestBody, buildSignalWebSocketBaseUrl as buildSignalWebSocketBaseUrlFromLocation, buildSignalWebSocketUrl } from '../features/screencast/screencastSignaling';
 import { wireScreencastSignalingSocket } from '../features/screencast/screencastSignalingSocket';
 import { wireScreencastPeerConnection } from '../features/screencast/screencastPeerConnection';
-import { createRestoredScreencastRuntimeState, isPersistedConnectionStale } from '../features/screencast/screencastSessionRestore';
 import { createScreencastPeerOfferSession } from '../features/screencast/screencastPeerOffer';
 import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
@@ -121,7 +120,7 @@ import {
   type NormalizedPoint
 } from '../features/inputMapping/inputMappingSchema';
 import type { InputMappingStickerItem } from '../features/inputMapping/inputMappingStickers';
-import type { CastTab, PersistedCastConnection } from '../types/screencast';
+import type { CastTab } from '../types/screencast';
 import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
 import {
   buildHidKeyboardReport,
@@ -1173,116 +1172,11 @@ export default defineComponent({
       tabKey = activeTabKey.value,
       options: { disposeOtherConnections?: boolean; wireBackgroundHandlers?: boolean } = {}
     ) => {
-      if (!peerConnection || !tabKey) {
-        return;
-      }
-
-      const previousSnapshot = getPersistedConnection(tabKey);
-      const connectionState = peerConnection.connectionState;
-      const snapshot: PersistedCastConnection = {
-        tabKey,
-        deviceId: deviceId.value,
-        appPackageName: appPackageName.value,
-        appDisplayName: appDisplayName.value,
-        newDisplay: isNewDisplayMode.value,
-        sessionId: currentScrcpySessionId,
-        persistedAt: Date.now(),
-        disconnectedAt: connectionState === 'disconnected'
-          ? previousSnapshot?.disconnectedAt ?? Date.now()
-          : undefined,
-        peerConnection,
-        ws,
-        dataChannel,
-        metaControlChannel,
-        pointerMoveChannel,
-        remoteTracks: new Map(remoteTracks),
-        remoteVideoStream,
-        remoteAudioStream,
-        pendingCandidates: [...pendingCandidates]
-      };
-      if (options.wireBackgroundHandlers) {
-        wireBackgroundPersistedConnectionHandlers(snapshot, disposePersistedConnection, PERSISTED_DISCONNECTED_GRACE_MS);
-      }
-
-      persistCastConnectionSnapshot(tabKey, snapshot, options);
+      screencastSession.lifecycle.persist(tabKey, options);
     };
 
     const restorePersistedConnection = (tabKey = activeTabKey.value) => {
-      const persisted = getPersistedConnection(tabKey);
-      if (!persisted) {
-        return false;
-      }
-
-      const persistedPeerConnectionState = persisted.peerConnection.connectionState;
-      if (isPersistedConnectionStale(persisted, PERSISTED_DISCONNECTED_GRACE_MS)) {
-        console.warn('[WebRTC] Discarding stale persisted connection snapshot.', {
-          tabKey,
-          deviceId: persisted.deviceId,
-          hasSocket: !!persisted.ws,
-          peerConnectionState: persistedPeerConnectionState
-        });
-        disposePersistedConnection(tabKey);
-        return false;
-      }
-
-      activeConnectionId++;
-      connectionSchedulerState.isStartConnectionInFlight = false;
-      connectionSchedulerState.activeConnectionTargetKey = tabKey;
-      resetSignalingDetachState();
-      const restored = createRestoredScreencastRuntimeState(persisted);
-      currentScrcpySessionId = restored.sessionId;
-      const restoredPeerConnection = restored.peerConnection;
-      peerConnection = restoredPeerConnection;
-      ws = restored.ws;
-      dataChannel = restored.dataChannel;
-      metaControlChannel = restored.metaControlChannel;
-      pointerMoveChannel = restored.pointerMoveChannel;
-      pendingCandidates = restored.pendingCandidates;
-      remoteTracks.clear();
-      for (const [kind, track] of restored.remoteTracks.entries()) {
-        remoteTracks.set(kind, track);
-      }
-      remoteVideoStream = restored.remoteVideoStream;
-      remoteAudioStream = restored.remoteAudioStream;
-
-      const connectionId = activeConnectionId;
-      wirePeerConnectionEventHandlers(connectionId, restoredPeerConnection);
-      if (ws) {
-        wireWebSocketEventHandlers(connectionId, ws);
-      }
-      if (dataChannel) {
-        setupControlChannel(dataChannel);
-      }
-      if (metaControlChannel) {
-        setupMetaControlChannel(metaControlChannel);
-      }
-      if (pointerMoveChannel) {
-        setupPointerMoveChannel(pointerMoveChannel);
-      }
-
-      if (videoElement.value) {
-        videoElement.value.srcObject = remoteVideoStream;
-      }
-      if (audioElement.value) {
-        audioElement.value.srcObject = remoteAudioStream;
-      }
-      const backgroundAudioElement = getPersistentAudioElement();
-      if (backgroundAudioElement.srcObject !== remoteAudioStream) {
-        backgroundAudioElement.srcObject = remoteAudioStream;
-      }
-
-      isConnected.value = restoredPeerConnection.connectionState === 'connected';
-      isConnecting.value = restoredPeerConnection.connectionState === 'connecting';
-      status.value = isConnected.value
-        ? t('Screencast.StatusConnected', '已连接')
-        : isConnecting.value
-          ? t('Screencast.StatusReconnecting', '正在恢复连接...')
-          : t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', restoredPeerConnection.connectionState);
-      startScrcpySessionHeartbeat(persisted.deviceId, currentScrcpySessionId);
-      scheduleResumeMediaPlayback(0);
-      startVideoFrameMonitor(connectionId);
-      persistCurrentConnection(tabKey, { disposeOtherConnections: false });
-      return true;
+      return screencastSession.lifecycle.restore(tabKey);
     };
 
     const getStageBounds = () => {
@@ -2360,152 +2254,11 @@ export default defineComponent({
     };
 
     const startConnection = async (bypassStartGuard = false) => {
-      if (!deviceId.value) {
-        return;
-      }
-
-      const targetTabKey = activeTabKey.value;
-      if (!targetTabKey) {
-        return;
-      }
-      if (!bypassStartGuard
-        && connectionSchedulerState.activeConnectionTargetKey === targetTabKey
-        && (connectionSchedulerState.isStartConnectionInFlight || hasLiveConnection())) {
-        return;
-      }
-
-      const token = getAccessToken();
-      if (!token) {
-        router.push('/login');
-        return;
-      }
-
-      const previousSession = getSessionReleaseTarget(targetTabKey);
-      stopScrcpySessionHeartbeat();
-      if (previousSession.sessionId) {
-        void postScrcpySessionAction('release', previousSession.deviceId, previousSession.sessionId);
-      }
-      disposeAllPersistedConnections();
-      stopConnection();
-      enableAutoReconnect();
-      resetSignalingDetachState();
-      resetVideoStreamWatchdogState();
-      connectionSchedulerState.isStartConnectionInFlight = true;
-      connectionSchedulerState.activeConnectionTargetKey = targetTabKey;
-      isConnecting.value = true;
-      status.value = t('Screencast.StatusConnectingDevice', '正在连接设备...');
-      pendingCandidates = [];
-      const connectionId = ++activeConnectionId;
-
-      try {
-        let wsUrl = buildSignalWebSocketBaseUrl();
-        const { ticketResponse } = await requestSignalTicket();
-
-        if (!ticketResponse.ok) {
-          status.value = t('Screencast.StatusCreateCredentialFailed', '创建连接凭据失败');
-          isConnecting.value = false;
-          clearStartConnectionState();
-          scheduleReconnect(`ticket_${ticketResponse.status}`);
-          return;
-        }
-        const ticketPayload = await ticketResponse.json();
-        currentScrcpySessionId = String(ticketPayload.sessionId ?? '');
-        wsUrl = buildSignalWebSocketUrl(wsUrl, ticketPayload.ticket);
-
-        ws = new WebSocket(wsUrl);
-        const socket = ws;
-
-        ws.onopen = async () => {
-          if (connectionId !== activeConnectionId || ws !== socket) {
-            return;
-          }
-          clearStartConnectionState();
-          status.value = t('Screencast.StatusCreatingSession', '正在创建 WebRTC 会话...');
-          startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
-
-          try {
-            const rtcConfiguration = await loadRtcConfiguration();
-            const offerSession = await createScreencastPeerOfferSession(rtcConfiguration);
-            peerConnection = offerSession.peerConnection;
-            const currentPeerConnection = offerSession.peerConnection;
-
-            setupControlChannel(offerSession.channels.controlChannel);
-            setupMetaControlChannel(offerSession.channels.metaControlChannel);
-            setupPointerMoveChannel(offerSession.channels.pointerMoveChannel);
-            wirePeerConnectionEventHandlers(connectionId, currentPeerConnection);
-
-            ws?.send(JSON.stringify(offerSession.localDescription));
-          } catch (error) {
-            console.error('Failed to create WebRTC offer:', error);
-            status.value = t('Screencast.StatusCreateOfferFailed', '创建 Offer 失败');
-            isConnecting.value = false;
-            clearStartConnectionState();
-            stopConnection();
-            scheduleReconnect('offer_create_failed');
-          }
-        };
-
-        wireWebSocketEventHandlers(connectionId, socket);
-
-        persistCurrentConnection();
-      } catch (error) {
-        console.error('Failed to start WebRTC connection:', error);
-        status.value = t('Screencast.StatusInitRetry', '连接初始化失败，准备重试...');
-        isConnecting.value = false;
-        clearStartConnectionState();
-        stopConnection();
-        scheduleReconnect('connection_bootstrap_failed');
-      }
+      await screencastSession.lifecycle.start(bypassStartGuard);
     };
 
     const detachActiveConnectionFromView = () => {
-      activeConnectionId++;
-      stopFlexDisplayHeartbeat();
-      clearPendingDisplayResize();
-      releaseInputMapping('disconnect');
-      clearAllPointerState();
-      clearInputMappingPointerKeys();
-      currentScrcpySessionId = '';
-      controlChannels.clearPendingPointerControlPayloads();
-      connectionSchedulerState.isStartConnectionInFlight = false;
-      connectionSchedulerState.activeConnectionTargetKey = '';
-      stopVideoFrameCaptureLoop();
-      stopVideoStreamWatchdog();
-      resetVideoStreamWatchdogState();
-      resetSignalingDetachState();
-      stopPointerControlFlushLoop();
-      stopPointerReleaseFlushLoop();
-      clearPendingIceRestartFallback();
-      clearPendingVideoRecovery();
-      clearPendingVideoStreamStallObservation();
-      isIceRestartInFlight = false;
-      peerConnection = null;
-      ws = null;
-      dataChannel = null;
-      metaControlChannel = null;
-      pointerMoveChannel = null;
-      pendingCandidates = [];
-      remoteTracks.clear();
-      remoteVideoStream = new MediaStream();
-      remoteAudioStream = new MediaStream();
-      clearPendingReconnect();
-      clearPendingStartConnection();
-      clearPendingDisplayResize();
-      lastDisplayResizeRequest = null;
-      isConnected.value = false;
-      isConnecting.value = false;
-      status.value = t('Screencast.StatusDisconnected', '未连接');
-      showLastFrameOverlayForTab();
-
-      if (videoElement.value) {
-        videoElement.value.pause();
-        videoElement.value.srcObject = null;
-      }
-
-      if (audioElement.value) {
-        audioElement.value.pause();
-        audioElement.value.srcObject = null;
-      }
+      screencastSession.lifecycle.detachFromView();
     };
 
     const stopConnection = (
@@ -2513,74 +2266,7 @@ export default defineComponent({
       preserveTabKey = activeTabKey.value,
       options: { disposeOtherPersistedConnections?: boolean } = {}
     ) => {
-      const shouldPreserveLiveConnection = preserveForBackground && hasLiveConnection();
-      if (!shouldPreserveLiveConnection) {
-        stopScrcpySessionHeartbeat();
-      }
-      stopFlexDisplayHeartbeat();
-      stopVideoStreamWatchdog();
-      clearPendingDisplayResize();
-      releaseInputMapping('disconnect');
-      resetAllPointerState();
-      clearInputMappingPointerKeys();
-      controlChannels.clearPendingPointerControlPayloads();
-      connectionSchedulerState.isStartConnectionInFlight = false;
-      connectionSchedulerState.activeConnectionTargetKey = '';
-      resetSignalingDetachState();
-      stopPointerControlFlushLoop();
-      stopPointerReleaseFlushLoop();
-      clearPendingIceRestartFallback();
-      clearPendingVideoRecovery();
-      clearPendingVideoStreamStallObservation();
-      isIceRestartInFlight = false;
-
-      if (shouldPreserveLiveConnection) {
-        captureCurrentVideoFrame(preserveTabKey);
-        persistCurrentConnection(preserveTabKey, {
-          disposeOtherConnections: options.disposeOtherPersistedConnections,
-          wireBackgroundHandlers: true
-        });
-        detachActiveConnectionFromView();
-        return;
-      }
-
-      currentScrcpySessionId = '';
-      activeConnectionId++;
-      releaseHidDevices();
-
-      if (dataChannel) {
-        dataChannel.close();
-        dataChannel = null;
-      }
-      if (pointerMoveChannel) {
-        pointerMoveChannel.close();
-        pointerMoveChannel = null;
-      }
-
-      if (metaControlChannel) {
-        metaControlChannel.close();
-        metaControlChannel = null;
-      }
-      if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
-      }
-      if (ws) {
-        const socket = ws;
-        ws = null;
-        socket.onclose = null;
-        socket.close();
-      }
-
-      cleanupMediaStream();
-      clearPersistedConnection();
-      pendingCandidates = [];
-      clearPendingReconnect();
-      clearPendingStartConnection();
-      lastDisplayResizeRequest = null;
-      isConnected.value = false;
-      isConnecting.value = false;
-      status.value = t('Screencast.StatusDisconnected', '未连接');
+      screencastSession.lifecycle.stop(preserveForBackground, preserveTabKey, options);
     };
 
     const screencastSession = useScreencastSession({
@@ -2591,11 +2277,6 @@ export default defineComponent({
         videoStream: remoteVideoStream,
         audioStream: remoteAudioStream
       },
-      lifecycle: {
-        start: startConnection,
-        stop: stopConnection,
-        restore: restorePersistedConnection
-      },
       controls: {
         sendAndroidCommand
       },
@@ -2603,7 +2284,127 @@ export default defineComponent({
         getStageElement: () => videoContainer.value,
         getVideoElement: () => videoElement.value,
         getAudioElement: () => audioElement.value
-      }
+      },
+      runtime: {
+        get peerConnection() { return peerConnection; },
+        set peerConnection(value) { peerConnection = value; },
+        get ws() { return ws; },
+        set ws(value) { ws = value; },
+        get dataChannel() { return dataChannel; },
+        set dataChannel(value) { dataChannel = value; },
+        get metaControlChannel() { return metaControlChannel; },
+        set metaControlChannel(value) { metaControlChannel = value; },
+        get pointerMoveChannel() { return pointerMoveChannel; },
+        set pointerMoveChannel(value) { pointerMoveChannel = value; },
+        get pendingCandidates() { return pendingCandidates; },
+        set pendingCandidates(value) { pendingCandidates = value; },
+        get remoteTracks() { return remoteTracks; },
+        set remoteTracks(value) {
+          remoteTracks.clear();
+          for (const [kind, track] of value.entries()) {
+            remoteTracks.set(kind, track);
+          }
+        },
+        get remoteVideoStream() { return remoteVideoStream; },
+        set remoteVideoStream(value) { remoteVideoStream = value; },
+        get remoteAudioStream() { return remoteAudioStream; },
+        set remoteAudioStream(value) { remoteAudioStream = value; },
+        get currentScrcpySessionId() { return currentScrcpySessionId; },
+        set currentScrcpySessionId(value) { currentScrcpySessionId = value; },
+        get activeConnectionId() { return activeConnectionId; },
+        set activeConnectionId(value) { activeConnectionId = value; },
+        get isIceRestartInFlight() { return isIceRestartInFlight; },
+        set isIceRestartInFlight(value) { isIceRestartInFlight = value; },
+        get lastDisplayResizeRequest() { return lastDisplayResizeRequest; },
+        set lastDisplayResizeRequest(value) { lastDisplayResizeRequest = value; }
+      },
+      schedulerState: connectionSchedulerState,
+      getActiveTabKey: () => activeTabKey.value,
+      getDeviceId: () => deviceId.value,
+      getAppPackageName: () => appPackageName.value,
+      getAppDisplayName: () => appDisplayName.value,
+      getIsNewDisplayMode: () => isNewDisplayMode.value,
+      getCurrentStatusText: (key, ...args) => {
+        switch (key) {
+          case 'connected':
+            return t('Screencast.StatusConnected', '已连接');
+          case 'disconnected':
+            return t('Screencast.StatusDisconnected', '未连接');
+          case 'reconnecting':
+            return t('Screencast.StatusReconnecting', '正在恢复连接...');
+          case 'connectingDevice':
+            return t('Screencast.StatusConnectingDevice', '正在连接设备...');
+          case 'creatingSession':
+            return t('Screencast.StatusCreatingSession', '正在创建 WebRTC 会话...');
+          case 'createCredentialFailed':
+            return t('Screencast.StatusCreateCredentialFailed', '创建连接凭据失败');
+          case 'createOfferFailed':
+            return t('Screencast.StatusCreateOfferFailed', '创建 Offer 失败');
+          case 'initRetry':
+            return t('Screencast.StatusInitRetry', '连接初始化失败，准备重试...');
+          case 'webRtcState':
+            return t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', args[0] ?? '');
+          default:
+            return '';
+        }
+      },
+      getAccessToken,
+      redirectToLogin: () => {
+        router.push('/login');
+      },
+      hasLiveConnection,
+      getSessionReleaseTarget,
+      postScrcpySessionAction: (action, targetDeviceId, sessionId) => {
+        void postScrcpySessionAction(action, targetDeviceId, sessionId);
+      },
+      stopScrcpySessionHeartbeat,
+      startScrcpySessionHeartbeat,
+      disposeAllPersistedConnections,
+      getPersistedConnection,
+      disposePersistedConnection,
+      persistCastConnectionSnapshot,
+      clearPersistedConnection,
+      wireBackgroundPersistedConnectionHandlers: (snapshot) => {
+        wireBackgroundPersistedConnectionHandlers(snapshot, disposePersistedConnection, PERSISTED_DISCONNECTED_GRACE_MS);
+      },
+      staleDisconnectedGraceMs: PERSISTED_DISCONNECTED_GRACE_MS,
+      buildSignalWebSocketBaseUrl,
+      requestSignalTicket,
+      loadRtcConfiguration,
+      createPeerOfferSession: createScreencastPeerOfferSession,
+      wirePeerConnectionEventHandlers,
+      wireWebSocketEventHandlers,
+      setupControlChannel,
+      setupMetaControlChannel,
+      setupPointerMoveChannel,
+      clearStartConnectionState,
+      enableAutoReconnect,
+      scheduleReconnect,
+      resetSignalingDetachState,
+      resetVideoStreamWatchdogState,
+      stopFlexDisplayHeartbeat,
+      stopVideoStreamWatchdog,
+      clearPendingDisplayResize,
+      releaseInputMapping,
+      resetAllPointerState,
+      clearAllPointerState,
+      clearInputMappingPointerKeys,
+      clearPendingPointerControlPayloads: controlChannels.clearPendingPointerControlPayloads,
+      stopVideoFrameCaptureLoop,
+      stopPointerControlFlushLoop,
+      stopPointerReleaseFlushLoop,
+      clearPendingIceRestartFallback,
+      clearPendingVideoRecovery,
+      clearPendingVideoStreamStallObservation,
+      clearPendingReconnect,
+      clearPendingStartConnection,
+      captureCurrentVideoFrame,
+      showLastFrameOverlayForTab,
+      releaseHidDevices,
+      cleanupMediaStream,
+      getPersistentAudioElement,
+      scheduleResumeMediaPlayback,
+      startVideoFrameMonitor
     });
 
     const activateTab = async (tabKey: string) => {

@@ -582,20 +582,32 @@ class WebRtcManager(
     }
 
     private fun replaceRemoteAudioTrack(track: AudioTrack) {
-        remoteAudioTracks.forEach { existing ->
-            if (existing !== track) {
-                existing.setEnabled(false)
-            }
+        if (remoteAudioTrack === track) {
+            track.setVolume(1.0)
+            track.setEnabled(true)
+            return
         }
+
+        // Android WebRTC 会为远端音频轨道自动接入播放链路，替换轨道时需要释放旧轨道，避免旧 native sink 继续发声。
+        val staleTracks = remoteAudioTracks.filter { it !== track }
+        staleTracks.forEach { releaseRemoteAudioTrack(it) }
+        remoteAudioTracks.removeAll(staleTracks.toSet())
         remoteAudioTracks.add(track)
+        track.setVolume(1.0)
         track.setEnabled(true)
         remoteAudioTrack = track
     }
 
     private fun releaseRemoteAudioTracks() {
-        remoteAudioTracks.forEach { it.setEnabled(false) }
+        remoteAudioTracks.forEach { releaseRemoteAudioTrack(it) }
         remoteAudioTracks.clear()
         remoteAudioTrack = null
+    }
+
+    private fun releaseRemoteAudioTrack(track: AudioTrack) {
+        track.setVolume(0.0)
+        track.setEnabled(false)
+        runCatching { track.dispose() }
     }
 
     private fun observeDataChannel(channel: DataChannel, generation: Int) {

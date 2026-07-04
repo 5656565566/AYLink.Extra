@@ -1,6 +1,7 @@
 import type { Ref } from 'vue';
 import type { PersistedCastConnection } from '../../types/screencast';
 import type { CastConnectionSchedulerState } from './connectionScheduler';
+import type { CreateScreencastPeerOfferOptions } from './screencastPeerOffer';
 import { createRestoredScreencastRuntimeState, isPersistedConnectionStale } from './screencastSessionRestore';
 import { buildSignalWebSocketUrl } from './screencastSignaling';
 
@@ -107,7 +108,7 @@ export interface UseScreencastSessionOptions {
   buildSignalWebSocketBaseUrl: () => string;
   requestSignalTicket: (existingSessionId?: string) => Promise<ScreencastSessionStartTicketResponse>;
   loadRtcConfiguration: () => Promise<RTCConfiguration>;
-  createPeerOfferSession: (configuration: RTCConfiguration) => Promise<ScreencastSessionOfferSession>;
+  createPeerOfferSession: (configuration: RTCConfiguration, options?: CreateScreencastPeerOfferOptions) => Promise<ScreencastSessionOfferSession>;
   wirePeerConnectionEventHandlers: (connectionId: number, peerConnection: RTCPeerConnection) => void;
   wireWebSocketEventHandlers: (connectionId: number, socket: WebSocket) => void;
   setupControlChannel: (channel: RTCDataChannel) => void;
@@ -451,13 +452,16 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
 
         try {
           const rtcConfiguration = await options.loadRtcConfiguration();
-          const offerSession = await options.createPeerOfferSession(rtcConfiguration);
+          const offerSession = await options.createPeerOfferSession(rtcConfiguration, {
+            beforeSetLocalDescription: ({ peerConnection, channels }) => {
+              runtime.peerConnection = peerConnection;
+              options.setupControlChannel(channels.controlChannel);
+              options.setupMetaControlChannel(channels.metaControlChannel);
+              options.setupPointerMoveChannel(channels.pointerMoveChannel);
+              options.wirePeerConnectionEventHandlers(connectionId, peerConnection);
+            }
+          });
           runtime.peerConnection = offerSession.peerConnection;
-
-          options.setupControlChannel(offerSession.channels.controlChannel);
-          options.setupMetaControlChannel(offerSession.channels.metaControlChannel);
-          options.setupPointerMoveChannel(offerSession.channels.pointerMoveChannel);
-          options.wirePeerConnectionEventHandlers(connectionId, offerSession.peerConnection);
 
           runtime.ws?.send(JSON.stringify(offerSession.localDescription));
         } catch (error) {

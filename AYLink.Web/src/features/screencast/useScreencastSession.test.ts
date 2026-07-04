@@ -121,15 +121,22 @@ function createHarness(overrides: Partial<UseScreencastSessionOptions> = {}) {
     buildSignalWebSocketBaseUrl: () => 'ws://localhost/webrtc',
     requestSignalTicket: vi.fn(async () => ({ ticketResponse: createResponse({ sessionId: 'session-1', ticket: 'ticket 1' }) })),
     loadRtcConfiguration: vi.fn(async () => ({})),
-    createPeerOfferSession: vi.fn(async () => ({
-      peerConnection: createPeerConnection('new'),
-      channels: {
-        controlChannel: createChannel('control'),
-        metaControlChannel: createChannel('control-meta'),
-        pointerMoveChannel: createChannel('pointer-move')
-      },
-      localDescription: { type: 'offer', sdp: 'offer-sdp' } as RTCSessionDescription
-    })),
+    createPeerOfferSession: vi.fn(async (_configuration, offerOptions) => {
+      const offerSession = {
+        peerConnection: createPeerConnection('new'),
+        channels: {
+          controlChannel: createChannel('control'),
+          metaControlChannel: createChannel('control-meta'),
+          pointerMoveChannel: createChannel('pointer-move')
+        },
+        localDescription: { type: 'offer', sdp: 'offer-sdp' } as RTCSessionDescription
+      };
+      offerOptions?.beforeSetLocalDescription?.({
+        peerConnection: offerSession.peerConnection,
+        channels: offerSession.channels
+      });
+      return offerSession;
+    }),
     wirePeerConnectionEventHandlers: vi.fn(),
     wireWebSocketEventHandlers: vi.fn(),
     setupControlChannel: vi.fn(),

@@ -36,4 +36,35 @@ describe('createScreencastPeerOfferSession', () => {
     expect(session.channels.pointerMoveChannel).toBe(channels.get('pointer-move'));
     expect(session.localDescription).toBe(localDescription);
   });
+
+  it('runs the preparation hook before setting the local description', async () => {
+    const localDescription = { type: 'offer', sdp: 'local-sdp' } as RTCSessionDescription;
+    const offer = { type: 'offer', sdp: 'offer-sdp' } as RTCSessionDescriptionInit;
+    const calls: string[] = [];
+    const peerConnection = {
+      localDescription,
+      addTransceiver: vi.fn(),
+      createDataChannel: vi.fn((label: string) => ({ label }) as RTCDataChannel),
+      createOffer: vi.fn(async () => {
+        calls.push('createOffer');
+        return offer;
+      }),
+      setLocalDescription: vi.fn(async () => {
+        calls.push('setLocalDescription');
+      })
+    } as unknown as RTCPeerConnection;
+
+    await createScreencastPeerOfferSession({}, {
+      createPeerConnection: () => peerConnection,
+      beforeSetLocalDescription: ({ peerConnection: preparedPeerConnection, channels }) => {
+        calls.push('beforeSetLocalDescription');
+        expect(preparedPeerConnection).toBe(peerConnection);
+        expect(channels.controlChannel.label).toBe('control');
+        expect(channels.metaControlChannel.label).toBe('control-meta');
+        expect(channels.pointerMoveChannel.label).toBe('pointer-move');
+      }
+    });
+
+    expect(calls).toEqual(['createOffer', 'beforeSetLocalDescription', 'setLocalDescription']);
+  });
 });

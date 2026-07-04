@@ -12,6 +12,10 @@ export interface ScreencastPeerOfferSession {
 
 export interface CreateScreencastPeerOfferOptions {
   createPeerConnection?: (configuration: RTCConfiguration) => RTCPeerConnection;
+  beforeSetLocalDescription?: (session: {
+    peerConnection: RTCPeerConnection;
+    channels: ScreencastPeerOfferChannels;
+  }) => void;
 }
 
 export async function createScreencastPeerOfferSession(
@@ -26,17 +30,22 @@ export async function createScreencastPeerOfferSession(
   const controlChannel = peerConnection.createDataChannel('control');
   const metaControlChannel = peerConnection.createDataChannel('control-meta');
   const pointerMoveChannel = peerConnection.createDataChannel('pointer-move', { ordered: false, maxRetransmits: 0 });
+  const channels = {
+    controlChannel,
+    metaControlChannel,
+    pointerMoveChannel
+  };
 
   const offer = await peerConnection.createOffer();
+  options.beforeSetLocalDescription?.({
+    peerConnection,
+    channels
+  });
   await peerConnection.setLocalDescription(offer);
 
   return {
     peerConnection,
-    channels: {
-      controlChannel,
-      metaControlChannel,
-      pointerMoveChannel
-    },
+    channels,
     localDescription: peerConnection.localDescription
   };
 }

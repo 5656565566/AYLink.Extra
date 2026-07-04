@@ -13,6 +13,11 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:5501',
         changeOrigin: true
+      },
+      '/webrtc': {
+        target: 'ws://127.0.0.1:5501',
+        ws: true,
+        changeOrigin: true
       }
     }
   },

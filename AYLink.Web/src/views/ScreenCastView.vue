@@ -10,44 +10,25 @@
       </template>
     </WorkspaceTabs>
 
-    <div class="stream-stage" ref="videoContainer" @contextmenu="handleInputMappingStageContextMenu">
-
-    <div v-if="!hasCastTabs" class="empty-state">
-      <svg class="empty-state__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M7 5.5L18 12L7 18.5V5.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <div class="empty-state__title">{{ t('Screencast.NoDeviceSelected', '未选中设备') }}</div>
-      <div class="empty-state__desc">{{ t('Screencast.SelectDevicePrompt', '请在首页选择一个设备来启动投屏') }}</div>
-    </div>
-      <img
-        v-if="shouldShowLastFrameOverlay && lastFrameOverlayUrl"
-        ref="lastFrameOverlayElement"
-        class="last-frame-overlay"
-        :class="{ 'fill-mode': effectiveFillMode }"
-        :src="lastFrameOverlayUrl"
-        alt=""
-        @pointerdown="handlePointerDown"
-        @pointerup="handlePointerUp"
-        @pointermove="handlePointerMove"
-        @pointercancel="handlePointerCancel"
-        @lostpointercapture="handlePointerCaptureLost"
-        @mousedown="handleMouseDown"
-        @contextmenu.prevent
-      />
-      <video
-        ref="videoElement"
-        autoplay
-        playsinline
-        :class="{ 'fill-mode': effectiveFillMode }"
-        @pointerdown="handlePointerDown"
-        @pointerup="handlePointerUp"
-        @pointermove="handlePointerMove"
-        @pointercancel="handlePointerCancel"
-        @lostpointercapture="handlePointerCaptureLost"
-        @mousedown="handleMouseDown"
-        @contextmenu.prevent
-      ></video>
-      <audio ref="audioElement" autoplay playsinline style="display: none"></audio>
+    <ScreencastStage
+      :fill-mode="effectiveFillMode"
+      :show-last-frame-overlay="shouldShowLastFrameOverlay"
+      :last-frame-overlay-url="lastFrameOverlayUrl"
+      @refs-change="syncScreencastStageRefs"
+      @pointerdown="handlePointerDown"
+      @pointerup="handlePointerUp"
+      @pointermove="handlePointerMove"
+      @pointercancel="handlePointerCancel"
+      @lostpointercapture="handlePointerCaptureLost"
+      @mousedown="handleMouseDown"
+      @contextmenu="handleInputMappingStageContextMenu">
+      <div v-if="!hasCastTabs" class="empty-state">
+        <svg class="empty-state__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M7 5.5L18 12L7 18.5V5.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="empty-state__title">{{ t('Screencast.NoDeviceSelected', '未选中设备') }}</div>
+        <div class="empty-state__desc">{{ t('Screencast.SelectDevicePrompt', '请在首页选择一个设备来启动投屏') }}</div>
+      </div>
       <div v-if="debugMode && isVideoStatsOverlayVisible" class="video-debug-overlay">
         <div class="video-debug-overlay__title">{{ t('Screencast.VideoStats', '视频统计信息') }}</div>
         <div class="video-debug-overlay__grid">
@@ -294,7 +275,7 @@
           </button>
         </div>
       </div>
-    </div>
+    </ScreencastStage>
 
     <div v-if="hasCastTabs && isClipboardWindowVisible" ref="clipboardFloatElement" class="clipboard-float" :style="clipboardWindowStyle">
       <div class="clipboard-float__header" @pointerdown="startClipboardDrag">

@@ -95,6 +95,11 @@ import {
 import { useFloatingMenu } from '../features/screencast/useFloatingMenu';
 import { useScreencastFloatingActions } from '../features/screencast/useScreencastFloatingActions';
 import { createFullWorkbenchFloatingActionModules } from '../features/screencast/screencastFloatingActionModules';
+import ScreencastStage from '../features/screencast/ScreencastStage.vue';
+import { useScreencastSession } from '../features/screencast/useScreencastSession';
+import { normalizeIceCandidate } from '../features/screencast/iceCandidate';
+import { buildSignalTicketRequestBody, buildSignalWebSocketBaseUrl as buildSignalWebSocketBaseUrlFromLocation, buildSignalWebSocketUrl } from '../features/screencast/screencastSignaling';
+import { wireScreencastSignalingSocket } from '../features/screencast/screencastSignalingSocket';
 import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
@@ -143,10 +148,18 @@ declare global {
   }
 }
 
+interface ScreencastStageRefs {
+  stageElement: HTMLDivElement | null;
+  videoElement: HTMLVideoElement | null;
+  audioElement: HTMLAudioElement | null;
+  lastFrameOverlayElement: HTMLImageElement | null;
+}
+
 export default defineComponent({
   name: 'ScreenCastView',
   components: {
     WorkspaceTabs,
+    ScreencastStage,
     ChevronLeft20Regular,
     ArrowHookUpLeft20Regular,
     Home20Regular,
@@ -183,15 +196,6 @@ export default defineComponent({
         Username?: string | null;
         Credential?: string | null;
       }>;
-    }
-
-    interface SignalErrorMessagePayload {
-      type: 'error';
-      code?: string;
-      messageKey: string;
-      message?: string;
-      detail?: string;
-      retryable?: boolean;
     }
 
     const CAST_MENU_PLACEMENT_STORAGE_KEY = 'aylink_cast_menu_placement';
@@ -310,6 +314,13 @@ export default defineComponent({
     const audioElement = ref<HTMLAudioElement | null>(null);
 
     const videoContainer = ref<HTMLDivElement | null>(null);
+
+    const syncScreencastStageRefs = (refs: ScreencastStageRefs) => {
+      videoContainer.value = refs.stageElement;
+      videoElement.value = refs.videoElement;
+      audioElement.value = refs.audioElement;
+      lastFrameOverlayElement.value = refs.lastFrameOverlayElement;
+    };
 
     let isPageEventListenersAttached = false;
 
@@ -745,14 +756,6 @@ export default defineComponent({
       return tab.appDisplayName ? `${baseTitle} · ${tab.appDisplayName}` : baseTitle;
     };
 
-    const isSignalErrorMessagePayload = (payload: unknown): payload is SignalErrorMessagePayload => {
-      return payload !== null &&
-        typeof payload === 'object' &&
-        (payload as { type?: unknown }).type === 'error' &&
-        typeof (payload as { messageKey?: unknown }).messageKey === 'string' &&
-        (payload as { messageKey: string }).messageKey.length > 0;
-    };
-
     const {
       CAST_TABS_STORAGE_KEY,
       CAST_ACTIVE_TAB_STORAGE_KEY,
@@ -1129,9 +1132,9 @@ export default defineComponent({
     };
 
     const buildSignalWebSocketBaseUrl = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      return import.meta.env.DEV ? 'ws://127.0.0.1:5501/webrtc' : `${protocol}//${host}/webrtc`;
+      return buildSignalWebSocketBaseUrlFromLocation(window.location, {
+        overrideUrl: import.meta.env.VITE_SIGNAL_WEBSOCKET_URL
+      });
     };
 
     const requestSignalTicket = async (existingSessionId = '') => {
@@ -1145,16 +1148,16 @@ export default defineComponent({
       const ticketResponse = await apiFetch('/api/webrtc-ticket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(buildSignalTicketRequestBody({
           deviceId: normalizedDeviceId,
-          sessionId: existingSessionId || undefined,
-          appPackage: normalizedAppPackage || undefined,
-          appName: appDisplayName.value || undefined,
+          sessionId: existingSessionId,
+          appPackage: normalizedAppPackage,
+          appName: appDisplayName.value,
           newDisplay: isNewDisplayMode.value,
           newDisplayWidth: initialNewDisplaySize?.width,
           newDisplayHeight: initialNewDisplaySize?.height,
-          newDisplayDpi: resolvedNewDisplayDpi.value ?? undefined,
-        })
+          newDisplayDpi: resolvedNewDisplayDpi.value ?? undefined
+        }))
       });
 
       return {
@@ -1625,7 +1628,7 @@ export default defineComponent({
 
         const ticketPayload = await ticketResponse.json();
         currentScrcpySessionId = String(ticketPayload.sessionId ?? currentScrcpySessionId);
-        const socket = new WebSocket(`${buildSignalWebSocketBaseUrl()}?ticket=${encodeURIComponent(String(ticketPayload.ticket ?? ''))}`);
+        const socket = new WebSocket(buildSignalWebSocketUrl(buildSignalWebSocketBaseUrl(), ticketPayload.ticket));
         ws = socket;
 
         socket.onopen = () => {
@@ -1828,89 +1831,6 @@ export default defineComponent({
       if (isConnected.value) {
         status.value = t('Screencast.StatusResolutionUpdated', '画面尺寸已更新: {0}x{1}', width, height);
       }
-    };
-
-    const normalizeIceCandidate = (candidate: unknown): RTCIceCandidateInit | null => {
-      function ensureCandidatePrefix(input: string): string {
-        const text = input.trim();
-        return text.startsWith('candidate:') ? text : `candidate:${text}`;
-      }
-
-      function deepParseCandidateText(input: string, maxDepth = 5): string {
-        let current = input;
-        let depth = 0;
-        while (depth < maxDepth) {
-          try {
-            const parsed = JSON.parse(current);
-            if (parsed && typeof parsed === 'object' && typeof parsed.candidate === 'string') {
-              current = parsed.candidate;
-              depth++;
-              continue;
-            }
-          } catch {
-            break;
-          }
-          break;
-        }
-        return current;
-      }
-
-      if (!candidate) return null;
-
-      if (typeof candidate === 'string') {
-        try {
-          const parsed = JSON.parse(candidate);
-          if (parsed && typeof parsed === 'object') {
-            let candidateText = parsed.candidate;
-            if (typeof candidateText === 'string') {
-              candidateText = deepParseCandidateText(candidateText);
-            }
-            const normalized: RTCIceCandidateInit = { candidate: ensureCandidatePrefix(String(candidateText)) };
-            if (typeof parsed.sdpMid === 'string') normalized.sdpMid = parsed.sdpMid;
-            if (typeof parsed.sdpMLineIndex === 'number') normalized.sdpMLineIndex = parsed.sdpMLineIndex;
-            if (typeof parsed.usernameFragment === 'string') normalized.usernameFragment = parsed.usernameFragment;
-            if (normalized.sdpMid === undefined && normalized.sdpMLineIndex === undefined) {
-              normalized.sdpMLineIndex = 0;
-            }
-            return normalized;
-          }
-        } catch {
-          return { candidate: ensureCandidatePrefix(candidate), sdpMLineIndex: 0 };
-        }
-      }
-
-      if (typeof candidate !== 'object') {
-        console.warn('Invalid ICE candidate payload:', candidate);
-        return null;
-      }
-
-      const value = candidate as Record<string, unknown>;
-      let candidateText = value.candidate ?? value.Candidate;
-      if (typeof candidateText === 'string') {
-        candidateText = deepParseCandidateText(candidateText);
-      }
-      if (typeof candidateText !== 'string' || candidateText.length === 0) {
-        return null;
-      }
-
-      const normalized: RTCIceCandidateInit = { candidate: ensureCandidatePrefix(candidateText) };
-      const sdpMid = value.sdpMid ?? value.SdpMid;
-      const sdpMLineIndex = value.sdpMLineIndex ?? value.SdpMLineIndex;
-      const usernameFragment = value.usernameFragment ?? value.UsernameFragment;
-
-      if (typeof sdpMid === 'string' && sdpMid.length > 0) normalized.sdpMid = sdpMid;
-      if (typeof sdpMLineIndex === 'number') {
-        normalized.sdpMLineIndex = sdpMLineIndex;
-      } else if (typeof sdpMLineIndex === 'string' && sdpMLineIndex.length > 0) {
-        const parsedIndex = Number(sdpMLineIndex);
-        if (Number.isInteger(parsedIndex)) normalized.sdpMLineIndex = parsedIndex;
-      }
-      if (normalized.sdpMid === undefined && normalized.sdpMLineIndex === undefined) {
-        normalized.sdpMLineIndex = 0;
-      }
-      if (typeof usernameFragment === 'string') normalized.usernameFragment = usernameFragment;
-
-      return normalized;
     };
 
     const isDroppableControlPayload = (payload: Uint8Array) => {
@@ -2397,19 +2317,22 @@ export default defineComponent({
       if (!targetSocket) return;
       const persistedTabKey = activeTabKey.value;
 
-      targetSocket.onmessage = async (event) => {
-        if (connectionId !== activeConnectionId || ws !== targetSocket) {
-          return;
-        }
-        const message = JSON.parse(event.data);
-        if ((message as { type?: unknown })?.type === 'error') {
-          if (!isSignalErrorMessagePayload(message)) {
-            status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
-            isConnecting.value = false;
-            console.warn('[WebRTC] Received invalid signaling error payload:', message);
-            return;
-          }
-
+      wireScreencastSignalingSocket({
+        connectionId,
+        socket: targetSocket,
+        getIsCurrentConnection: () => connectionId === activeConnectionId && ws === targetSocket,
+        getPeerConnection: () => peerConnection,
+        getPendingCandidates: () => pendingCandidates,
+        setPendingCandidates: (candidates) => {
+          pendingCandidates = candidates;
+        },
+        createSessionDescription: (message) => new RTCSessionDescription(message),
+        onInvalidSignalError: (message) => {
+          status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
+          isConnecting.value = false;
+          console.warn('[WebRTC] Received invalid signaling error payload:', message);
+        },
+        onSignalError: (message) => {
           status.value = t(
             message.messageKey,
             typeof message.message === 'string' && message.message ? message.message : t('Screencast.StatusSignalingClosed', '信令连接已断开')
@@ -2423,74 +2346,43 @@ export default defineComponent({
               detail: message.detail
             });
           }
-          return;
-        }
-        if (message?.candidate && peerConnection) {
-          const candidate = normalizeIceCandidate(message);
-          if (candidate) {
-            if (peerConnection.remoteDescription) {
-              try {
-                await peerConnection.addIceCandidate(candidate);
-              } catch (error) {
-                console.warn('Ignored ICE candidate:', candidate, error);
-              }
-            } else {
-              pendingCandidates.push(candidate);
-            }
-          }
-        } else if (message?.sdp && peerConnection && message.type === 'answer') {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(message));
+        },
+        onRemoteAnswerApplied: () => {
           clearPendingIceRestartFallback();
           isIceRestartInFlight = false;
           scheduleVideoRecovery(connectionId, 'remote_answer_applied');
-          for (const candidate of pendingCandidates) {
-            try {
-              await peerConnection.addIceCandidate(candidate);
-            } catch (error) {
-              console.warn('Ignored queued ICE candidate:', candidate, error);
-            }
-          }
-          pendingCandidates = [];
           persistCurrentConnection();
-        }
-      };
+        },
+        onSocketError: () => {
+          status.value = t('Screencast.StatusWebSocketError', 'WebSocket 连接出错');
+          isConnecting.value = false;
+        },
+        onSocketClosed: () => {
+          const wasIntentionalDetach = videoStreamHealth.consumeExpectedSignalingClose(connectionId);
+          ws = null;
+          const currentState = peerConnection?.connectionState;
+          if (currentState === 'connected' || currentState === 'connecting') {
+            videoStreamHealth.markSignalingClosedWhileActive(connectionId);
+            persistCurrentConnection(persistedTabKey);
+            status.value = wasIntentionalDetach
+              ? t('Screencast.StatusMediaDirect', '媒体已直连，信令已断开')
+              : t('Screencast.StatusSignalingDetached', '信令连接已断开，媒体链路继续运行');
+            console.warn('[WebRTC] Signaling websocket closed while peer connection is still active.', {
+              deviceId: deviceId.value,
+              tabKey: activeTabKey.value,
+              peerConnectionState: currentState,
+              intentionalDetach: wasIntentionalDetach
+            });
+            return;
+          }
 
-      targetSocket.onerror = () => {
-        if (connectionId !== activeConnectionId || ws !== targetSocket) {
-          return;
+          clearPersistedConnection(persistedTabKey);
+          resetSignalingDetachState();
+          status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
+          stopConnection();
+          scheduleReconnect('websocket_closed');
         }
-        status.value = t('Screencast.StatusWebSocketError', 'WebSocket 连接出错');
-        isConnecting.value = false;
-      };
-
-      targetSocket.onclose = () => {
-        if (connectionId !== activeConnectionId || ws !== targetSocket) {
-          return;
-        }
-        const wasIntentionalDetach = videoStreamHealth.consumeExpectedSignalingClose(connectionId);
-        ws = null;
-        const currentState = peerConnection?.connectionState;
-        if (currentState === 'connected' || currentState === 'connecting') {
-          videoStreamHealth.markSignalingClosedWhileActive(connectionId);
-          persistCurrentConnection(persistedTabKey);
-          status.value = wasIntentionalDetach
-            ? t('Screencast.StatusMediaDirect', '媒体已直连，信令已断开')
-            : t('Screencast.StatusSignalingDetached', '信令连接已断开，媒体链路继续运行');
-          console.warn('[WebRTC] Signaling websocket closed while peer connection is still active.', {
-            deviceId: deviceId.value,
-            tabKey: activeTabKey.value,
-            peerConnectionState: currentState,
-            intentionalDetach: wasIntentionalDetach
-          });
-          return;
-        }
-
-        clearPersistedConnection(persistedTabKey);
-        resetSignalingDetachState();
-        status.value = t('Screencast.StatusSignalingClosed', '信令连接已断开');
-        stopConnection();
-        scheduleReconnect('websocket_closed');
-      };
+      });
     };
 
     const startConnection = async (bypassStartGuard = false) => {
@@ -2544,7 +2436,7 @@ export default defineComponent({
         }
         const ticketPayload = await ticketResponse.json();
         currentScrcpySessionId = String(ticketPayload.sessionId ?? '');
-        wsUrl += `?ticket=${encodeURIComponent(ticketPayload.ticket)}`;
+        wsUrl = buildSignalWebSocketUrl(wsUrl, ticketPayload.ticket);
 
         ws = new WebSocket(wsUrl);
         const socket = ws;
@@ -2720,6 +2612,29 @@ export default defineComponent({
       status.value = t('Screencast.StatusDisconnected', '未连接');
     };
 
+    const screencastSession = useScreencastSession({
+      state: {
+        isConnected,
+        isConnecting,
+        status,
+        videoStream: remoteVideoStream,
+        audioStream: remoteAudioStream
+      },
+      lifecycle: {
+        start: startConnection,
+        stop: stopConnection,
+        restore: restorePersistedConnection
+      },
+      controls: {
+        sendAndroidCommand
+      },
+      refs: {
+        getStageElement: () => videoContainer.value,
+        getVideoElement: () => videoElement.value,
+        getAudioElement: () => audioElement.value
+      }
+    });
+
     const activateTab = async (tabKey: string) => {
       if (tabKey === activeTabKey.value && peerConnection) {
         return;
@@ -2734,7 +2649,7 @@ export default defineComponent({
       if (previousTabKey && previousTabKey !== tab.key) {
         captureCurrentVideoFrame(previousTabKey);
         disableAutoReconnect();
-        stopConnection(true, previousTabKey, { disposeOtherPersistedConnections: false });
+        screencastSession.lifecycle.stop(true, previousTabKey, { disposeOtherPersistedConnections: false });
       }
 
       activeTabKey.value = tab.key;
@@ -2745,7 +2660,7 @@ export default defineComponent({
       await syncRouteToActiveTab();
       await loadActiveInputMappingProfile();
       await refreshDeviceContext();
-      if (restorePersistedConnection(tab.key)) {
+      if (screencastSession.lifecycle.restore(tab.key)) {
         return;
       }
       if (deviceId.value) {
@@ -2776,7 +2691,7 @@ export default defineComponent({
 
       disableAutoReconnect();
       const activeSessionId = currentScrcpySessionId;
-      stopConnection();
+      screencastSession.lifecycle.stop();
       clearPersistedConnection(tabKey);
       void postScrcpySessionAction('release', deviceId.value, activeSessionId);
 
@@ -4288,7 +4203,7 @@ export default defineComponent({
         disposeAllPersistedConnections();
       }
 
-      stopConnection(preserveForBackground);
+      screencastSession.lifecycle.stop(preserveForBackground);
       if (preserveForBackground) {
         showLastFrameOverlayForTab();
       }
@@ -4319,7 +4234,7 @@ export default defineComponent({
       }
 
       if (activeTab.value) {
-        if (restorePersistedConnection()) {
+        if (screencastSession.lifecycle.restore()) {
           void refreshDeviceContext();
           hasUsedInitialConnectionWarmup = true;
           return;
@@ -4350,7 +4265,7 @@ export default defineComponent({
       }
 
       if (activeTab.value) {
-        if (restorePersistedConnection()) {
+        if (screencastSession.lifecycle.restore()) {
           void refreshDeviceContext();
           return;
         }
@@ -4440,10 +4355,12 @@ export default defineComponent({
       lastFrameOverlayElement,
       audioElement,
       videoContainer,
+      syncScreencastStageRefs,
       clipboardFloatElement,
       isConnected,
       isConnecting,
       status,
+      screencastSession,
       lastFrameOverlayUrl,
       shouldShowLastFrameOverlay,
       shouldFillVideoFrame,

@@ -100,6 +100,7 @@ import { useScreencastSession } from '../features/screencast/useScreencastSessio
 import { normalizeIceCandidate } from '../features/screencast/iceCandidate';
 import { buildSignalTicketRequestBody, buildSignalWebSocketBaseUrl as buildSignalWebSocketBaseUrlFromLocation, buildSignalWebSocketUrl } from '../features/screencast/screencastSignaling';
 import { wireScreencastSignalingSocket } from '../features/screencast/screencastSignalingSocket';
+import { wireScreencastPeerConnection } from '../features/screencast/screencastPeerConnection';
 import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
@@ -2210,35 +2211,21 @@ export default defineComponent({
     const wirePeerConnectionEventHandlers = (connectionId: number, targetPeerConnection: RTCPeerConnection) => {
       if (!targetPeerConnection) return;
 
-      targetPeerConnection.ontrack = (event) => {
-        if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
-          return;
-        }
-        console.log('[WebRTC] ontrack fired:', event.track.kind);
-        void attachRemoteTrack(event);
-      };
-
-      targetPeerConnection.onicecandidate = (event) => {
-        if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
-          return;
-        }
-        if (event.candidate && ws?.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(event.candidate));
-        }
-      };
-
-      targetPeerConnection.onconnectionstatechange = () => {
-        if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
-          return;
-        }
-        status.value = t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', peerConnection.connectionState);
-        isConnected.value = peerConnection.connectionState === 'connected';
-        console.debug('[WebRTC] Peer connection state changed:', peerConnection.connectionState, {
-          deviceId: deviceId.value,
-          tabKey: activeTabKey.value
-        });
-
-        if (peerConnection.connectionState === 'connected') {
+      wireScreencastPeerConnection({
+        peerConnection: targetPeerConnection,
+        getIsCurrentConnection: () => connectionId === activeConnectionId && peerConnection === targetPeerConnection,
+        getSignalSocket: () => ws,
+        hasVideoTrack: () => remoteTracks.has('video'),
+        onRemoteTrack: attachRemoteTrack,
+        onPeerStateChanged: (connectionState) => {
+          status.value = t('Screencast.StatusWebRtcState', 'WebRTC 状态: {0}', connectionState);
+          isConnected.value = connectionState === 'connected';
+          console.debug('[WebRTC] Peer connection state changed:', connectionState, {
+            deviceId: deviceId.value,
+            tabKey: activeTabKey.value
+          });
+        },
+        onPeerConnected: () => {
           isConnecting.value = false;
           clearPendingReconnect();
           clearPendingIceRestartFallback();
@@ -2248,69 +2235,57 @@ export default defineComponent({
           startVideoFrameMonitor(connectionId);
           scheduleDisplayResize(150);
           scheduleSignalingDetach(connectionId);
-          if (!remoteTracks.has('video')) {
-            scheduleVideoRecovery(connectionId, 'peer_connected_without_video');
-          }
-        }
-
-        if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'closed') {
-          markActiveVideoStreamUnstable(connectionId, `peer_connection_${peerConnection.connectionState}`);
+        },
+        onPeerConnectedWithoutVideo: () => {
+          scheduleVideoRecovery(connectionId, 'peer_connected_without_video');
+        },
+        onPeerRecoverableFailure: (connectionState) => {
+          markActiveVideoStreamUnstable(connectionId, `peer_connection_${connectionState}`);
           isConnecting.value = false;
-          if (peerConnection.connectionState === 'closed') {
-            stopConnection();
-            scheduleReconnect('peer_connection_closed');
-            return;
-          }
-
           void (async () => {
-            const restarted = await tryIceRestart(`peer_connection_${peerConnection.connectionState}`);
+            const restarted = await tryIceRestart(`peer_connection_${connectionState}`);
             if (!restarted) {
               stopConnection();
-              scheduleReconnect(`peer_connection_${peerConnection.connectionState}`);
+              scheduleReconnect(`peer_connection_${connectionState}`);
             }
           })();
-          return;
-        }
-
-        persistCurrentConnection();
-      };
-
-      targetPeerConnection.oniceconnectionstatechange = () => {
-        if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
-          return;
-        }
-
-        const currentIceState = targetPeerConnection.iceConnectionState;
-        console.debug('[WebRTC] ICE connection state changed:', currentIceState, {
-          deviceId: deviceId.value,
-          tabKey: activeTabKey.value
-        });
-
-        if (currentIceState === 'connected' || currentIceState === 'completed') {
+        },
+        onPeerClosed: () => {
+          markActiveVideoStreamUnstable(connectionId, 'peer_connection_closed');
+          isConnecting.value = false;
+          stopConnection();
+          scheduleReconnect('peer_connection_closed');
+        },
+        onPeerStateSettled: () => {
+          persistCurrentConnection();
+        },
+        onIceStateChanged: (currentIceState) => {
+          console.debug('[WebRTC] ICE connection state changed:', currentIceState, {
+            deviceId: deviceId.value,
+            tabKey: activeTabKey.value
+          });
+        },
+        onIceConnected: () => {
           scheduleSignalingDetach(connectionId);
-          if (!remoteTracks.has('video')) {
-            scheduleVideoRecovery(connectionId, `ice_${currentIceState}_without_video`);
-          }
-          return;
-        }
-
-        markActiveVideoStreamUnstable(connectionId, `ice_connection_${currentIceState}`);
-        if (currentIceState === 'closed') {
+        },
+        onIceConnectedWithoutVideo: (currentIceState) => {
+          scheduleVideoRecovery(connectionId, `ice_${currentIceState}_without_video`);
+        },
+        onIceUnstable: (currentIceState) => {
+          markActiveVideoStreamUnstable(connectionId, `ice_connection_${currentIceState}`);
+        },
+        onIceClosed: () => {
           stopConnection();
           scheduleReconnect('ice_connection_closed');
+        },
+        onDataChannel: (channel) => {
+          if (channel.label === 'pointer-move') {
+            setupPointerMoveChannel(channel);
+          } else {
+            setupControlChannel(channel);
+          }
         }
-      };
-
-      targetPeerConnection.ondatachannel = (event) => {
-        if (connectionId !== activeConnectionId || peerConnection !== targetPeerConnection) {
-          return;
-        }
-        if (event.channel.label === 'pointer-move') {
-          setupPointerMoveChannel(event.channel);
-        } else {
-          setupControlChannel(event.channel);
-        }
-      };
+      });
     };
 
     const wireWebSocketEventHandlers = (connectionId: number, targetSocket: WebSocket) => {

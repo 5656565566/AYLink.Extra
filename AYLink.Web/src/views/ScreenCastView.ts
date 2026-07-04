@@ -101,6 +101,7 @@ import { normalizeIceCandidate } from '../features/screencast/iceCandidate';
 import { buildSignalTicketRequestBody, buildSignalWebSocketBaseUrl as buildSignalWebSocketBaseUrlFromLocation, buildSignalWebSocketUrl } from '../features/screencast/screencastSignaling';
 import { wireScreencastSignalingSocket } from '../features/screencast/screencastSignalingSocket';
 import { wireScreencastPeerConnection } from '../features/screencast/screencastPeerConnection';
+import { createRestoredScreencastRuntimeState, isPersistedConnectionStale } from '../features/screencast/screencastSessionRestore';
 import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
@@ -1212,11 +1213,7 @@ export default defineComponent({
       }
 
       const persistedPeerConnectionState = persisted.peerConnection.connectionState;
-      if ((persisted.ws && persisted.ws.readyState >= WebSocket.CLOSING)
-        || persistedPeerConnectionState === 'closed'
-        || persistedPeerConnectionState === 'failed'
-        || (persistedPeerConnectionState === 'disconnected'
-          && Date.now() - (persisted.disconnectedAt ?? persisted.persistedAt) >= PERSISTED_DISCONNECTED_GRACE_MS)) {
+      if (isPersistedConnectionStale(persisted, PERSISTED_DISCONNECTED_GRACE_MS)) {
         console.warn('[WebRTC] Discarding stale persisted connection snapshot.', {
           tabKey,
           deviceId: persisted.deviceId,
@@ -1231,20 +1228,21 @@ export default defineComponent({
       connectionSchedulerState.isStartConnectionInFlight = false;
       connectionSchedulerState.activeConnectionTargetKey = tabKey;
       resetSignalingDetachState();
-      currentScrcpySessionId = persisted.sessionId ?? '';
-      const restoredPeerConnection = persisted.peerConnection;
+      const restored = createRestoredScreencastRuntimeState(persisted);
+      currentScrcpySessionId = restored.sessionId;
+      const restoredPeerConnection = restored.peerConnection;
       peerConnection = restoredPeerConnection;
-      ws = persisted.ws;
-      dataChannel = persisted.dataChannel;
-      metaControlChannel = persisted.metaControlChannel;
-      pointerMoveChannel = persisted.pointerMoveChannel;
-      pendingCandidates = [...persisted.pendingCandidates];
+      ws = restored.ws;
+      dataChannel = restored.dataChannel;
+      metaControlChannel = restored.metaControlChannel;
+      pointerMoveChannel = restored.pointerMoveChannel;
+      pendingCandidates = restored.pendingCandidates;
       remoteTracks.clear();
-      for (const [kind, track] of persisted.remoteTracks.entries()) {
+      for (const [kind, track] of restored.remoteTracks.entries()) {
         remoteTracks.set(kind, track);
       }
-      remoteVideoStream = persisted.remoteVideoStream;
-      remoteAudioStream = persisted.remoteAudioStream;
+      remoteVideoStream = restored.remoteVideoStream;
+      remoteAudioStream = restored.remoteAudioStream;
 
       const connectionId = activeConnectionId;
       wirePeerConnectionEventHandlers(connectionId, restoredPeerConnection);

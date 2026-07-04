@@ -11,6 +11,7 @@ import (
 	"time"
 
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
+	deviceservice "aylink-agent/internal/service/device"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
 	webrtcservice "aylink-agent/internal/service/webrtc"
 
@@ -443,7 +444,8 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	runtime, created, err := h.acquireRuntime(r.Context(), ticket.DeviceID, ticket.SessionID, deviceID, options)
 	if err != nil {
-		writeSignalError(conn, "SCRCPY_START_FAILED", "WebRTC.ScrcpyStartFailed", "启动 scrcpy 会话失败", err, false)
+		code, messageKey, message := signalScrcpyStartError(err)
+		writeSignalError(conn, code, messageKey, message, err, false)
 		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "scrcpy start failed"))
 		return
 	}
@@ -759,4 +761,19 @@ func writeSignalError(
 	}
 
 	_ = conn.WriteJSON(payload)
+}
+
+func signalScrcpyStartError(err error) (string, string, string) {
+	switch {
+	case errors.Is(err, deviceservice.ErrDeviceOffline):
+		return "DEVICE_OFFLINE", "Devices.Offline", "设备已断开，请稍后重试"
+	case errors.Is(err, scrcpyservice.ErrDeviceNotFound):
+		return "DEVICE_NOT_FOUND", "Devices.NotFound", "设备不存在"
+	case errors.Is(err, scrcpyservice.ErrDeviceSerialMissing):
+		return "DEVICE_SERIAL_REQUIRED", "Devices.SerialRequired", "设备序列号不能为空"
+	case errors.Is(err, scrcpyservice.ErrServerUnavailable):
+		return "SCRCPY_SERVER_UNAVAILABLE", "Scrcpy.ServerUnavailable", "scrcpy-server 文件不可用"
+	default:
+		return "SCRCPY_START_FAILED", "WebRTC.ScrcpyStartFailed", "启动 scrcpy 会话失败"
+	}
 }

@@ -1118,6 +1118,8 @@ func (h *DeviceHandler) writeScrcpyError(w http.ResponseWriter, err error, fallb
 		WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "设备不存在")
 	case errors.Is(err, scrcpyservice.ErrDeviceSerialMissing):
 		WriteError(w, http.StatusBadRequest, "DEVICE_SERIAL_REQUIRED", "Devices.SerialRequired", "设备序列号不能为空")
+	case errors.Is(err, deviceservice.ErrDeviceOffline):
+		WriteError(w, http.StatusConflict, "DEVICE_OFFLINE", "Devices.Offline", "设备已断开，请稍后重试")
 	case errors.Is(err, scrcpyservice.ErrServerUnavailable):
 		WriteError(w, http.StatusServiceUnavailable, "SCRCPY_SERVER_UNAVAILABLE", "Scrcpy.ServerUnavailable", "scrcpy-server 文件不可用")
 	default:

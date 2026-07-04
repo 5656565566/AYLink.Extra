@@ -8,6 +8,7 @@ import (
 
 	domaindevice "aylink-agent/internal/domain/device"
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
+	deviceservice "aylink-agent/internal/service/device"
 )
 
 var (
@@ -16,8 +17,8 @@ var (
 	ErrServerUnavailable   = errors.New("scrcpy server unavailable")
 )
 
-type DeviceRepository interface {
-	GetByID(ctx context.Context, id int) (*domaindevice.Device, error)
+type DeviceResolver interface {
+	ResolveSerialForAccess(ctx context.Context, id int) (string, error)
 }
 
 type SettingsRepository interface {
@@ -35,7 +36,7 @@ type Backend interface {
 }
 
 type Service struct {
-	devices  DeviceRepository
+	devices  DeviceResolver
 	settings SettingsRepository
 	backend  Backend
 }
@@ -51,7 +52,7 @@ type WebRTCRuntimeOptions struct {
 	NewDisplayDPI    *int
 }
 
-func NewService(devices DeviceRepository, settings SettingsRepository, backend Backend) *Service {
+func NewService(devices DeviceResolver, settings SettingsRepository, backend Backend) *Service {
 	return &Service{
 		devices:  devices,
 		settings: settings,
@@ -153,14 +154,20 @@ func (s *Service) StartRuntimeForWebRTC(ctx context.Context, deviceID int, optio
 }
 
 func (s *Service) resolveSerial(ctx context.Context, deviceID int) (string, error) {
-	device, err := s.devices.GetByID(ctx, deviceID)
-	if err != nil {
-		return "", err
-	}
-	if device == nil {
+	if s.devices == nil {
 		return "", ErrDeviceNotFound
 	}
-	serial := strings.TrimSpace(device.Serial)
+	serial, err := s.devices.ResolveSerialForAccess(ctx, deviceID)
+	if err != nil {
+		if errors.Is(err, deviceservice.ErrDeviceNotFound) {
+			return "", ErrDeviceNotFound
+		}
+		if errors.Is(err, deviceservice.ErrDeviceSerialEmpty) {
+			return "", ErrDeviceSerialMissing
+		}
+		return "", err
+	}
+	serial = strings.TrimSpace(serial)
 	if serial == "" {
 		return "", ErrDeviceSerialMissing
 	}

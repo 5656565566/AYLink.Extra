@@ -11,6 +11,7 @@ import (
 
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
 	domainwebrtc "aylink-agent/internal/domain/webrtc"
+	deviceservice "aylink-agent/internal/service/device"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
 	webrtcservice "aylink-agent/internal/service/webrtc"
 
@@ -329,6 +330,14 @@ func TestWebRTCHandlerVideoHealthReturnsSnapshot(t *testing.T) {
 	body := recorder.Body.String()
 	if !strings.Contains(body, `"state":"observing"`) || !strings.Contains(body, `"origin":"sender"`) || !strings.Contains(body, `"peerConnected":true`) {
 		t.Fatalf("expected health snapshot payload, got %s", body)
+	}
+}
+
+func TestSignalScrcpyStartErrorMapsDeviceOffline(t *testing.T) {
+	code, messageKey, message := signalScrcpyStartError(deviceservice.ErrDeviceOffline)
+
+	if code != "DEVICE_OFFLINE" || messageKey != "Devices.Offline" || message == "" {
+		t.Fatalf("expected device offline signal mapping, got code=%q messageKey=%q message=%q", code, messageKey, message)
 	}
 }
 

@@ -90,7 +90,7 @@ func New(deps Dependencies) http.Handler {
 	}
 
 	scrcpyBackend := scrcpy.NewService(deps.Logger, deps.Config.ADB.ServerHost, deps.Config.ADB.ServerPort, adbBinaryPath, deps.Config.Scrcpy.ServerPath)
-	scrcpyService := scrcpyservice.NewService(deviceRepo, settingsRepo, scrcpyBackend)
+	scrcpyService := scrcpyservice.NewService(deviceService, settingsRepo, scrcpyBackend)
 
 	deviceHandler := handler.NewDeviceHandler(
 		deviceService,

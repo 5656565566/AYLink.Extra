@@ -124,24 +124,9 @@ func (s *Service) List(ctx context.Context) ([]domaindevice.Device, error) {
 	now := time.Now().UTC()
 	for i := range devices {
 		device := &devices[i]
-		serial := strings.TrimSpace(device.Serial)
-		if _, ok := onlineSerials[serial]; ok {
-			previousName := device.Name
-			s.refreshDefaultLikeName(ctx, device, serial)
-			if !strings.EqualFold(device.Status, "online") {
-				device.Status = "online"
-				device.LastSeen = now
-				device.UpdatedAt = now
-				if err := s.repo.Update(ctx, device); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			if device.Name != previousName {
-				device.UpdatedAt = now
-				if err := s.repo.Update(ctx, device); err != nil {
-					return nil, err
-				}
+		if s.syncDeviceStatusFromOnlineSerials(ctx, device, onlineSerials, now) {
+			if err := s.repo.Update(ctx, device); err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -169,7 +154,64 @@ func (s *Service) List(ctx context.Context) ([]domaindevice.Device, error) {
 }
 
 func (s *Service) GetByID(ctx context.Context, id int) (*domaindevice.Device, error) {
-	return s.repo.GetByID(ctx, id)
+	device, err := s.repo.GetByID(ctx, id)
+	if err != nil || device == nil {
+		return device, err
+	}
+	if s.adb == nil {
+		return device, nil
+	}
+
+	now := time.Now().UTC()
+	if s.syncDeviceADBStatus(ctx, device, now) {
+		if err := s.repo.Update(ctx, device); err != nil {
+			return nil, err
+		}
+	}
+	return device, nil
+}
+
+func (s *Service) syncDeviceADBStatus(ctx context.Context, device *domaindevice.Device, now time.Time) bool {
+	if s.adb == nil || device == nil {
+		return false
+	}
+
+	adbDevices, err := s.adb.Devices(ctx)
+	if err != nil {
+		return false
+	}
+
+	onlineSerials := make(map[string]struct{}, len(adbDevices))
+	for _, adbDevice := range adbDevices {
+		if isADBDeviceUsable(adbDevice.State) {
+			onlineSerials[strings.TrimSpace(adbDevice.Serial)] = struct{}{}
+		}
+	}
+
+	return s.syncDeviceStatusFromOnlineSerials(ctx, device, onlineSerials, now)
+}
+
+func (s *Service) syncDeviceStatusFromOnlineSerials(ctx context.Context, device *domaindevice.Device, onlineSerials map[string]struct{}, now time.Time) bool {
+	serial := strings.TrimSpace(device.Serial)
+	if _, ok := onlineSerials[serial]; !ok {
+		return false
+	}
+
+	changed := false
+	previousName := device.Name
+	s.refreshDefaultLikeName(ctx, device, serial)
+	if !strings.EqualFold(device.Status, "online") {
+		device.Status = "online"
+		device.LastSeen = now
+		changed = true
+	}
+	if device.Name != previousName {
+		changed = true
+	}
+	if changed {
+		device.UpdatedAt = now
+	}
+	return changed
 }
 
 func (s *Service) ResolveSerialForAccess(ctx context.Context, id int) (string, error) {

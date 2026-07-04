@@ -84,6 +84,47 @@ func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, devices)
 }
 
+// Get 获取单个设备
+// @Summary 获取单个设备
+// @Description 返回指定设备的最新状态。用于在不刷新完整设备列表的情况下校验单个设备。
+// @Tags 设备
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Success 200 {object} Device
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id} [get]
+func (h *DeviceHandler) Get(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+	id, err := deviceIDFromPath(r.URL.Path)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
+
+	device, err := h.service.GetByID(r.Context(), id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "DEVICE_GET_FAILED", "Errors.DevicesListFailed", "加载设备失败")
+		return
+	}
+	if device == nil {
+		WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "设备不存在")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, device)
+}
+
 // Preview 获取设备预览
 // @Summary 获取设备预览
 // @Description 获取设备屏幕预览图片。

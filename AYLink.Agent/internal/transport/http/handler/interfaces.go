@@ -55,6 +55,7 @@ type StatusService interface {
 
 type DeviceService interface {
 	List(ctx context.Context) ([]domaindevice.Device, error)
+	GetByID(ctx context.Context, id int) (*domaindevice.Device, error)
 	Create(ctx context.Context, input deviceservice.CreateInput) (*domaindevice.Device, error)
 	Delete(ctx context.Context, id int) error
 	Connect(ctx context.Context, id int) (*domaindevice.Device, error)

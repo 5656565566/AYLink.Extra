@@ -22,6 +22,8 @@ import (
 type fakeDeviceService struct {
 	listResult    []domaindevice.Device
 	listErr       error
+	getResult     *domaindevice.Device
+	getErr        error
 	createInput   deviceservice.CreateInput
 	createResult  *domaindevice.Device
 	createErr     error
@@ -31,6 +33,10 @@ type fakeDeviceService struct {
 
 func (f *fakeDeviceService) List(context.Context) ([]domaindevice.Device, error) {
 	return f.listResult, f.listErr
+}
+
+func (f *fakeDeviceService) GetByID(context.Context, int) (*domaindevice.Device, error) {
+	return f.getResult, f.getErr
 }
 
 func (f *fakeDeviceService) Create(_ context.Context, input deviceservice.CreateInput) (*domaindevice.Device, error) {
@@ -128,6 +134,43 @@ func TestDeviceHandlerListReturnsDevices(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"Name":"Pixel"`) {
 		t.Fatalf("expected device list payload, got %s", recorder.Body.String())
+	}
+}
+
+func TestDeviceHandlerGetReturnsDevice(t *testing.T) {
+	service := &fakeDeviceService{
+		getResult: &domaindevice.Device{ID: 7, Name: "Pixel", Serial: "serial-1", Status: "online"},
+	}
+	handler := NewDeviceHandler(service, fakeDeviceAccessService{allowed: true}, nil, &fakeDevicePreviewService{}, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/devices/7", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.Get(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"Status":"online"`) {
+		t.Fatalf("expected device payload, got %s", recorder.Body.String())
+	}
+}
+
+func TestDeviceHandlerGetReturnsNotFound(t *testing.T) {
+	handler := NewDeviceHandler(&fakeDeviceService{}, fakeDeviceAccessService{allowed: true}, nil, &fakeDevicePreviewService{}, fakeAppService{}, fakeFileService{}, fakeDeviceSettingsService{}, fakeScrcpyService{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/devices/7", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.Get(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `DEVICE_NOT_FOUND`) {
+		t.Fatalf("expected not found payload, got %s", recorder.Body.String())
 	}
 }
 

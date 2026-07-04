@@ -674,8 +674,55 @@ export function useHomeDevices() {
     }
   };
 
-  const ensureDeviceInteractive = (device: DeviceSummary) => {
+  const findDeviceById = (deviceId: number | string | null | undefined) => {
+    const normalizedId = Number(deviceId);
+    if (!Number.isFinite(normalizedId)) {
+      return null;
+    }
+
+    return devices.value.find((item) => Number(item.Id) === normalizedId) || null;
+  };
+
+  const updateDeviceInList = (device: DeviceSummary) => {
+    const normalizedId = Number(device.Id);
+    if (!Number.isFinite(normalizedId)) {
+      return;
+    }
+
+    const index = devices.value.findIndex((item) => Number(item.Id) === normalizedId);
+    if (index < 0) {
+      return;
+    }
+
+    devices.value = [
+      ...devices.value.slice(0, index),
+      device,
+      ...devices.value.slice(index + 1)
+    ];
+  };
+
+  const fetchDeviceStatus = async (deviceId: number | string) => {
+    const response = await apiFetch(`/api/devices/${encodeURIComponent(String(deviceId))}`, {
+      timeoutMs: 5000,
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const device = await response.json().catch(() => null) as DeviceSummary | null;
+    if (device) {
+      updateDeviceInList(device);
+    }
+    return device;
+  };
+
+  const ensureDeviceInteractive = async (device: DeviceSummary) => {
     if (String(device.Status ?? '').toLowerCase() === 'online') {
+      return true;
+    }
+
+    const latestDevice = await fetchDeviceStatus(device.Id) || findDeviceById(device.Id);
+    if (String(latestDevice?.Status ?? '').toLowerCase() === 'online') {
       return true;
     }
 
@@ -691,9 +738,9 @@ export function useHomeDevices() {
     return device.Name || device.Serial || fallback;
   };
 
-    const openScreencast = (device: DeviceSummary) => {
+  const openScreencast = async (device: DeviceSummary) => {
     activeMenuDeviceId.value = null;
-    if (!ensureDeviceInteractive(device)) return;
+    if (!await ensureDeviceInteractive(device)) return;
 
     requestWorkspaceOpen('screencast', {
       deviceId: String(device.Id),
@@ -702,9 +749,9 @@ export function useHomeDevices() {
     router.push({ name: 'screencast' });
   };
 
-  const openNewDisplayScreencast = (device: DeviceSummary) => {
+  const openNewDisplayScreencast = async (device: DeviceSummary) => {
     activeMenuDeviceId.value = null;
-    if (!ensureDeviceInteractive(device)) return;
+    if (!await ensureDeviceInteractive(device)) return;
 
     requestWorkspaceOpen('screencast', {
       deviceId: String(device.Id),
@@ -714,9 +761,9 @@ export function useHomeDevices() {
     router.push({ name: 'screencast' });
   };
 
-  const openTerminal = (device: DeviceSummary) => {
+  const openTerminal = async (device: DeviceSummary) => {
     activeMenuDeviceId.value = null;
-    if (!ensureDeviceInteractive(device)) return;
+    if (!await ensureDeviceInteractive(device)) return;
 
     requestWorkspaceOpen('terminal', {
       deviceId: String(device.Id),
@@ -725,9 +772,9 @@ export function useHomeDevices() {
     router.push({ name: 'terminal' });
   };
 
-  const openFileManager = (device: DeviceSummary) => {
+  const openFileManager = async (device: DeviceSummary) => {
     activeMenuDeviceId.value = null;
-    if (!ensureDeviceInteractive(device)) return;
+    if (!await ensureDeviceInteractive(device)) return;
 
     requestWorkspaceOpen('files', {
       deviceId: String(device.Id),
@@ -736,9 +783,9 @@ export function useHomeDevices() {
     router.push({ name: 'files' });
   };
 
-  const openAppManager = (device: DeviceSummary) => {
+  const openAppManager = async (device: DeviceSummary) => {
     activeMenuDeviceId.value = null;
-    if (!ensureDeviceInteractive(device)) return;
+    if (!await ensureDeviceInteractive(device)) return;
 
     requestWorkspaceOpen('apps', {
       deviceId: String(device.Id),

@@ -142,12 +142,17 @@ func handleDeviceClipboardRoute(w http.ResponseWriter, r *http.Request, handlers
 }
 
 func handleUnknownDeviceRoute(w http.ResponseWriter, r *http.Request, handlers routeHandlers, guards routeGuards) {
+	if r.Method == http.MethodGet {
+		guards.requireDevicesView(http.HandlerFunc(handlers.device.Get)).ServeHTTP(w, r)
+		return
+	}
+
 	if r.Method == http.MethodDelete {
 		guards.requireDevicesManage(http.HandlerFunc(handlers.device.Delete)).ServeHTTP(w, r)
 		return
 	}
 
-	handler.WriteMethodNotAllowed(w, http.MethodDelete)
+	handler.WriteMethodNotAllowed(w, http.MethodGet+", "+http.MethodDelete)
 }
 
 func classifyDeviceRoute(path string) deviceRouteKind {

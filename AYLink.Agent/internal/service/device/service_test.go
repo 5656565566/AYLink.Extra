@@ -163,6 +163,36 @@ func TestResolveSerialForAccessReturnsUpdateErrorWhenStatusPersistFails(t *testi
 	}
 }
 
+func TestGetByIDRefreshesADBOnlineState(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute)
+	device := &domaindevice.Device{
+		ID:        1,
+		Name:      "Pixel",
+		Serial:    "serial-1",
+		Status:    "offline",
+		LastSeen:  now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	repo := &fakeRepository{getByID: device}
+	adb := &fakeADBManager{
+		devices: []domainadb.Device{{Serial: "serial-1", State: "device"}},
+	}
+	service := NewService(repo)
+	service.SetADBManager(adb)
+
+	got, err := service.GetByID(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("expected get success, got %v", err)
+	}
+	if got.Status != "online" {
+		t.Fatalf("expected refreshed online status, got %q", got.Status)
+	}
+	if !repo.updateCalled {
+		t.Fatal("expected refreshed status to be persisted")
+	}
+}
+
 func TestCreateReturnsADBConnectError(t *testing.T) {
 	repo := &fakeRepository{}
 	adb := &fakeADBManager{connectErr: errors.New("connect failed")}

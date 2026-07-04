@@ -94,6 +94,7 @@ import {
 } from '../features/screencast/videoViewport';
 import { useFloatingMenu } from '../features/screencast/useFloatingMenu';
 import { useScreencastFloatingActions } from '../features/screencast/useScreencastFloatingActions';
+import { createFullWorkbenchFloatingActionModules } from '../features/screencast/screencastFloatingActionModules';
 import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
@@ -3469,61 +3470,66 @@ export default defineComponent({
       });
     };
 
+    const floatingActionIcons = {
+      arrowBack: ArrowHookUpLeft20Regular,
+      back: ChevronLeft20Regular,
+      home: Home20Regular,
+      menu: List20Regular,
+      recent: AppRecent20Regular,
+      fullscreen: FullScreenMaximize20Regular,
+      fillDisplay: ArrowExpand24Regular,
+      volumeUp: Speaker220Regular,
+      volumeDown: Speaker020Regular,
+      mute: SpeakerMute20Regular,
+      power: Power20Regular,
+      phone: Phone20Regular,
+      inputMapping: Apps24Regular,
+      clipboard: Clipboard20Regular,
+      save: Save20Regular,
+      edit: Edit20Regular,
+      dismiss: DismissCircle20Regular,
+      eye: Eye20Regular,
+      eyeOff: EyeOff20Regular,
+      pause: Pause20Regular,
+      play: Play20Regular,
+      closeMapping: DismissCircle20Regular,
+      debug: Flash24Regular
+    };
+
     const {
       activeFloatingMenuPage,
       activeFloatingMenuItems,
       activeFloatingMenuItemCount
     } = useScreencastFloatingActions({
-      t,
-      icons: {
-        arrowBack: ArrowHookUpLeft20Regular,
-        back: ChevronLeft20Regular,
-        home: Home20Regular,
-        menu: List20Regular,
-        recent: AppRecent20Regular,
-        fullscreen: FullScreenMaximize20Regular,
-        fillDisplay: ArrowExpand24Regular,
-        volumeUp: Speaker220Regular,
-        volumeDown: Speaker020Regular,
-        mute: SpeakerMute20Regular,
-        power: Power20Regular,
-        phone: Phone20Regular,
-        inputMapping: Apps24Regular,
-        clipboard: Clipboard20Regular,
-        save: Save20Regular,
-        edit: Edit20Regular,
-        dismiss: DismissCircle20Regular,
-        eye: Eye20Regular,
-        eyeOff: EyeOff20Regular,
-        pause: Pause20Regular,
-        play: Play20Regular,
-        closeMapping: DismissCircle20Regular,
-        debug: Flash24Regular
-      },
       isMenuExpanded,
-      effectiveFillMode,
-      isInputMappingEditMode,
-      hasActiveInputMappingProfile: computed(() => !!activeInputMappingProfile.value),
-      isNewInputMappingProfileDraft,
-      isInputMappingHintsVisible,
-      isInputMappingEnabled,
-      isInputMappingPaused,
-      debugModeEnabled: debugMode,
-      isVideoStatsOverlayVisible,
+      backToMainIcon: floatingActionIcons.arrowBack,
       ensureMenuInsideStage,
-      sendAndroidCommand,
-      toggleFillMode,
-      toggleFullscreen,
-      toggleClipboardWindow,
-      saveInputMappingProfileFromEditMenu,
-      openInputMappingProfileDialog,
-      exitInputMappingEditMode,
-      backToInputMappingProfiles,
-      enterInputMappingEditMode,
-      toggleInputMappingHintsWithNotification,
-      toggleInputMappingPausedWithNotification,
-      closeInputMappingWithNotification,
-      toggleVideoStatsOverlay
+      modules: createFullWorkbenchFloatingActionModules({
+        t,
+        icons: floatingActionIcons,
+        effectiveFillMode,
+        isInputMappingEditMode,
+        hasActiveInputMappingProfile: computed(() => !!activeInputMappingProfile.value),
+        isNewInputMappingProfileDraft,
+        isInputMappingHintsVisible,
+        isInputMappingEnabled,
+        isInputMappingPaused,
+        debugModeEnabled: debugMode,
+        isVideoStatsOverlayVisible,
+        sendAndroidCommand,
+        toggleFillMode,
+        toggleFullscreen,
+        toggleClipboardWindow,
+        saveInputMappingProfileFromEditMenu,
+        openInputMappingProfileDialog,
+        exitInputMappingEditMode,
+        backToInputMappingProfiles,
+        enterInputMappingEditMode,
+        toggleInputMappingHintsWithNotification,
+        toggleInputMappingPausedWithNotification,
+        closeInputMappingWithNotification,
+        toggleVideoStatsOverlay
+      })
     });
 
     const pushInputMappingSwipeRecordingPoint = (point: NormalizedPoint) => {

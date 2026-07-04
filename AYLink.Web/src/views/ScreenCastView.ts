@@ -102,6 +102,7 @@ import { buildSignalTicketRequestBody, buildSignalWebSocketBaseUrl as buildSigna
 import { wireScreencastSignalingSocket } from '../features/screencast/screencastSignalingSocket';
 import { wireScreencastPeerConnection } from '../features/screencast/screencastPeerConnection';
 import { createRestoredScreencastRuntimeState, isPersistedConnectionStale } from '../features/screencast/screencastSessionRestore';
+import { createScreencastPeerOfferSession } from '../features/screencast/screencastPeerOffer';
 import { useRemoteClipboard } from '../features/screencast/useRemoteClipboard';
 import { useTouchPointerInput } from '../features/screencast/useTouchPointerInput';
 import { createInputMappingTouchBridge } from '../features/screencast/inputMappingTouchBridge';
@@ -2424,19 +2425,16 @@ export default defineComponent({
 
           try {
             const rtcConfiguration = await loadRtcConfiguration();
-            peerConnection = new RTCPeerConnection(rtcConfiguration);
-            const currentPeerConnection = peerConnection;
+            const offerSession = await createScreencastPeerOfferSession(rtcConfiguration);
+            peerConnection = offerSession.peerConnection;
+            const currentPeerConnection = offerSession.peerConnection;
 
-            peerConnection.addTransceiver('video', { direction: 'recvonly' });
-            peerConnection.addTransceiver('audio', { direction: 'recvonly' });
-            setupControlChannel(peerConnection.createDataChannel('control'));
-            setupMetaControlChannel(peerConnection.createDataChannel('control-meta'));
-            setupPointerMoveChannel(peerConnection.createDataChannel('pointer-move', { ordered: false, maxRetransmits: 0 }));
+            setupControlChannel(offerSession.channels.controlChannel);
+            setupMetaControlChannel(offerSession.channels.metaControlChannel);
+            setupPointerMoveChannel(offerSession.channels.pointerMoveChannel);
             wirePeerConnectionEventHandlers(connectionId, currentPeerConnection);
 
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            ws?.send(JSON.stringify(peerConnection.localDescription));
+            ws?.send(JSON.stringify(offerSession.localDescription));
           } catch (error) {
             console.error('Failed to create WebRTC offer:', error);
             status.value = t('Screencast.StatusCreateOfferFailed', '创建 Offer 失败');

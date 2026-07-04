@@ -1,4 +1,4 @@
-# AYLink (安易连)
+﻿# AYLink
 
 [![License](https://img.shields.io/badge/License-Apache2.0-blue.svg)](../LICENSE)
 [![CodeFactor](https://www.codefactor.io/repository/github/5656565566/aylink.extra/badge)](https://www.codefactor.io/repository/github/5656565566/aylink.extra)
@@ -6,113 +6,111 @@
 ![Vue](https://img.shields.io/badge/Vue-3.5-42B883.svg?logo=vue.js&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-15-3DDC84.svg?logo=android&logoColor=white)
 
-[English](README_EN.md) | **简体中文**
+**English** | [简体中文](README_CN.md)
 
-**安易连（AYLink）** 是一套基于 [scrcpy](https://github.com/Genymobile/scrcpy) 与 WebRTC 的安卓设备管理与投屏方案，当前仓库包含：
+**AYLink** is an Android device management and screen casting solution built on top of [scrcpy](https://github.com/Genymobile/scrcpy) and WebRTC. This repository currently includes:
 
-- `AYLink.Agent`：Go 编写的服务端，负责 ADB、scrcpy、鉴权、设备管理与 WebRTC 信令
-- `AYLink.Web`：Vue 3 编写的 Web 管理界面
-- `AYLink.Mobile`：Android 原生手机客户端，提供设备列表、远程投屏、应用管理、文件管理与终端能力
-- 如果你在找本机客户端 [AYLink](https://github.com/5656565566/AYLink) 该仓库包含了一个跨平台的桌面客户端，性能更佳
-- 该客户端目前可以有限的连接 `AYLink.Agent`
+- `AYLink.Agent`: the Go backend service responsible for ADB, scrcpy, authentication, device management, and WebRTC signaling
+- `AYLink.Web`: the Vue 3 based web management UI
+- `AYLink.Mobile`: the native Android mobile client, providing device list, remote casting, app management, file management, and terminal features
+- If you are looking for the local desktop client, [AYLink](https://github.com/5656565566/AYLink) contains a cross-platform desktop app with better performance
+- That desktop client can currently connect to `AYLink.Agent` with limited support
 
 > [!TIP]
-> 项目仍在持续迭代中。功能已经可用，但在不同设备、网络与编码器环境下仍可能遇到兼容性问题，欢迎通过 Issue 或 PR 一起完善。
+> The project is still evolving. The core features are already usable, but compatibility issues may still appear across different devices, networks, and encoder environments. Issues and PRs are welcome.
 
-## ✨ 核心特性
+## ✨ Features
 
-- **低延迟投屏与控制**：基于 scrcpy + WebRTC，支持触摸、键盘、鼠标与 HID 输入链路
-- **投屏按键映射**: 可以使用按键映射方案把鼠标键盘映射为触摸输入
-- **设备管理**：查看在线设备、连接状态、无线 ADB 配对与常用操作
-- **文件管理**：浏览、下载、删除、重命名设备文件
-- **应用管理**：查看应用列表、启动应用、按应用发起投屏
-- **终端能力**：通过 WebSocket 访问设备 Shell 终端
-- **账号与权限**：内置本地账号、角色与权限模型，支持服务端 RBAC
-- **WebRTC 网络配置**：支持 STUN/TURN、Host Candidate 覆写、单端口映射等部署方式
+- **Low-latency casting and control**: built on scrcpy + WebRTC, with touch, keyboard, mouse, and HID input support
+- **Casting key mapping**: map keyboard and mouse input to touch actions with key mapping profiles
+- **Device management**: view online devices, connection states, wireless ADB pairing, and common actions
+- **File management**: browse, download, delete, and rename files on the device
+- **App management**: list installed apps, launch them, and start app-level casting
+- **Terminal access**: access the device shell over WebSocket
+- **Accounts and permissions**: built-in local accounts, roles, and server-side RBAC
+- **WebRTC network configuration**: supports STUN/TURN, host candidate override, and single-port mapping
 
-## 📸 界面展示
+## 📸 Screenshots
 
-| **主界面** | **投屏窗口** |
+| **Main View** | **Casting View** |
 | :---: | :---: |
-| ![主界面](screenshot/1.png) | ![投屏窗口](screenshot/2.png) |
-| **主要设置** | **权限设置** |
-| ![主要设置](screenshot/3.png) | ![权限设置](screenshot/4.png) |
+| ![Main View](screenshot/1.png) | ![Casting View](screenshot/2.png) |
+| **Main Settings** | **Permission Settings** |
+| ![Main Settings](screenshot/3.png) | ![Permission Settings](screenshot/4.png) |
 
-- 更多功能请部署后体验
+- Deploy and try it out to experience more features
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 前置准备
+### Prerequisites
 
-1. 安卓设备开启“开发者选项”
-2. 打开“USB 调试”
-3. 如需无线调试，按设备系统版本开启“无线调试”或先通过 USB 建立 ADB
-4. 准备好 `adb`
+1. Enable **Developer options** on your Android device
+2. Enable **USB debugging**
+3. If you want wireless debugging, enable it depending on your Android version, or establish ADB over USB first
+4. Prepare `adb`
 
-### 方式一：本地开发运行
+### Option 1: Run locally for development
 
-1. 安装依赖：
+1. Install dependencies:
    - Go 1.25+
    - Node.js 20+
    - Android ADB
-2. 复制配置文件
-3. 根据本机环境调整 [config.example.json](F:/project/csharp_app/AYLink.Extra/AYLink.Agent/config.example.json) 中的 ADB 与 `scrcpy-server` 路径
-4. 启动服务端：
+2. Copy the config file
+3. Adjust the ADB and `scrcpy-server` paths in [config.example.json](F:/project/csharp_app/AYLink.Extra/AYLink.Agent/config.example.json) according to your environment
+4. Start the backend:
 
 ```powershell
 cd AYLink.Agent
 go run ./cmd/agent
 ```
 
-5. 首次启动时，服务端会自动创建一个初始管理员账号：
-   - 用户名固定为 `admin`
-   - 密码为随机生成，并打印在服务端控制台
-6. 浏览器打开 `http://127.0.0.1:5501`
+5. On first startup, the server automatically creates an initial admin account:
+   - Username is always `admin`
+   - Password is randomly generated and printed in the server console
+6. Open `http://127.0.0.1:5501` in your browser
 
-### 方式二：一键构建前端并本地运行
+### Option 2: Build frontend and run locally with one command
 
-仓库根目录提供了 `Makefile`：
+The repository root includes a `Makefile`:
 
 ```bash
 make run
 ```
 
-常用命令：
+Common commands:
 
-- `make web`：构建前端资源
-- `make agent`：构建多平台 Agent 二进制
-- `make clean`：清理构建产物
+- `make web`: build web assets
+- `make agent`: build multi-platform Agent binaries
+- `make clean`: clean build artifacts
 
-### 方式三：Docker 运行
+### Option 3: Run with Docker
 
-直接使用仓库内的 [docker-compose.yml](F:/project/csharp_app/AYLink.Extra/docker-compose.yml)：
+Use the included [docker-compose.yml](F:/project/csharp_app/AYLink.Extra/docker-compose.yml):
 
 ```bash
 docker compose up -d
 ```
 
-默认会暴露：
+By default it exposes:
 
-- HTTP 管理端口：`5501`
+- HTTP management port: `5501`
 
-容器镜像内已包含：
+The container image already includes:
 
-- `android-tools`，可直接提供 `adb`
-- 运行所需的 `scrcpy-server`
+- `android-tools`, so `adb` is available directly
+- the required `scrcpy-server`
 
-如果你的部署环境对 ADB 或 WebRTC 网络路径有特殊要求，可以结合：
+If your deployment environment has special ADB or WebRTC networking requirements, you can combine:
 
-- 环境变量
-- 挂载 `config.json`
+- environment variables
+- mounting `config.json`
 - `network_mode: host`
 
-一起使用。
+## ⚙️ Configuration
 
-## ⚙️ 配置说明
+The default server configuration example is available in [config.example.json](F:/project/csharp_app/AYLink.Extra/AYLink.Agent/config.example.json).
 
-服务端默认配置示例见 [config.example.json](F:/project/csharp_app/AYLink.Extra/AYLink.Agent/config.example.json)：
-
-环境变量优先级高于 `config.json`，常用项包括：
+Environment variables take precedence over `config.json`. Common options include:
 
 - `AYLINK_HTTP_LISTENADDR`
 - `AYLINK_DB_PATH`
@@ -121,51 +119,50 @@ docker compose up -d
 - `AYLINK_ADB_SERVERPORT`
 - `AYLINK_ADB_BUNDLEDDIR`
 
-## 📡 WebRTC 部署说明
+## 📡 WebRTC Deployment Notes
 
-如果你只在局域网内使用，默认配置通常就够用。  
-如果你需要跨公网投屏，建议根据网络形态选择以下方式之一：
+If you only use AYLink on a local network, the default configuration is usually enough.  
+If you need screen casting across the public internet, choose one of these approaches depending on your network environment:
 
-### 方案一：STUN / TURN
+### Option 1: STUN / TURN
 
-适合标准 WebRTC 部署场景：
+Suitable for standard WebRTC deployment:
 
-- 在设置页填写 STUN 或 TURN 服务器
-- 可选 `all` 或 `relay` 传输策略
-- `relay` 模式会强制通过 TURN
+- Configure STUN or TURN servers in the settings page
+- Optionally use the `all` or `relay` transport policy
+- `relay` mode forces traffic through TURN
 
-### 方案二：Host Candidate 覆写
+### Option 2: Host Candidate Override
 
-适合你明确知道服务端对外地址，不想依赖 STUN/TURN 的场景：
+Suitable when you know the server's public address and do not want to rely on STUN/TURN:
 
-- 启用“直连 Host Candidate 覆写”
-- 填写公网 IPv4 或确定可达的对外地址
+- Enable direct host candidate override
+- Fill in a public IPv4 address or another reachable public endpoint
 
-### 方案三：单端口映射模式
+### Option 3: Single-Port Mapping
 
-适合 FRP、端口转发或受限网络环境：
+Suitable for FRP, port forwarding, or restricted network environments:
 
-- 启用“单端口映射模式”
-- 指定服务端固定本地 UDP 监听端口
-- 如外部访问端口不同，再填写“对外发布端口”
+- Enable single-port mapping mode
+- Specify a fixed local UDP listening port on the server
+- If the externally exposed port is different, also fill in the published port
 
-建议：
+Suggestions:
 
-- 如果 ICE 候选来源复杂，先清空不需要的 STUN/TURN，再逐项排查
-- 遇到短暂网络波动，当前投屏页已支持自动重连自愈
+- If ICE candidates are coming from too many sources, clear unneeded STUN/TURN settings first and troubleshoot step by step
+- The current casting page already supports automatic reconnection for short network interruptions
 
-## 🔐 认证与权限
+## 🔐 Authentication and Permissions
 
-当前版本内置本地账号系统：
+The current version includes a built-in local account system:
 
-- 首次启动自动创建管理员账号
-- 请妥善的保存，因为仅会显示一次
-- 你可以首次登陆后立即改密
+- An admin account is created automatically on first startup
+- Save the password carefully, because it is shown only once
+- It is recommended to change the password immediately after the first login
 
+## 🛠️ Development and Build
 
-## 🛠️ 开发与构建
-
-### 前端
+### Frontend
 
 ```bash
 cd AYLink.Web
@@ -173,58 +170,56 @@ npm install
 npm run build
 ```
 
-开发模式下，Vite 默认会把 API 代理到 `http://127.0.0.1:5501`。
+In development mode, Vite proxies API requests to `http://127.0.0.1:5501` by default.
 
-### 服务端
+### Backend
 
 ```bash
 cd AYLink.Agent
 go build ./...
 ```
 
-### 全量构建
+### Full Build
 
 ```bash
 make agent
 ```
 
-会生成：
+This generates Agent executables for:
 
 - Windows `amd64 / arm64`
 - Linux `amd64 / arm64 / loong64 ...`
 - macOS `amd64 / arm64`
 
-平台的 Agent 可执行文件。
-
-### Agent API 文档
+### Agent API Documentation
 
 ```bash
 make make api-docs
 make api-docs-serve
 ```
 
-然后访问 http://127.0.0.1:18080/ 查阅文档
-可以通过
+Then visit http://127.0.0.1:18080/ to read the documentation.
+You can change the backend address with:
 
 ```bash
 make api-docs-serve API_DOCS_ARGS="-api-base-url http://127.0.0.1:5502"
 ```
 
-来改变后端的地址，默认为本地 5501 端口
+The default backend address uses the local `5501` port.
 
-## 📦 依赖与致谢
+## 📦 Dependencies and Credits
 
-本项目的实现离不开以下开源项目：
+This project is built with help from the following open source projects:
 
-| 项目 | 描述 |
+| Project | Description |
 |------|------|
-| [scrcpy](https://github.com/Genymobile/scrcpy) | 提供核心的屏幕镜像与控制能力 |
-| [go-adbkit](https://github.com/codeskyblue/go-adbkit) | 使用的经过部分修改的代码方便管理 ADB |
-| [pion](https://github.com/pion/webrtc) | 使用了一系列 pion webrtc 相关库 |
-| [opus](https://github.com/jj11hh/opus) | 使用 WASM 编码器来避免使用 CGO |
-| [websocket](https://github.com/gorilla/websocket) | WebSocket 协议的 Go 实现 |
-| [sqlite](modernc.org/sqlite) | 提供了数据库功能 |
+| [scrcpy](https://github.com/Genymobile/scrcpy) | Provides the core screen mirroring and control capability |
+| [go-adbkit](https://github.com/codeskyblue/go-adbkit) | A partially modified codebase used for easier ADB management |
+| [pion](https://github.com/pion/webrtc) | A set of Pion WebRTC related libraries |
+| [opus](https://github.com/jj11hh/opus) | Uses a WASM encoder to avoid CGO |
+| [websocket](https://github.com/gorilla/websocket) | Go implementation of the WebSocket protocol |
+| [sqlite](modernc.org/sqlite) | Provides database support |
 
-## 📄 开源协议
+## 📄 License
 
-本项目基于 [Apache-2.0](../LICENSE) 协议开源。
+This project is licensed under [Apache-2.0](../LICENSE).

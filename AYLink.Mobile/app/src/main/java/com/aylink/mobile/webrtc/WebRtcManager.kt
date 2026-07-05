@@ -121,6 +121,7 @@ class WebRtcManager(
     private val remoteAudioTracks = linkedSetOf<AudioTrack>()
     private var frameSizeSink: VideoSink? = null
     private var renderer: SurfaceViewRenderer? = null
+    private var isReleased = false
 
     @Volatile
     private var isDisconnecting = false
@@ -477,7 +478,9 @@ class WebRtcManager(
         return requested
     }
 
+    @Synchronized
     fun disconnect() {
+        if (isReleased) return
         isDisconnecting = true
         connectionGeneration += 1
         closePeerConnection()
@@ -485,11 +488,14 @@ class WebRtcManager(
         isDisconnecting = false
     }
 
+    @Synchronized
     fun release() {
+        if (isReleased) return
         disconnect()
         audioDeviceModule.release()
         peerConnectionFactory.dispose()
         eglBase.release()
+        isReleased = true
     }
 
     private fun buildAudioAttributes(): AudioAttributes =
@@ -634,6 +640,9 @@ class WebRtcManager(
         }
 
     private fun closePeerConnection() {
+        val connection = peerConnection
+        peerConnection = null
+
         resetConnectionReadyState()
         dataChannel?.unregisterObserver()
         metaControlChannel?.unregisterObserver()
@@ -645,7 +654,7 @@ class WebRtcManager(
         metaControlChannel = null
         pointerMoveChannel = null
 
-        releaseRemoteAudioTracks()
+        clearRemoteAudioTracks()
         remoteVideoTrack?.setEnabled(false)
         frameSizeSink?.let { remoteVideoTrack?.removeSink(it) }
         renderer?.let { remoteVideoTrack?.removeSink(it) }
@@ -653,9 +662,8 @@ class WebRtcManager(
         remoteAudioTrack = null
         frameSizeSink = null
 
-        peerConnection?.close()
-        peerConnection?.dispose()
-        peerConnection = null
+        connection?.close()
+        connection?.dispose()
 
         lastVideoWidth = 0
         lastVideoHeight = 0
@@ -670,26 +678,32 @@ class WebRtcManager(
             return
         }
 
-        // Android WebRTC 会为远端音频轨道自动接入播放链路，替换轨道时需要释放旧轨道，避免旧 native sink 继续发声。
+        // Android WebRTC 会为远端音频轨道自动接入播放链路，替换轨道时只解除本地引用；轨道释放由 PeerConnection 统一负责。
         val staleTracks = remoteAudioTracks.filter { it !== track }
-        staleTracks.forEach { releaseRemoteAudioTrack(it) }
-        remoteAudioTracks.removeAll(staleTracks.toSet())
+        staleTracks.forEach { detachRemoteAudioTrack(it) }
         remoteAudioTracks.add(track)
         track.setVolume(1.0)
         track.setEnabled(true)
         remoteAudioTrack = track
     }
 
-    private fun releaseRemoteAudioTracks() {
-        remoteAudioTracks.forEach { releaseRemoteAudioTrack(it) }
+    private fun clearRemoteAudioTracks() {
+        remoteAudioTracks.forEach { disableRemoteAudioTrack(it) }
         remoteAudioTracks.clear()
         remoteAudioTrack = null
     }
 
-    private fun releaseRemoteAudioTrack(track: AudioTrack) {
+    private fun detachRemoteAudioTrack(track: AudioTrack) {
+        disableRemoteAudioTrack(track)
+        remoteAudioTracks.remove(track)
+        if (remoteAudioTrack === track) {
+            remoteAudioTrack = null
+        }
+    }
+
+    private fun disableRemoteAudioTrack(track: AudioTrack) {
         track.setVolume(0.0)
         track.setEnabled(false)
-        runCatching { track.dispose() }
     }
 
     private fun observeDataChannel(

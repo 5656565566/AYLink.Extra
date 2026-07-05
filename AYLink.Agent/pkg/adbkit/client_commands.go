@@ -1,26 +1,43 @@
 package adbkit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const defaultHostCommandTimeout = 5 * time.Second
 
 // SendHostCommand sends a "host:*" command to the adb server and returns the payload
 func (c *Client) SendHostCommand(cmd string) ([]byte, error) {
-	conn, err := c.Connection()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHostCommandTimeout)
+	defer cancel()
+
+	return c.SendHostCommandContext(ctx, cmd)
+}
+
+// SendHostCommandContext sends a "host:*" command with context-aware connection and I/O deadlines.
+func (c *Client) SendHostCommandContext(ctx context.Context, cmd string) ([]byte, error) {
+	conn, err := c.ConnectionContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	// keep connection open until we read the payload
 	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	stopContextClose := closeConnOnContextDone(ctx, conn)
+	defer stopContextClose()
 
 	status, err := sendADBCommand(conn, cmd)
 	if err != nil {
-		return nil, err
+		return nil, contextError(ctx, err)
 	}
 	if status == StatusFail {
 		// read error payload
@@ -28,14 +45,33 @@ func (c *Client) SendHostCommand(cmd string) ([]byte, error) {
 		return nil, fmt.Errorf("adb server FAIL: %s", string(payload))
 	}
 
-	// OKAY 鈥?read length-prefixed payload(s). Most host commands send a single length-prefixed block.
+	// OKAY: read length-prefixed payload(s). Most host commands send a single length-prefixed block.
 	payload, err := readLengthPrefixed(conn)
 	if err != nil {
 		// If there's no length, try to read raw remainder
 		rest, _ := io.ReadAll(conn)
-		return rest, nil
+		return rest, contextError(ctx, nil)
 	}
 	return payload, nil
+}
+
+func closeConnOnContextDone(ctx context.Context, conn net.Conn) func() {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
+}
+
+func contextError(ctx context.Context, fallback error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fallback
 }
 
 // Version returns the adb server version as integer (as returned by host:version)
@@ -59,12 +95,19 @@ func (c *Client) Version() (int, error) {
 // Connect connects to a remote adb device (host:connect:host:port)
 // Accepts host:port format (e.g., "192.168.1.100:5555")
 func (c *Client) Connect(hostPort string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHostCommandTimeout)
+	defer cancel()
+
+	return c.ConnectContext(ctx, hostPort)
+}
+
+func (c *Client) ConnectContext(ctx context.Context, hostPort string) error {
 	host, port, err := ParseHostPort(hostPort, 5555)
 	if err != nil {
 		return err
 	}
 
-	resp, err := c.SendHostCommand(
+	resp, err := c.SendHostCommandContext(ctx,
 		fmt.Sprintf("host:connect:%s:%d", host, port),
 	)
 	if err != nil {
@@ -98,7 +141,14 @@ func (c *Client) Disconnect(hostPort string) (string, error) {
 
 // ListDevices returns the list of attached devices (host:devices)
 func (c *Client) ListDevices() ([]DeviceInfo, error) {
-	payload, err := c.SendHostCommand("host:devices")
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHostCommandTimeout)
+	defer cancel()
+
+	return c.ListDevicesContext(ctx)
+}
+
+func (c *Client) ListDevicesContext(ctx context.Context) ([]DeviceInfo, error) {
+	payload, err := c.SendHostCommandContext(ctx, "host:devices")
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +254,14 @@ func parseDevicesList(line string) []DeviceInfo {
 
 // KillServer kills the adb server
 func (c *Client) KillServer() (bool, error) {
-	payload, err := c.SendHostCommand("host:kill")
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHostCommandTimeout)
+	defer cancel()
+
+	return c.KillServerContext(ctx)
+}
+
+func (c *Client) KillServerContext(ctx context.Context) (bool, error) {
+	payload, err := c.SendHostCommandContext(ctx, "host:kill")
 	if err != nil {
 		return false, err
 	}
@@ -261,12 +318,19 @@ func (c *Client) Features() ([]string, error) {
 // Pair connects to a remote adb device using pairing code (Android 11+)
 // Accepts host:port format and a pairing password (code)
 func (c *Client) Pair(hostPort string, password string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHostCommandTimeout)
+	defer cancel()
+
+	return c.PairContext(ctx, hostPort, password)
+}
+
+func (c *Client) PairContext(ctx context.Context, hostPort string, password string) (string, error) {
 	host, port, err := ParseHostPort(hostPort, 5555)
 	if err != nil {
 		return "", err
 	}
 	cmd := fmt.Sprintf("host:pair:%s:%s:%d", password, host, port)
-	payload, err := c.SendHostCommand(cmd)
+	payload, err := c.SendHostCommandContext(ctx, cmd)
 	if err != nil {
 		return "", err
 	}

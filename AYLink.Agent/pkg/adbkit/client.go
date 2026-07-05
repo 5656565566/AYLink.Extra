@@ -41,7 +41,7 @@ func (c *autoStartConnector) ConnectionContext(ctx context.Context) (net.Conn, e
 	conn, err := c.base.ConnectionContext(ctx)
 	if err != nil {
 		// Connection failed, try to start the server
-		_ = exec.Command(c.bin, "start-server").Run()
+		_ = exec.CommandContext(ctx, c.bin, "start-server").Run()
 		// Try again
 		conn, err = c.base.ConnectionContext(ctx)
 	}

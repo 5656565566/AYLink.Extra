@@ -1,6 +1,7 @@
 package adbkit
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -62,7 +63,11 @@ func parseGetpropOutput(output string) map[string]string {
 
 // Properties returns device properties by running `getprop`
 func (d *Device) Properties() (map[string]string, error) {
-	output, err := d.RunCommand("getprop")
+	return d.PropertiesContext(context.Background())
+}
+
+func (d *Device) PropertiesContext(ctx context.Context) (map[string]string, error) {
+	output, err := d.RunCommandContext(ctx, "getprop")
 	if err != nil {
 		return nil, err
 	}

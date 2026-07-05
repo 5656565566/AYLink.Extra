@@ -18,6 +18,13 @@ import (
 	"aylink-agent/pkg/adbkit"
 )
 
+const (
+	deviceListTimeout     = 3 * time.Second
+	deviceConnectTimeout  = 5 * time.Second
+	devicePropertyTimeout = 3 * time.Second
+	devicePairTimeout     = 15 * time.Second
+)
+
 type Manager struct {
 	logger   logging.Logger
 	resolved domainadb.ResolvedBinary
@@ -59,12 +66,15 @@ func (m *Manager) ServerAddress() string {
 }
 
 func (m *Manager) Devices(ctx context.Context) ([]domainadb.Device, error) {
+	listCtx, cancel := context.WithTimeout(ctx, deviceListTimeout)
+	defer cancel()
+
 	// 确保服务端已启动
 	if m.hasBinary() {
-		_ = m.StartServer(ctx)
+		_ = m.StartServer(listCtx)
 	}
 
-	adbkitDevices, err := m.client.ListDevices()
+	adbkitDevices, err := m.client.ListDevicesContext(listCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list devices via adbkit: %w", err)
 	}
@@ -94,7 +104,7 @@ func (m *Manager) StartServer(ctx context.Context) error {
 }
 
 func (m *Manager) KillServer(ctx context.Context) error {
-	_, err := m.client.KillServer()
+	_, err := m.client.KillServerContext(ctx)
 	if err != nil {
 		// 如果通过 adbkit 通信失败（服务端失去响应） 则通过命令行强制结束
 		if m.hasBinary() {
@@ -112,22 +122,26 @@ func (m *Manager) KillServer(ctx context.Context) error {
 // PairDevice 使用底层协议对目标设备进行无线配对
 func (m *Manager) PairDevice(ctx context.Context, host string, port int, code string) (string, error) {
 	// 配对操作提供基础超时保护
-	_, cancel := context.WithTimeout(ctx, 15*time.Second)
+	pairCtx, cancel := context.WithTimeout(ctx, devicePairTimeout)
 	defer cancel()
 
 	hostPort := fmt.Sprintf("%s:%d", host, port)
-	return m.client.Pair(hostPort, code)
+	return m.client.PairContext(pairCtx, hostPort, code)
 }
 
 // ConnectDevice 尝试与网络设备建立连接
 func (m *Manager) ConnectDevice(ctx context.Context, host string, port int) error {
 	hostPort := fmt.Sprintf("%s:%d", host, port)
-	return m.client.Connect(hostPort)
+	connectCtx, cancel := context.WithTimeout(ctx, deviceConnectTimeout)
+	defer cancel()
+	return m.client.ConnectContext(connectCtx, hostPort)
 }
 
 func (m *Manager) DeviceDisplayName(ctx context.Context, serial string) (string, error) {
 	device := m.client.Device(adbkit.DeviceWithSerial(serial))
-	props, err := device.Properties()
+	propertyCtx, cancel := context.WithTimeout(ctx, devicePropertyTimeout)
+	defer cancel()
+	props, err := device.PropertiesContext(propertyCtx)
 	if err != nil {
 		return "", err
 	}

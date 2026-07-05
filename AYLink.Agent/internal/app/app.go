@@ -102,7 +102,11 @@ func (a *App) Run(ctx context.Context) error {
 		defer cancel()
 
 		a.logger.Info("http server stopping")
-		return a.httpServer.Shutdown(shutdownCtx)
+		if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
+			a.logger.Warn("http server graceful shutdown timed out", "err", err)
+			return a.httpServer.Close()
+		}
+		return nil
 	case err := <-errCh:
 		return err
 	}

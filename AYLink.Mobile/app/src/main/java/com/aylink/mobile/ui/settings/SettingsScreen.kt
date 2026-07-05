@@ -32,21 +32,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import com.aylink.mobile.data.repo.LocalSettingsStore
 import com.aylink.mobile.data.repo.PointerSamplingRateHz
 import com.aylink.mobile.data.repo.ThemeMode
 import com.aylink.mobile.logging.AppLogger
 import com.aylink.mobile.logging.DiagnosticLogExporter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settingsStore: LocalSettingsStore,
     logger: AppLogger,
-    logExporter: DiagnosticLogExporter
+    logExporter: DiagnosticLogExporter,
 ) {
     val settings by settingsStore.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -54,34 +54,36 @@ fun SettingsScreen(
     var logActionMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         SettingCard(
             title = "主题",
-            description = "选择应用的外观模式"
+            description = "选择应用的外观模式",
         ) {
             ThemeMode.entries.forEach { mode ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = when (mode) {
-                                ThemeMode.SYSTEM -> "跟随系统"
-                                ThemeMode.LIGHT -> "浅色模式"
-                                ThemeMode.DARK -> "深色模式"
-                            },
-                            style = MaterialTheme.typography.bodyLarge
+                            text =
+                                when (mode) {
+                                    ThemeMode.SYSTEM -> "跟随系统"
+                                    ThemeMode.LIGHT -> "浅色模式"
+                                    ThemeMode.DARK -> "深色模式"
+                                },
+                            style = MaterialTheme.typography.bodyLarge,
                         )
                     }
                     RadioButton(
                         selected = settings.themeMode == mode,
-                        onClick = { settingsStore.updateThemeMode(mode) }
+                        onClick = { settingsStore.updateThemeMode(mode) },
                     )
                 }
             }
@@ -89,40 +91,40 @@ fun SettingsScreen(
 
         SettingCard(
             title = "动态取色",
-            description = "Android 12 及以上可使用系统动态颜色"
+            description = "Android 12 及以上可使用系统动态颜色",
         ) {
             SettingSwitchRow(
                 title = "启用动态颜色",
                 checked = settings.useDynamicColor,
-                onCheckedChange = settingsStore::updateDynamicColor
+                onCheckedChange = settingsStore::updateDynamicColor,
             )
         }
 
         SettingCard(
             title = "远程恢复",
-            description = "应用返回前台后，尝试恢复上次投屏连接"
+            description = "应用返回前台后，尝试恢复上次投屏连接",
         ) {
             SettingSwitchRow(
                 title = "恢复上次投屏",
                 checked = settings.resumeLastRemote,
-                onCheckedChange = settingsStore::updateResumeLastRemote
+                onCheckedChange = settingsStore::updateResumeLastRemote,
             )
         }
 
         SettingCard(
             title = "操作采样",
-            description = "调整远程触控移动的发送频率与弱网策略"
+            description = "调整远程触控移动的发送频率与弱网策略",
         ) {
             SettingSwitchRow(
                 title = "自适应采样",
                 checked = settings.adaptivePointerSampling,
-                onCheckedChange = settingsStore::updateAdaptivePointerSampling
+                onCheckedChange = settingsStore::updateAdaptivePointerSampling,
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "自定义采样",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(8.dp))
             PointerSamplingRateHz.entries.forEach { rate ->
@@ -130,7 +132,7 @@ fun SettingsScreen(
                     title = "${rate.hz}Hz",
                     selected = settings.pointerSamplingRateHz == rate,
                     enabled = !settings.adaptivePointerSampling,
-                    onClick = { settingsStore.updatePointerSamplingRate(rate) }
+                    onClick = { settingsStore.updatePointerSamplingRate(rate) },
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -138,23 +140,23 @@ fun SettingsScreen(
                 title = "弱网模式",
                 checked = settings.weakNetworkMode,
                 enabled = !settings.adaptivePointerSampling,
-                onCheckedChange = settingsStore::updateWeakNetworkMode
+                onCheckedChange = settingsStore::updateWeakNetworkMode,
             )
         }
 
         SettingCard(
             title = "诊断",
-            description = "开启调试显示和导出最近的应用日志，便于排查远程连接问题"
+            description = "开启调试显示和导出最近的应用日志，便于排查远程连接问题",
         ) {
             SettingSwitchRow(
                 title = "调试模式",
                 checked = settings.debugMode,
-                onCheckedChange = settingsStore::updateDebugMode
+                onCheckedChange = settingsStore::updateDebugMode,
             )
             Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
                     modifier = Modifier.weight(1f),
@@ -162,14 +164,15 @@ fun SettingsScreen(
                         coroutineScope.launch {
                             runCatching {
                                 logger.i("AYLinkSettings", "Diagnostic log export requested")
-                                val shareIntent = withContext(Dispatchers.IO) {
-                                    logExporter.createExportIntent()
-                                }
+                                val shareIntent =
+                                    withContext(Dispatchers.IO) {
+                                        logExporter.createExportIntent()
+                                    }
                                 context.startActivity(
                                     android.content.Intent.createChooser(
                                         shareIntent,
-                                        "导出诊断日志"
-                                    )
+                                        "导出诊断日志",
+                                    ),
                                 )
                             }.onSuccess {
                                 logActionMessage = "已打开分享面板"
@@ -178,7 +181,7 @@ fun SettingsScreen(
                                 logActionMessage = error.message ?: "导出失败"
                             }
                         }
-                    }
+                    },
                 ) {
                     Text("导出日志")
                 }
@@ -187,7 +190,7 @@ fun SettingsScreen(
                     onClick = {
                         logger.clear()
                         logActionMessage = "日志已清空"
-                    }
+                    },
                 ) {
                     Text("清空日志")
                 }
@@ -197,7 +200,7 @@ fun SettingsScreen(
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -208,27 +211,28 @@ fun SettingsScreen(
 private fun SettingCard(
     title: String,
     description: String,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        )
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(16.dp),
         ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(16.dp))
             content()
@@ -241,28 +245,29 @@ private fun SettingSwitchRow(
     title: String,
     checked: Boolean,
     enabled: Boolean = true,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 0.6f else 0.35f)
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 0.6f else 0.35f),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
             )
             Switch(
                 checked = checked,
                 enabled = enabled,
-                onCheckedChange = onCheckedChange
+                onCheckedChange = onCheckedChange,
             )
         }
     }
@@ -273,28 +278,29 @@ private fun SettingRadioRow(
     title: String,
     selected: Boolean,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 0.6f else 0.35f)
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (enabled) 0.6f else 0.35f),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
             )
             RadioButton(
                 selected = selected,
                 enabled = enabled,
-                onClick = onClick
+                onClick = onClick,
             )
         }
     }

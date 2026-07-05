@@ -17,34 +17,46 @@ data class LoginUiState(
     val username: String = "",
     val password: String = "",
     val loading: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
 )
 
 sealed interface LoginIntent {
-    data class UpdateBaseUrl(val url: String) : LoginIntent
-    data class UpdateUsername(val username: String) : LoginIntent
-    data class UpdatePassword(val password: String) : LoginIntent
+    data class UpdateBaseUrl(
+        val url: String,
+    ) : LoginIntent
+
+    data class UpdateUsername(
+        val username: String,
+    ) : LoginIntent
+
+    data class UpdatePassword(
+        val password: String,
+    ) : LoginIntent
+
     data object SaveBaseUrl : LoginIntent
+
     data object Login : LoginIntent
+
     data object DismissError : LoginIntent
 }
 
 sealed interface LoginEffect {
     data object NavigateToLogin : LoginEffect
+
     data object NavigateToDevices : LoginEffect
 }
 
 class LoginViewModel(
     private val authRepository: AuthRepository,
-    private val sessionStore: SessionStore
+    private val sessionStore: SessionStore,
 ) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(
-        LoginUiState(
-            baseUrl = sessionStore.baseUrl.value,
-            username = sessionStore.username.value
+    private val _uiState =
+        MutableStateFlow(
+            LoginUiState(
+                baseUrl = sessionStore.baseUrl.value,
+                username = sessionStore.username.value,
+            ),
         )
-    )
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
     private val _effect = MutableSharedFlow<LoginEffect>()
@@ -52,9 +64,21 @@ class LoginViewModel(
 
     fun handleIntent(intent: LoginIntent) {
         when (intent) {
-            is LoginIntent.UpdateBaseUrl -> _uiState.update { it.copy(baseUrl = intent.url, errorMessage = null) }
-            is LoginIntent.UpdateUsername -> _uiState.update { it.copy(username = intent.username, errorMessage = null) }
-            is LoginIntent.UpdatePassword -> _uiState.update { it.copy(password = intent.password, errorMessage = null) }
+            is LoginIntent.UpdateBaseUrl -> {
+                _uiState.update {
+                    it.copy(baseUrl = intent.url, errorMessage = null)
+                }
+            }
+            is LoginIntent.UpdateUsername -> {
+                _uiState.update {
+                    it.copy(username = intent.username, errorMessage = null)
+                }
+            }
+            is LoginIntent.UpdatePassword -> {
+                _uiState.update {
+                    it.copy(password = intent.password, errorMessage = null)
+                }
+            }
             LoginIntent.SaveBaseUrl -> saveBaseUrl()
             LoginIntent.Login -> login()
             LoginIntent.DismissError -> _uiState.update { it.copy(errorMessage = null) }
@@ -91,16 +115,25 @@ class LoginViewModel(
         }
 
         _uiState.update { it.copy(loading = true, errorMessage = null) }
-        
+
         viewModelScope.launch {
-            val result = authRepository.login(normalizedBaseUrl, normalizedUsername, currentState.password)
-            
+            val result =
+                authRepository.login(normalizedBaseUrl, normalizedUsername, currentState.password)
+
             result.onSuccess {
-                _uiState.update { it.copy(loading = false, baseUrl = normalizedBaseUrl, username = normalizedUsername) }
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        baseUrl = normalizedBaseUrl,
+                        username = normalizedUsername,
+                    )
+                }
                 _effect.emit(LoginEffect.NavigateToDevices)
             }
-            .onFailure { error ->
-                _uiState.update { it.copy(loading = false, errorMessage = error.message ?: "登录失败") }
+            result.onFailure { error ->
+                _uiState.update {
+                    it.copy(loading = false, errorMessage = error.message ?: "登录失败")
+                }
             }
         }
     }

@@ -10,7 +10,7 @@ enum class UnifiedVideoStreamState {
     Degraded,
     Stalled,
     Recovering,
-    Detached
+    Detached,
 }
 
 enum class UnifiedVideoHealthOrigin {
@@ -18,7 +18,7 @@ enum class UnifiedVideoHealthOrigin {
     Source,
     Sender,
     Transport,
-    Client
+    Client,
 }
 
 enum class UnifiedVideoRecoveryAction {
@@ -28,42 +28,68 @@ enum class UnifiedVideoRecoveryAction {
     SignalingReattach,
     Renegotiate,
     IceRestart,
-    Reconnect
+    Reconnect,
 }
 
 data class ClientVideoHealthSnapshot(
     val state: String,
     val reason: String,
     val signalingAttached: Boolean,
-    val peerConnected: Boolean
+    val peerConnected: Boolean,
 )
 
 data class UnifiedVideoRecoveryDecision(
     val state: UnifiedVideoStreamState,
     val origin: UnifiedVideoHealthOrigin,
     val action: UnifiedVideoRecoveryAction,
-    val reason: String
+    val reason: String,
 )
 
 fun decideVideoRecovery(
     client: ClientVideoHealthSnapshot,
-    agent: VideoStreamHealthSnapshot?
+    agent: VideoStreamHealthSnapshot?,
 ): UnifiedVideoRecoveryDecision {
     val agentOrigin = normalizeOrigin(agent?.origin)
     val agentState = agent?.state.orEmpty().lowercase()
-    val sourceState = agent?.source?.state.orEmpty().lowercase()
-    val senderState = agent?.sender?.state.orEmpty().lowercase()
-    val transportState = agent?.transport?.peerConnectionState.orEmpty().lowercase()
-    val agentReason = listOfNotNull(agent?.reason, agent?.source?.reason, agent?.source?.state)
-        .firstOrNull { it.isNotBlank() }
-        .orEmpty()
+    val sourceState =
+        agent
+            ?.source
+            ?.state
+            .orEmpty()
+            .lowercase()
+    val senderState =
+        agent
+            ?.sender
+            ?.state
+            .orEmpty()
+            .lowercase()
+    val transportState =
+        agent
+            ?.transport
+            ?.peerConnectionState
+            .orEmpty()
+            .lowercase()
+    val agentReason =
+        listOfNotNull(
+            agent?.reason,
+            agent?.source?.reason,
+            agent?.source?.state,
+        ).firstOrNull { it.isNotBlank() }
+            .orEmpty()
 
-    if (isStaticButAliveSource(sourceState) && isAgentVideoPathHealthy(senderState, transportState, agent?.transport?.sessionClosed == true)) {
+    if (
+        isStaticButAliveSource(sourceState) &&
+        isAgentVideoPathHealthy(
+            senderState,
+            transportState,
+            agent?.transport?.sessionClosed == true,
+        )
+    ) {
         return UnifiedVideoRecoveryDecision(
             state = UnifiedVideoStreamState.Observing,
             origin = UnifiedVideoHealthOrigin.Source,
             action = UnifiedVideoRecoveryAction.Observe,
-            reason = agentReason.ifBlank { client.reason }
+            reason = agentReason.ifBlank { client.reason },
         )
     }
 
@@ -72,16 +98,22 @@ fun decideVideoRecovery(
             state = UnifiedVideoStreamState.Stalled,
             origin = UnifiedVideoHealthOrigin.Source,
             action = UnifiedVideoRecoveryAction.SourceRefresh,
-            reason = agentReason.ifBlank { client.reason }
+            reason = agentReason.ifBlank { client.reason },
         )
     }
 
+    val transportRecoveryAction =
+        if (client.signalingAttached) {
+            UnifiedVideoRecoveryAction.IceRestart
+        } else {
+            UnifiedVideoRecoveryAction.SignalingReattach
+        }
     if (agentOrigin == UnifiedVideoHealthOrigin.Transport || !client.peerConnected) {
         return UnifiedVideoRecoveryDecision(
             state = UnifiedVideoStreamState.Degraded,
             origin = UnifiedVideoHealthOrigin.Transport,
-            action = if (client.signalingAttached) UnifiedVideoRecoveryAction.IceRestart else UnifiedVideoRecoveryAction.SignalingReattach,
-            reason = agentReason.ifBlank { client.reason }
+            action = transportRecoveryAction,
+            reason = agentReason.ifBlank { client.reason },
         )
     }
 
@@ -90,7 +122,7 @@ fun decideVideoRecovery(
             state = UnifiedVideoStreamState.Detached,
             origin = UnifiedVideoHealthOrigin.Transport,
             action = UnifiedVideoRecoveryAction.SignalingReattach,
-            reason = client.reason
+            reason = client.reason,
         )
     }
 
@@ -99,7 +131,7 @@ fun decideVideoRecovery(
             state = UnifiedVideoStreamState.Recovering,
             origin = UnifiedVideoHealthOrigin.Sender,
             action = UnifiedVideoRecoveryAction.KeyFrameReplay,
-            reason = agentReason.ifBlank { client.reason }
+            reason = agentReason.ifBlank { client.reason },
         )
     }
 
@@ -107,27 +139,28 @@ fun decideVideoRecovery(
         state = UnifiedVideoStreamState.Stalled,
         origin = UnifiedVideoHealthOrigin.Client,
         action = UnifiedVideoRecoveryAction.KeyFrameReplay,
-        reason = client.reason
+        reason = client.reason,
     )
 }
 
-private fun isStaticButAliveSource(state: String): Boolean {
-    return state == "static_but_alive"
-}
+private fun isStaticButAliveSource(state: String): Boolean = state == "static_but_alive"
 
-private fun isAgentVideoPathHealthy(senderState: String, transportState: String, sessionClosed: Boolean): Boolean {
+private fun isAgentVideoPathHealthy(
+    senderState: String,
+    transportState: String,
+    sessionClosed: Boolean,
+): Boolean {
     if (sessionClosed) {
         return false
     }
     return senderState == "ready" && transportState != "failed" && transportState != "closed"
 }
 
-private fun normalizeOrigin(value: String?): UnifiedVideoHealthOrigin {
-    return when (value.orEmpty().lowercase()) {
+private fun normalizeOrigin(value: String?): UnifiedVideoHealthOrigin =
+    when (value.orEmpty().lowercase()) {
         "source" -> UnifiedVideoHealthOrigin.Source
         "sender" -> UnifiedVideoHealthOrigin.Sender
         "transport" -> UnifiedVideoHealthOrigin.Transport
         "client" -> UnifiedVideoHealthOrigin.Client
         else -> UnifiedVideoHealthOrigin.Unknown
     }
-}

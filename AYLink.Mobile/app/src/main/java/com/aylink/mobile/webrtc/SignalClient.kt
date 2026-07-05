@@ -22,7 +22,7 @@ import okhttp3.WebSocketListener
 class SignalClient(
     private val okHttpClient: OkHttpClient,
     private val json: Json,
-    private val appLogger: AppLogger? = null
+    private val appLogger: AppLogger? = null,
 ) {
     private companion object {
         private const val LOG_TAG = "AYLinkSignal"
@@ -30,27 +30,41 @@ class SignalClient(
 
     data class ConnectArgs(
         val baseUrl: String,
-        val ticket: String
+        val ticket: String,
     )
 
     sealed interface Event {
-        data class Answer(val payload: RtcAnswerMessage) : Event
-        data class Candidate(val payload: RtcCandidateMessage) : Event
-        data class Error(val message: String, val retryable: Boolean = true) : Event
+        data class Answer(
+            val payload: RtcAnswerMessage,
+        ) : Event
+
+        data class Candidate(
+            val payload: RtcCandidateMessage,
+        ) : Event
+
+        data class Error(
+            val message: String,
+            val retryable: Boolean = true,
+        ) : Event
+
         data object Open : Event
+
         data object Closed : Event
     }
 
-    private val _events = MutableSharedFlow<Event>(
-        extraBufferCapacity = 32,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
+    private val _events =
+        MutableSharedFlow<Event>(
+            extraBufferCapacity = 32,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
 
     val events: SharedFlow<Event> = _events
 
     private var socket: WebSocket? = null
+
     @Volatile
     private var isSocketOpen = false
+
     @Volatile
     private var activeConnectionId = 0
     private var connectionSequence = 0
@@ -68,76 +82,99 @@ class SignalClient(
         previousSocket?.close(1000, null)
         val wsUrl = buildWebSocketUrl(args.baseUrl, args.ticket)
         val request = Request.Builder().url(wsUrl).build()
-        socket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                if (connectionId != activeConnectionId) {
-                    webSocket.close(1000, null)
-                    return
-                }
-                isSocketOpen = true
-                appLogger?.i(LOG_TAG, "Signaling opened, connectionId=$connectionId")
-                _events.tryEmit(Event.Open)
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                if (connectionId != activeConnectionId) {
-                    return
-                }
-                val payload = json.parseToJsonElement(text) as? JsonObject ?: return
-                val eventType = payload["type"]?.jsonPrimitive?.contentOrNull
-                val candidate = payload["candidate"]?.jsonPrimitive?.contentOrNull
-                val sdp = payload["sdp"]?.jsonPrimitive?.contentOrNull
-                val sdpType = payload["type"]?.jsonPrimitive?.contentOrNull
-
-                when {
-                    eventType == "error" -> {
-                        val signalError = json.decodeFromJsonElement(RtcSignalErrorMessage.serializer(), payload)
-                        _events.tryEmit(
-                            Event.Error(
-                                message = buildSignalErrorMessage(signalError),
-                                retryable = signalError.retryable
-                            )
-                        )
+        socket =
+            okHttpClient.newWebSocket(
+                request,
+                object : WebSocketListener() {
+                    override fun onOpen(
+                        webSocket: WebSocket,
+                        response: Response,
+                    ) {
+                        if (connectionId != activeConnectionId) {
+                            webSocket.close(1000, null)
+                            return
+                        }
+                        isSocketOpen = true
+                        appLogger?.i(LOG_TAG, "Signaling opened, connectionId=$connectionId")
+                        _events.tryEmit(Event.Open)
                     }
 
-                    !candidate.isNullOrBlank() -> {
-                        _events.tryEmit(Event.Candidate(json.decodeFromJsonElement(RtcCandidateMessage.serializer(), payload)))
+                    override fun onMessage(
+                        webSocket: WebSocket,
+                        text: String,
+                    ) {
+                        if (connectionId != activeConnectionId) {
+                            return
+                        }
+                        val payload = json.parseToJsonElement(text) as? JsonObject ?: return
+                        val eventType = payload["type"]?.jsonPrimitive?.contentOrNull
+                        val candidate = payload["candidate"]?.jsonPrimitive?.contentOrNull
+                        val sdp = payload["sdp"]?.jsonPrimitive?.contentOrNull
+                        val sdpType = payload["type"]?.jsonPrimitive?.contentOrNull
+
+                        when {
+                            eventType == "error" -> {
+                                val signalError = json.decodeFromJsonElement(RtcSignalErrorMessage.serializer(), payload)
+                                _events.tryEmit(
+                                    Event.Error(
+                                        message = buildSignalErrorMessage(signalError),
+                                        retryable = signalError.retryable,
+                                    ),
+                                )
+                            }
+
+                            !candidate.isNullOrBlank() -> {
+                                _events.tryEmit(
+                                    Event.Candidate(json.decodeFromJsonElement(RtcCandidateMessage.serializer(), payload)),
+                                )
+                            }
+
+                            !sdp.isNullOrBlank() && !sdpType.isNullOrBlank() -> {
+                                _events.tryEmit(
+                                    Event.Answer(json.decodeFromJsonElement(RtcAnswerMessage.serializer(), payload)),
+                                )
+                            }
+                        }
                     }
 
-                    !sdp.isNullOrBlank() && !sdpType.isNullOrBlank() -> {
-                        _events.tryEmit(Event.Answer(json.decodeFromJsonElement(RtcAnswerMessage.serializer(), payload)))
+                    override fun onFailure(
+                        webSocket: WebSocket,
+                        t: Throwable,
+                        response: Response?,
+                    ) {
+                        if (connectionId != activeConnectionId) {
+                            return
+                        }
+                        isSocketOpen = false
+                        socket = null
+                        appLogger?.w(LOG_TAG, "Signaling failed, connectionId=$connectionId, responseCode=${response?.code}", t)
+                        val message =
+                            buildString {
+                                append(t.message ?: "Signal connection failed")
+                                if (response != null) {
+                                    append(" (HTTP ")
+                                    append(response.code)
+                                    append(")")
+                                }
+                            }
+                        _events.tryEmit(Event.Error(message = message, retryable = true))
                     }
-                }
-            }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (connectionId != activeConnectionId) {
-                    return
-                }
-                isSocketOpen = false
-                socket = null
-                appLogger?.w(LOG_TAG, "Signaling failed, connectionId=$connectionId, responseCode=${response?.code}", t)
-                val message = buildString {
-                    append(t.message ?: "Signal connection failed")
-                    if (response != null) {
-                        append(" (HTTP ")
-                        append(response.code)
-                        append(")")
+                    override fun onClosed(
+                        webSocket: WebSocket,
+                        code: Int,
+                        reason: String,
+                    ) {
+                        if (connectionId != activeConnectionId) {
+                            return
+                        }
+                        isSocketOpen = false
+                        socket = null
+                        appLogger?.i(LOG_TAG, "Signaling closed, connectionId=$connectionId, code=$code, reason=$reason")
+                        _events.tryEmit(Event.Closed)
                     }
-                }
-                _events.tryEmit(Event.Error(message = message, retryable = true))
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (connectionId != activeConnectionId) {
-                    return
-                }
-                isSocketOpen = false
-                socket = null
-                appLogger?.i(LOG_TAG, "Signaling closed, connectionId=$connectionId, code=$code, reason=$reason")
-                _events.tryEmit(Event.Closed)
-            }
-        })
+                },
+            )
     }
 
     fun sendOffer(offer: RtcOfferMessage) {
@@ -156,13 +193,17 @@ class SignalClient(
         currentSocket?.close(1000, null)
     }
 
-    private fun buildWebSocketUrl(baseUrl: String, ticket: String): String {
+    private fun buildWebSocketUrl(
+        baseUrl: String,
+        ticket: String,
+    ): String {
         val httpBase = baseUrl.removeSuffix("/")
-        val wsBase = when {
-            httpBase.startsWith("https://") -> "wss://${httpBase.removePrefix("https://")}"
-            httpBase.startsWith("http://") -> "ws://${httpBase.removePrefix("http://")}"
-            else -> "ws://$httpBase"
-        }
+        val wsBase =
+            when {
+                httpBase.startsWith("https://") -> "wss://${httpBase.removePrefix("https://")}"
+                httpBase.startsWith("http://") -> "ws://${httpBase.removePrefix("http://")}"
+                else -> "ws://$httpBase"
+            }
 
         return buildString {
             append(wsBase)

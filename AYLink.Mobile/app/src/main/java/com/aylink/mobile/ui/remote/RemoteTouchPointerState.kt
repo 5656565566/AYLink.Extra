@@ -7,7 +7,7 @@ internal data class RemoteTouchPointerEvent(
     val pointerId: Int,
     val isPrimary: Boolean,
     val point: Offset,
-    val epoch: Int
+    val epoch: Int,
 )
 
 internal class RemoteTouchPointerState {
@@ -30,7 +30,7 @@ internal class RemoteTouchPointerState {
     fun beginGesture(
         sourcePointerId: Long,
         point: Offset,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
         releaseOtherPointers(sourcePointerId, "cancel", emit)
         pointerDown(sourcePointerId, point, emit)
@@ -39,18 +39,19 @@ internal class RemoteTouchPointerState {
     fun pointerDown(
         sourcePointerId: Long,
         point: Offset,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
         activePointers[sourcePointerId]?.let { stale ->
             emit(stale.toEvent("cancel", point = stale.lastPoint, epoch = currentEpoch))
             activePointers.remove(sourcePointerId)
         }
 
-        val pointer = ActivePointer(
-            sourcePointerId = sourcePointerId,
-            scrcpyPointerId = nextScrcpyPointerId++,
-            lastPoint = point
-        )
+        val pointer =
+            ActivePointer(
+                sourcePointerId = sourcePointerId,
+                scrcpyPointerId = nextScrcpyPointerId++,
+                lastPoint = point,
+            )
         activePointers[sourcePointerId] = pointer
         if (primarySourcePointerId == null) {
             primarySourcePointerId = sourcePointerId
@@ -61,7 +62,7 @@ internal class RemoteTouchPointerState {
     fun pointerMove(
         sourcePointerId: Long,
         point: Offset,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
         val pointer = activePointers[sourcePointerId] ?: return
         if (pointer.lastPoint == point) {
@@ -75,7 +76,7 @@ internal class RemoteTouchPointerState {
     fun pointerUp(
         sourcePointerId: Long,
         point: Offset,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
         releasePointer(sourcePointerId, "up", point, emit)
     }
@@ -83,7 +84,7 @@ internal class RemoteTouchPointerState {
     fun pointerCancel(
         sourcePointerId: Long,
         point: Offset? = null,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
         releasePointer(sourcePointerId, "cancel", point, emit)
     }
@@ -102,7 +103,7 @@ internal class RemoteTouchPointerState {
         sourcePointerId: Long,
         phase: String,
         point: Offset?,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
         val pointer = activePointers.remove(sourcePointerId) ?: return
         emit(pointer.toEvent(phase, point ?: pointer.lastPoint, currentEpoch))
@@ -115,12 +116,13 @@ internal class RemoteTouchPointerState {
     private fun releaseOtherPointers(
         keptSourcePointerId: Long,
         phase: String,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
-        val stalePointers = activePointers
-            .filterKeys { it != keptSourcePointerId }
-            .values
-            .toList()
+        val stalePointers =
+            activePointers
+                .filterKeys { it != keptSourcePointerId }
+                .values
+                .toList()
         stalePointers.forEach { pointer ->
             activePointers.remove(pointer.sourcePointerId)
             emit(pointer.toEvent(phase, pointer.lastPoint, currentEpoch))
@@ -133,7 +135,7 @@ internal class RemoteTouchPointerState {
 
     private fun releaseAll(
         phase: String,
-        emit: (RemoteTouchPointerEvent) -> Unit
+        emit: (RemoteTouchPointerEvent) -> Unit,
     ) {
         if (activePointers.isEmpty()) {
             primarySourcePointerId = null
@@ -155,19 +157,22 @@ internal class RemoteTouchPointerState {
         }
     }
 
-    private fun ActivePointer.toEvent(phase: String, point: Offset, epoch: Int): RemoteTouchPointerEvent {
-        return RemoteTouchPointerEvent(
+    private fun ActivePointer.toEvent(
+        phase: String,
+        point: Offset,
+        epoch: Int,
+    ): RemoteTouchPointerEvent =
+        RemoteTouchPointerEvent(
             phase = phase,
             pointerId = scrcpyPointerId,
             isPrimary = sourcePointerId == primarySourcePointerId,
             point = point,
-            epoch = epoch
+            epoch = epoch,
         )
-    }
 
     private data class ActivePointer(
         val sourcePointerId: Long,
         val scrcpyPointerId: Int,
-        var lastPoint: Offset
+        var lastPoint: Offset,
     )
 }

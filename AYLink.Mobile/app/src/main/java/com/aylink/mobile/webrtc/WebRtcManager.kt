@@ -1,7 +1,7 @@
 package com.aylink.mobile.webrtc
 
-import android.media.AudioAttributes
 import android.content.Context
+import android.media.AudioAttributes
 import com.aylink.mobile.data.model.PointerControlMessage
 import com.aylink.mobile.data.model.RtcCandidateMessage
 import com.aylink.mobile.data.model.RtcOfferMessage
@@ -21,8 +21,8 @@ import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
-import org.webrtc.RtpTransceiver
 import org.webrtc.RtpReceiver
+import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceViewRenderer
@@ -37,7 +37,7 @@ class WebRtcManager(
     context: Context,
     private val json: Json,
     private val signalClient: SignalClient,
-    private val appLogger: AppLogger? = null
+    private val appLogger: AppLogger? = null,
 ) {
     data class VideoFrameHealthSnapshot(
         val generation: Int,
@@ -46,7 +46,7 @@ class WebRtcManager(
         val width: Int,
         val height: Int,
         val isPeerConnected: Boolean,
-        val hasVideoFrame: Boolean
+        val hasVideoFrame: Boolean,
     )
 
     companion object {
@@ -78,17 +78,35 @@ class WebRtcManager(
     sealed interface Event {
         val generation: Int
 
-        data class Connected(override val generation: Int) : Event
-        data class IceDisconnected(override val generation: Int) : Event
-        data class Disconnected(override val generation: Int) : Event
-        data class VideoSizeChanged(override val generation: Int, val width: Int, val height: Int) : Event
-        data class Error(override val generation: Int, val message: String) : Event
+        data class Connected(
+            override val generation: Int,
+        ) : Event
+
+        data class IceDisconnected(
+            override val generation: Int,
+        ) : Event
+
+        data class Disconnected(
+            override val generation: Int,
+        ) : Event
+
+        data class VideoSizeChanged(
+            override val generation: Int,
+            val width: Int,
+            val height: Int,
+        ) : Event
+
+        data class Error(
+            override val generation: Int,
+            val message: String,
+        ) : Event
     }
 
-    private val _events = MutableSharedFlow<Event>(
-        extraBufferCapacity = 16,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
+    private val _events =
+        MutableSharedFlow<Event>(
+            extraBufferCapacity = 16,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
     val events: SharedFlow<Event> = _events
 
     private val eglBase = EglBase.create()
@@ -103,42 +121,48 @@ class WebRtcManager(
     private val remoteAudioTracks = linkedSetOf<AudioTrack>()
     private var frameSizeSink: VideoSink? = null
     private var renderer: SurfaceViewRenderer? = null
+
     @Volatile
     private var isDisconnecting = false
+
     @Volatile
     private var connectionGeneration = 0
+
     private var lastVideoWidth = 0
     private var lastVideoHeight = 0
+
     @Volatile
     private var lastFrameAtMillis = 0L
+
     @Volatile
     private var videoFrameCount = 0L
     private var isIceConnected = false
     private var isPrimaryControlChannelOpen = false
     private var hasVideoFrame = false
     private var hasEmittedConnected = false
+
     init {
         PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(context)
-                .createInitializationOptions()
+            PeerConnectionFactory.InitializationOptions
+                .builder(context)
+                .createInitializationOptions(),
         )
 
-        audioDeviceModule = JavaAudioDeviceModule.builder(context)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
-                    .build()
-            )
-            .createAudioDeviceModule()
+        audioDeviceModule =
+            JavaAudioDeviceModule
+                .builder(context)
+                .setAudioAttributes(buildAudioAttributes())
+                .createAudioDeviceModule()
 
         val options = PeerConnectionFactory.Options()
-        peerConnectionFactory = PeerConnectionFactory.builder()
-            .setOptions(options)
-            .setAudioDeviceModule(audioDeviceModule)
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
-            .createPeerConnectionFactory()
+        peerConnectionFactory =
+            PeerConnectionFactory
+                .builder()
+                .setOptions(options)
+                .setAudioDeviceModule(audioDeviceModule)
+                .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
+                .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
+                .createPeerConnectionFactory()
     }
 
     fun initializeRenderer(renderer: SurfaceViewRenderer) {
@@ -163,91 +187,114 @@ class WebRtcManager(
         isDisconnecting = false
         val generation = ++connectionGeneration
         frameSizeSink = createFrameSizeSink(generation)
-        val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-        }
-
-        peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
-            override fun onSignalingChange(newState: PeerConnection.SignalingState) = Unit
-            override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
-                if (!isCurrentGeneration(generation)) {
-                    return
-                }
-                appLogger?.i(LOG_TAG, "ICE connection state changed, generation=$generation, state=$newState")
-                when (newState) {
-                    PeerConnection.IceConnectionState.CONNECTED,
-                    PeerConnection.IceConnectionState.COMPLETED -> {
-                        isIceConnected = true
-                        emitConnectedIfReady(generation)
-                    }
-                    PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        isIceConnected = false
-                        hasEmittedConnected = false
-                        _events.tryEmit(Event.IceDisconnected(generation))
-                    }
-                    PeerConnection.IceConnectionState.CLOSED,
-                    PeerConnection.IceConnectionState.FAILED -> {
-                        resetConnectionReadyState()
-                        _events.tryEmit(Event.Disconnected(generation))
-                    }
-                    else -> Unit
-                }
+        val rtcConfig =
+            PeerConnection.RTCConfiguration(emptyList()).apply {
+                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             }
 
-            override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
-            override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) = Unit
-            override fun onIceCandidate(candidate: IceCandidate) {
-                if (!isCurrentGeneration(generation)) {
-                    return
-                }
-                signalClient.sendCandidate(
-                    RtcCandidateMessage(
-                        candidate = candidate.sdp,
-                        sdpMid = candidate.sdpMid,
-                        sdpMLineIndex = candidate.sdpMLineIndex
-                    )
-                )
-            }
+        peerConnection =
+            peerConnectionFactory.createPeerConnection(
+                rtcConfig,
+                object : PeerConnection.Observer {
+                    override fun onSignalingChange(newState: PeerConnection.SignalingState) = Unit
 
-            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) = Unit
-            override fun onAddStream(stream: MediaStream) = Unit
-            override fun onRemoveStream(stream: MediaStream) = Unit
-            override fun onDataChannel(channel: DataChannel) {
-                appLogger?.i(LOG_TAG, "Remote data channel received, generation=$generation, label=${channel.label()}")
-                when (channel.label()) {
-                    POINTER_MOVE_CHANNEL_LABEL -> {
-                        pointerMoveChannel = channel
-                        observeDataChannel(channel, generation)
-                    }
-                    META_CONTROL_CHANNEL_LABEL -> {
-                        metaControlChannel = channel
-                        observeDataChannel(channel, generation)
-                    }
-                    else -> {
-                        dataChannel = channel
-                        observeDataChannel(channel, generation)
-                    }
-                }
-            }
+                    override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
+                        if (!isCurrentGeneration(generation)) {
+                            return
+                        }
+                        appLogger?.i(LOG_TAG, "ICE connection state changed, generation=$generation, state=$newState")
+                        when (newState) {
+                            PeerConnection.IceConnectionState.CONNECTED,
+                            PeerConnection.IceConnectionState.COMPLETED,
+                            -> {
+                                isIceConnected = true
+                                emitConnectedIfReady(generation)
+                            }
 
-            override fun onRenegotiationNeeded() = Unit
-            override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) = Unit
+                            PeerConnection.IceConnectionState.DISCONNECTED -> {
+                                isIceConnected = false
+                                hasEmittedConnected = false
+                                _events.tryEmit(Event.IceDisconnected(generation))
+                            }
 
-            override fun onTrack(transceiver: RtpTransceiver) {
-                if (!isCurrentGeneration(generation)) {
-                    return
-                }
-                when (val track = transceiver.receiver.track()) {
-                    is VideoTrack -> {
-                        remoteVideoTrack?.removeSink(frameSizeSink)
-                        renderer?.let { remoteVideoTrack?.removeSink(it) }
-                        remoteVideoTrack = track
-                        bindTrackToRenderer()
+                            PeerConnection.IceConnectionState.CLOSED,
+                            PeerConnection.IceConnectionState.FAILED,
+                            -> {
+                                resetConnectionReadyState()
+                                _events.tryEmit(Event.Disconnected(generation))
+                            }
+
+                            else -> Unit
+                        }
                     }
-                    is AudioTrack -> replaceRemoteAudioTrack(track)
-                }
-            }
-        })
+
+                    override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
+
+                    override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) = Unit
+
+                    override fun onIceCandidate(candidate: IceCandidate) {
+                        if (!isCurrentGeneration(generation)) {
+                            return
+                        }
+                        signalClient.sendCandidate(
+                            RtcCandidateMessage(
+                                candidate = candidate.sdp,
+                                sdpMid = candidate.sdpMid,
+                                sdpMLineIndex = candidate.sdpMLineIndex,
+                            ),
+                        )
+                    }
+
+                    override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) = Unit
+
+                    override fun onAddStream(stream: MediaStream) = Unit
+
+                    override fun onRemoveStream(stream: MediaStream) = Unit
+
+                    override fun onDataChannel(channel: DataChannel) {
+                        appLogger?.i(LOG_TAG, "Remote data channel received, generation=$generation, label=${channel.label()}")
+                        when (channel.label()) {
+                            POINTER_MOVE_CHANNEL_LABEL -> {
+                                pointerMoveChannel = channel
+                                observeDataChannel(channel, generation)
+                            }
+
+                            META_CONTROL_CHANNEL_LABEL -> {
+                                metaControlChannel = channel
+                                observeDataChannel(channel, generation)
+                            }
+
+                            else -> {
+                                dataChannel = channel
+                                observeDataChannel(channel, generation)
+                            }
+                        }
+                    }
+
+                    override fun onRenegotiationNeeded() = Unit
+
+                    override fun onAddTrack(
+                        receiver: RtpReceiver,
+                        mediaStreams: Array<out MediaStream>,
+                    ) = Unit
+
+                    override fun onTrack(transceiver: RtpTransceiver) {
+                        if (!isCurrentGeneration(generation)) {
+                            return
+                        }
+                        when (val track = transceiver.receiver.track()) {
+                            is VideoTrack -> {
+                                remoteVideoTrack?.removeSink(frameSizeSink)
+                                renderer?.let { remoteVideoTrack?.removeSink(it) }
+                                remoteVideoTrack = track
+                                bindTrackToRenderer()
+                            }
+
+                            is AudioTrack -> replaceRemoteAudioTrack(track)
+                        }
+                    }
+                },
+            )
 
         val connection = peerConnection
         if (connection == null) {
@@ -257,15 +304,9 @@ class WebRtcManager(
 
         connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, recvOnlyInit())
         connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, recvOnlyInit())
-        dataChannel = connection.createDataChannel(CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
-        metaControlChannel = connection.createDataChannel(META_CONTROL_CHANNEL_LABEL, DataChannel.Init())?.also { observeDataChannel(it, generation) }
-        pointerMoveChannel = connection.createDataChannel(
-            POINTER_MOVE_CHANNEL_LABEL,
-            DataChannel.Init().apply {
-                ordered = false
-                maxRetransmits = 0
-            }
-        )?.also { observeDataChannel(it, generation) }
+        dataChannel = createObservedDataChannel(connection, CONTROL_CHANNEL_LABEL, DataChannel.Init(), generation)
+        metaControlChannel = createObservedDataChannel(connection, META_CONTROL_CHANNEL_LABEL, DataChannel.Init(), generation)
+        pointerMoveChannel = createObservedDataChannel(connection, POINTER_MOVE_CHANNEL_LABEL, pointerMoveChannelInit(), generation)
         return generation
     }
 
@@ -284,10 +325,7 @@ class WebRtcManager(
         createOfferInternal(generation)
     }
 
-    fun isPeerConnected(): Boolean {
-        val state = peerConnection?.connectionState()
-        return state == PeerConnection.PeerConnectionState.CONNECTED
-    }
+    fun isPeerConnected(): Boolean = isPeerConnectionStateConnected(peerConnection?.connectionState())
 
     fun hasRecentFrame(withinMs: Long): Boolean {
         val last = lastFrameAtMillis
@@ -297,94 +335,110 @@ class WebRtcManager(
         return System.currentTimeMillis() - last <= withinMs
     }
 
-    fun getVideoFrameHealthSnapshot(): VideoFrameHealthSnapshot {
-        return VideoFrameHealthSnapshot(
+    fun getVideoFrameHealthSnapshot(): VideoFrameHealthSnapshot =
+        VideoFrameHealthSnapshot(
             generation = connectionGeneration,
             frameCount = videoFrameCount,
             lastFrameAtMillis = lastFrameAtMillis,
             width = lastVideoWidth,
             height = lastVideoHeight,
             isPeerConnected = isPeerConnected(),
-            hasVideoFrame = hasVideoFrame
+            hasVideoFrame = hasVideoFrame,
         )
-    }
 
     private fun createOfferInternal(generation: Int) {
         val connection = peerConnection ?: return
-        connection.createOffer(object : SdpObserver {
-            override fun onCreateSuccess(description: SessionDescription) {
-                if (!isCurrentConnection(connection, generation)) {
-                    return
-                }
-                connection.setLocalDescription(object : SdpObserver {
-                    override fun onSetSuccess() {
-                        if (!isCurrentConnection(connection, generation)) {
-                            return
-                        }
-                        signalClient.sendOffer(
-                            RtcOfferMessage(
-                                type = description.type.canonicalForm(),
-                                sdp = description.description
-                            )
-                        )
+        connection.createOffer(
+            object : SdpObserver {
+                override fun onCreateSuccess(description: SessionDescription) {
+                    if (!isCurrentConnection(connection, generation)) {
+                        return
                     }
+                    connection.setLocalDescription(
+                        object : SdpObserver {
+                            override fun onSetSuccess() {
+                                if (!isCurrentConnection(connection, generation)) {
+                                    return
+                                }
+                                signalClient.sendOffer(
+                                    RtcOfferMessage(
+                                        type = description.type.canonicalForm(),
+                                        sdp = description.description,
+                                    ),
+                                )
+                            }
 
-                    override fun onSetFailure(error: String) {
-                        if (!isCurrentConnection(connection, generation)) {
-                            return
-                        }
-                        _events.tryEmit(Event.Error(generation, error))
-                    }
+                            override fun onSetFailure(error: String) {
+                                if (!isCurrentConnection(connection, generation)) {
+                                    return
+                                }
+                                _events.tryEmit(Event.Error(generation, error))
+                            }
 
-                    override fun onCreateSuccess(description: SessionDescription) = Unit
-                    override fun onCreateFailure(error: String) = Unit
-                }, description)
-            }
+                            override fun onCreateSuccess(description: SessionDescription) = Unit
 
-            override fun onCreateFailure(error: String) {
-                if (!isCurrentConnection(connection, generation)) {
-                    return
+                            override fun onCreateFailure(error: String) = Unit
+                        },
+                        description,
+                    )
                 }
-                _events.tryEmit(Event.Error(generation, error))
-            }
 
-            override fun onSetSuccess() = Unit
-            override fun onSetFailure(error: String) = Unit
-        }, MediaConstraints())
+                override fun onCreateFailure(error: String) {
+                    if (!isCurrentConnection(connection, generation)) {
+                        return
+                    }
+                    _events.tryEmit(Event.Error(generation, error))
+                }
+
+                override fun onSetSuccess() = Unit
+
+                override fun onSetFailure(error: String) = Unit
+            },
+            MediaConstraints(),
+        )
     }
 
-    fun setRemoteAnswer(type: String, sdp: String, generation: Int = connectionGeneration) {
+    fun setRemoteAnswer(
+        type: String,
+        sdp: String,
+        generation: Int = connectionGeneration,
+    ) {
         val connection = peerConnection ?: return
         if (!isCurrentConnection(connection, generation)) {
             return
         }
-        val description = SessionDescription(
-            if (type.equals("answer", ignoreCase = true)) SessionDescription.Type.ANSWER else SessionDescription.Type.OFFER,
-            sdp
-        )
+        val description =
+            SessionDescription(
+                resolveRemoteDescriptionType(type),
+                sdp,
+            )
         connection.setRemoteDescription(noopSdpObserver(connection, generation), description)
     }
 
-    fun addRemoteCandidate(candidate: RtcCandidateMessage, generation: Int = connectionGeneration) {
+    fun addRemoteCandidate(
+        candidate: RtcCandidateMessage,
+        generation: Int = connectionGeneration,
+    ) {
         val connection = peerConnection ?: return
         if (!isCurrentConnection(connection, generation)) {
             return
         }
         connection.addIceCandidate(
-            IceCandidate(candidate.sdpMid, candidate.sdpMLineIndex ?: 0, candidate.candidate)
+            IceCandidate(candidate.sdpMid, candidate.sdpMLineIndex ?: 0, candidate.candidate),
         )
     }
 
     fun sendPointerMessage(
         payload: PointerControlMessage,
         preferPointerMoveChannel: Boolean = true,
-        reportFailure: Boolean = true
+        reportFailure: Boolean = true,
     ): Boolean {
-        val action = when (payload.phase.lowercase()) {
-            "down" -> SCRCPY_ACTION_DOWN
-            "up", "cancel" -> SCRCPY_ACTION_UP
-            else -> SCRCPY_ACTION_MOVE
-        }
+        val action =
+            when (payload.phase.lowercase()) {
+                "down" -> SCRCPY_ACTION_DOWN
+                "up", "cancel" -> SCRCPY_ACTION_UP
+                else -> SCRCPY_ACTION_MOVE
+            }
         val message = buildTouchMessage(payload, action)
         return if (action == SCRCPY_ACTION_MOVE && preferPointerMoveChannel) {
             sendPointerMove(message)
@@ -405,16 +459,20 @@ class WebRtcManager(
         }
     }
 
-    fun sendDisplayResize(width: Int, height: Int) {
+    fun sendDisplayResize(
+        width: Int,
+        height: Int,
+    ) {
         sendMetaControl(buildResizeDisplayMessage(width, height))
     }
 
     fun requestVideoKeyFrameReplay(reason: String): Boolean {
-        val requested = sendBinary(
-            selectDedicatedMetaControlChannel(),
-            byteArrayOf(LOCAL_META_CONTROL_PREFIX, LOCAL_META_MSG_VIDEO_KEY_FRAME),
-            reportFailure = false
-        )
+        val requested =
+            sendBinary(
+                selectDedicatedMetaControlChannel(),
+                byteArrayOf(LOCAL_META_CONTROL_PREFIX, LOCAL_META_MSG_VIDEO_KEY_FRAME),
+                reportFailure = false,
+            )
         appLogger?.i(LOG_TAG, "Video key frame replay request result=$requested, reason=$reason, generation=$connectionGeneration")
         return requested
     }
@@ -434,13 +492,44 @@ class WebRtcManager(
         eglBase.release()
     }
 
-    private fun sendControl(message: ByteArray, reportFailure: Boolean = true): Boolean {
-        return sendBinary(selectControlChannel(), message, reportFailure)
+    private fun buildAudioAttributes(): AudioAttributes =
+        AudioAttributes
+            .Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+            .build()
+
+    private fun isPeerConnectionStateConnected(state: PeerConnection.PeerConnectionState?): Boolean =
+        state == PeerConnection.PeerConnectionState.CONNECTED
+
+    private fun resolveRemoteDescriptionType(type: String): SessionDescription.Type =
+        if (type.equals("answer", ignoreCase = true)) SessionDescription.Type.ANSWER else SessionDescription.Type.OFFER
+
+    private fun createObservedDataChannel(
+        connection: PeerConnection,
+        label: String,
+        init: DataChannel.Init,
+        generation: Int,
+    ): DataChannel? {
+        val channel = connection.createDataChannel(label, init)
+        if (channel != null) {
+            observeDataChannel(channel, generation)
+        }
+        return channel
     }
 
-    private fun sendMetaControl(message: ByteArray): Boolean {
-        return sendBinary(selectMetaControlChannel(), message, reportFailure = true)
-    }
+    private fun pointerMoveChannelInit(): DataChannel.Init =
+        DataChannel.Init().apply {
+            ordered = false
+            maxRetransmits = 0
+        }
+
+    private fun sendControl(
+        message: ByteArray,
+        reportFailure: Boolean = true,
+    ): Boolean = sendBinary(selectControlChannel(), message, reportFailure)
+
+    private fun sendMetaControl(message: ByteArray): Boolean = sendBinary(selectMetaControlChannel(), message, reportFailure = true)
 
     private fun sendPointerMove(message: ByteArray): Boolean {
         val dedicatedPointerMoveChannel = pointerMoveChannel
@@ -456,14 +545,15 @@ class WebRtcManager(
     private fun sendBinary(
         channel: DataChannel?,
         message: ByteArray,
-        reportFailure: Boolean
+        reportFailure: Boolean,
     ): Boolean {
-        val targetChannel = channel ?: run {
-            if (reportFailure) {
-                reportControlChannelIssue("控制通道不可用")
+        val targetChannel =
+            channel ?: run {
+                if (reportFailure) {
+                    reportControlChannelIssue("控制通道不可用")
+                }
+                return false
             }
-            return false
-        }
         if (targetChannel.state() != DataChannel.State.OPEN) {
             if (reportFailure) {
                 reportControlChannelIssue("控制通道不可用")
@@ -478,37 +568,30 @@ class WebRtcManager(
         return sent
     }
 
-    private fun selectControlChannel(): DataChannel? {
-        return if (dataChannel?.state() == DataChannel.State.OPEN) dataChannel else null
-    }
+    private fun selectControlChannel(): DataChannel? = selectIfOpen(dataChannel)
 
-    private fun selectMetaControlChannel(): DataChannel? {
-        return when {
+    private fun selectMetaControlChannel(): DataChannel? =
+        when {
             metaControlChannel?.state() == DataChannel.State.OPEN -> metaControlChannel
             dataChannel?.state() == DataChannel.State.OPEN -> dataChannel
             else -> null
         }
-    }
 
-    private fun selectDedicatedMetaControlChannel(): DataChannel? {
-        return if (metaControlChannel?.state() == DataChannel.State.OPEN) metaControlChannel else null
-    }
+    private fun selectDedicatedMetaControlChannel(): DataChannel? = selectIfOpen(metaControlChannel)
 
-    private fun selectHighFrequencyControlChannel(): DataChannel? {
-        return when {
+    private fun selectHighFrequencyControlChannel(): DataChannel? =
+        when {
             pointerMoveChannel?.state() == DataChannel.State.OPEN -> pointerMoveChannel
             dataChannel?.state() == DataChannel.State.OPEN -> dataChannel
             else -> null
         }
-    }
 
-    fun getPointerMoveBufferedAmount(): Long {
-        return selectHighFrequencyControlChannel()?.bufferedAmount() ?: 0L
-    }
+    fun getPointerMoveBufferedAmount(): Long = selectHighFrequencyControlChannel()?.bufferedAmount() ?: 0L
 
-    private fun recvOnlyInit(): RtpTransceiver.RtpTransceiverInit {
-        return RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
-    }
+    private fun selectIfOpen(channel: DataChannel?): DataChannel? = if (channel?.state() == DataChannel.State.OPEN) channel else null
+
+    private fun recvOnlyInit(): RtpTransceiver.RtpTransceiverInit =
+        RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
 
     private fun bindTrackToRenderer() {
         val track = remoteVideoTrack ?: return
@@ -528,8 +611,8 @@ class WebRtcManager(
         }
     }
 
-    private fun createFrameSizeSink(generation: Int): VideoSink {
-        return VideoSink { frame: VideoFrame ->
+    private fun createFrameSizeSink(generation: Int): VideoSink =
+        VideoSink { frame: VideoFrame ->
             if (!isCurrentGeneration(generation)) {
                 return@VideoSink
             }
@@ -549,7 +632,6 @@ class WebRtcManager(
                 emitConnectedIfReady(generation)
             }
         }
-    }
 
     private fun closePeerConnection() {
         resetConnectionReadyState()
@@ -610,46 +692,50 @@ class WebRtcManager(
         runCatching { track.dispose() }
     }
 
-    private fun observeDataChannel(channel: DataChannel, generation: Int) {
-        channel.registerObserver(object : DataChannel.Observer {
-            override fun onBufferedAmountChange(previousAmount: Long) = Unit
+    private fun observeDataChannel(
+        channel: DataChannel,
+        generation: Int,
+    ) {
+        channel.registerObserver(
+            object : DataChannel.Observer {
+                override fun onBufferedAmountChange(previousAmount: Long) = Unit
 
-            override fun onStateChange() {
-                if (!isCurrentGeneration(generation)) {
-                    return
-                }
-                val state = channel.state()
-                appLogger?.i(LOG_TAG, "Data channel state changed, generation=$generation, label=${channel.label()}, state=$state")
-                if (state == DataChannel.State.CLOSED) {
-                    val wasPrimaryControlChannel = channel.label() == CONTROL_CHANNEL_LABEL
-                    when (channel.label()) {
-                        POINTER_MOVE_CHANNEL_LABEL -> if (pointerMoveChannel === channel) pointerMoveChannel = null
-                        META_CONTROL_CHANNEL_LABEL -> if (metaControlChannel === channel) metaControlChannel = null
-                        else -> if (dataChannel === channel) dataChannel = null
+                override fun onStateChange() {
+                    if (!isCurrentGeneration(generation)) {
+                        return
                     }
-                    if (wasPrimaryControlChannel) {
-                        isPrimaryControlChannelOpen = false
-                        hasEmittedConnected = false
-                        reportControlChannelIssue("控制通道断开")
+                    val state = channel.state()
+                    appLogger?.i(LOG_TAG, "Data channel state changed, generation=$generation, label=${channel.label()}, state=$state")
+                    if (state == DataChannel.State.CLOSED) {
+                        val wasPrimaryControlChannel = channel.label() == CONTROL_CHANNEL_LABEL
+                        when (channel.label()) {
+                            POINTER_MOVE_CHANNEL_LABEL -> if (pointerMoveChannel === channel) pointerMoveChannel = null
+                            META_CONTROL_CHANNEL_LABEL -> if (metaControlChannel === channel) metaControlChannel = null
+                            else -> if (dataChannel === channel) dataChannel = null
+                        }
+                        if (wasPrimaryControlChannel) {
+                            isPrimaryControlChannelOpen = false
+                            hasEmittedConnected = false
+                            reportControlChannelIssue("控制通道断开")
+                        }
+                    }
+                    if (state == DataChannel.State.OPEN && channel.label() == CONTROL_CHANNEL_LABEL) {
+                        isPrimaryControlChannelOpen = true
+                        emitConnectedIfReady(generation)
                     }
                 }
-                if (state == DataChannel.State.OPEN && channel.label() == CONTROL_CHANNEL_LABEL) {
-                    isPrimaryControlChannelOpen = true
-                    emitConnectedIfReady(generation)
-                }
-            }
 
-            override fun onMessage(buffer: DataChannel.Buffer) = Unit
-        })
+                override fun onMessage(buffer: DataChannel.Buffer) = Unit
+            },
+        )
     }
 
-    private fun isCurrentGeneration(generation: Int): Boolean {
-        return generation == connectionGeneration
-    }
+    private fun isCurrentGeneration(generation: Int): Boolean = generation == connectionGeneration
 
-    private fun isCurrentConnection(connection: PeerConnection, generation: Int): Boolean {
-        return isCurrentGeneration(generation) && peerConnection === connection
-    }
+    private fun isCurrentConnection(
+        connection: PeerConnection,
+        generation: Int,
+    ): Boolean = isCurrentGeneration(generation) && peerConnection === connection
 
     private fun resetConnectionReadyState() {
         isIceConnected = false
@@ -678,8 +764,8 @@ class WebRtcManager(
         _events.tryEmit(Event.Error(connectionGeneration, message))
     }
 
-    private fun mapAndroidCommandToKeycode(action: String): Int? {
-        return when (action.lowercase()) {
+    private fun mapAndroidCommandToKeycode(action: String): Int? =
+        when (action.lowercase()) {
             "back" -> ANDROID_KEYCODE_BACK
             "home" -> ANDROID_KEYCODE_HOME
             "menu" -> ANDROID_KEYCODE_MENU
@@ -690,13 +776,12 @@ class WebRtcManager(
             "mute" -> ANDROID_KEYCODE_MUTE
             else -> null
         }
-    }
 
     private fun buildInjectKeycodeMessage(
         action: Byte,
         keycode: Int,
         repeat: Int = 0,
-        metaState: Int = 0
+        metaState: Int = 0,
     ): ByteArray {
         // Scrcpy format: type(1) + action(1) + keycode(4) + repeat(4) + metastate(4) = 14 bytes
         val buffer = ByteBuffer.allocate(14).order(ByteOrder.BIG_ENDIAN)
@@ -712,11 +797,14 @@ class WebRtcManager(
         // type(1) + mode(1) = 2 bytes
         return byteArrayOf(
             SCRCPY_MSG_SET_SCREEN_POWER_MODE,
-            if (isOn) 1 else 0
+            if (isOn) 1 else 0,
         )
     }
 
-    private fun buildResizeDisplayMessage(width: Int, height: Int): ByteArray {
+    private fun buildResizeDisplayMessage(
+        width: Int,
+        height: Int,
+    ): ByteArray {
         // type(1) + width(2) + height(2) = 5 bytes
         val buffer = ByteBuffer.allocate(5).order(ByteOrder.BIG_ENDIAN)
         buffer.put(SCRCPY_MSG_RESIZE_DISPLAY)
@@ -725,24 +813,31 @@ class WebRtcManager(
         return buffer.array()
     }
 
-    private fun buildTouchMessage(payload: PointerControlMessage, action: Byte): ByteArray {
+    private fun buildTouchMessage(
+        payload: PointerControlMessage,
+        action: Byte,
+    ): ByteArray {
         val frameWidth = payload.frameWidth.coerceAtLeast(1)
         val frameHeight = payload.frameHeight.coerceAtLeast(1)
-        
+
         // Use coordinates matched to the reported frame size
-        val x = (payload.xRatio.coerceIn(0f, 1f) * frameWidth).toInt()
-        val y = (payload.yRatio.coerceIn(0f, 1f) * frameHeight).toInt()
+        val x =
+            (payload.xRatio.coerceIn(0f, 1f) * frameWidth).toInt()
+        val y =
+            (payload.yRatio.coerceIn(0f, 1f) * frameHeight).toInt()
         val pressure = (payload.pressure.coerceIn(0f, 1f) * 0xFFFF).toInt()
-        
-        val actionButton = when (action) {
-            SCRCPY_ACTION_DOWN, SCRCPY_ACTION_UP -> 1
-            else -> 0
-        }
-        val buttons = when (action) {
-            SCRCPY_ACTION_UP -> 0
-            else -> 1
-        }
-        
+
+        val actionButton =
+            when (action) {
+                SCRCPY_ACTION_DOWN, SCRCPY_ACTION_UP -> 1
+                else -> 0
+            }
+        val buttons =
+            when (action) {
+                SCRCPY_ACTION_UP -> 0
+                else -> 1
+            }
+
         // type(1) + action(1) + pointerId(8) + x(4) + y(4) + width(2) + height(2) + pressure(2) + actionButton(4) + buttons(4) = 32 bytes
         val buffer = ByteBuffer.allocate(32).order(ByteOrder.BIG_ENDIAN)
         buffer.put(SCRCPY_MSG_INJECT_TOUCH_EVENT)
@@ -758,15 +853,23 @@ class WebRtcManager(
         return buffer.array()
     }
 
-    private fun noopSdpObserver(connection: PeerConnection, generation: Int) = object : SdpObserver {
-        override fun onCreateSuccess(description: SessionDescription) = Unit
-        override fun onSetSuccess() = Unit
-        override fun onCreateFailure(error: String) = Unit
-        override fun onSetFailure(error: String) {
-            if (!isCurrentConnection(connection, generation)) {
-                return
+    private fun noopSdpObserver(
+        connection: PeerConnection,
+        generation: Int,
+    ): SdpObserver {
+        return object : SdpObserver {
+            override fun onCreateSuccess(description: SessionDescription) = Unit
+
+            override fun onSetSuccess() = Unit
+
+            override fun onCreateFailure(error: String) = Unit
+
+            override fun onSetFailure(error: String) {
+                if (!isCurrentConnection(connection, generation)) {
+                    return
+                }
+                _events.tryEmit(Event.Error(generation, error))
             }
-            _events.tryEmit(Event.Error(generation, error))
         }
     }
 }

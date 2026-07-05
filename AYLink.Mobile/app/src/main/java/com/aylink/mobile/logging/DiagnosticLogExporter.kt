@@ -14,20 +14,22 @@ import java.util.zip.ZipOutputStream
 
 class DiagnosticLogExporter(
     private val context: Context,
-    private val logger: AppLogger
+    private val logger: AppLogger,
 ) {
     private val exportDir = File(context.cacheDir, "diagnostics")
-    private val fileNameFormat = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).apply {
-        timeZone = TimeZone.getDefault()
-    }
+    private val fileNameFormat =
+        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).apply {
+            timeZone = TimeZone.getDefault()
+        }
 
     fun createExportIntent(): Intent {
         val exportFile = createExportFile()
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${BuildConfig.APPLICATION_ID}.fileprovider",
-            exportFile
-        )
+        val uri =
+            FileProvider.getUriForFile(
+                context,
+                "${BuildConfig.APPLICATION_ID}.fileprovider",
+                exportFile,
+            )
         return Intent(Intent.ACTION_SEND).apply {
             type = "application/zip"
             putExtra(Intent.EXTRA_STREAM, uri)

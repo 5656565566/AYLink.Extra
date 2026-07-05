@@ -1,13 +1,11 @@
 package com.aylink.mobile.ui.remote
 
 import android.content.Context
-import android.util.Log
 import android.util.DisplayMetrics
+import android.util.Log
 import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import com.aylink.mobile.data.model.Device
 import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.PointerControlMessage
@@ -18,9 +16,11 @@ import com.aylink.mobile.data.repo.SessionStore
 import com.aylink.mobile.logging.AppLogger
 import com.aylink.mobile.webrtc.SignalClient
 import com.aylink.mobile.webrtc.WebRtcManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -31,8 +31,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
@@ -52,7 +52,7 @@ data class RemoteUiState(
     val isDebugModeEnabled: Boolean = false,
     val isDebugOverlayVisible: Boolean = false,
     val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null,
-    val unifiedRecoveryDecision: UnifiedVideoRecoveryDecision? = null
+    val unifiedRecoveryDecision: UnifiedVideoRecoveryDecision? = null,
 )
 
 data class RemoteViewportUiState(
@@ -60,7 +60,7 @@ data class RemoteViewportUiState(
     val fillMode: Boolean = false,
     val isFlexDisplayEnabled: Boolean = false,
     val isAppProjectionMode: Boolean = false,
-    val isNewDisplayMode: Boolean = false
+    val isNewDisplayMode: Boolean = false,
 )
 
 data class RemoteControlUiState(
@@ -72,14 +72,14 @@ data class RemoteControlUiState(
     val isDebugModeEnabled: Boolean = false,
     val isDebugOverlayVisible: Boolean = false,
     val debugSnapshot: WebRtcManager.VideoFrameHealthSnapshot? = null,
-    val unifiedRecoveryDecision: UnifiedVideoRecoveryDecision? = null
+    val unifiedRecoveryDecision: UnifiedVideoRecoveryDecision? = null,
 )
 
 data class RemoteAppPickerUiState(
     val availableApps: List<DeviceApp> = emptyList(),
     val isLoadingApps: Boolean = false,
     val appError: String? = null,
-    val isAppSelectDialogOpen: Boolean = false
+    val isAppSelectDialogOpen: Boolean = false,
 )
 
 sealed interface RemoteEffect {
@@ -88,25 +88,55 @@ sealed interface RemoteEffect {
 
 sealed interface RemoteIntent {
     data object LoadApps : RemoteIntent
-    data class ReconnectToApp(val app: DeviceApp) : RemoteIntent
+
+    data class ReconnectToApp(
+        val app: DeviceApp,
+    ) : RemoteIntent
+
     data object ReconnectToDevice : RemoteIntent
-    data class SendPointer(val payload: PointerControlMessage) : RemoteIntent
-    data class SendKey(val action: String) : RemoteIntent
-    data class SendDisplayResize(val width: Int, val height: Int) : RemoteIntent
-    data class SetControlDialogOpen(val isOpen: Boolean) : RemoteIntent
-    data class SetAppSelectDialogOpen(val isOpen: Boolean) : RemoteIntent
-    data class SetFillMode(val fillMode: Boolean) : RemoteIntent
-    data class SetControlPanelCollapsed(val isCollapsed: Boolean) : RemoteIntent
+
+    data class SendPointer(
+        val payload: PointerControlMessage,
+    ) : RemoteIntent
+
+    data class SendKey(
+        val action: String,
+    ) : RemoteIntent
+
+    data class SendDisplayResize(
+        val width: Int,
+        val height: Int,
+    ) : RemoteIntent
+
+    data class SetControlDialogOpen(
+        val isOpen: Boolean,
+    ) : RemoteIntent
+
+    data class SetAppSelectDialogOpen(
+        val isOpen: Boolean,
+    ) : RemoteIntent
+
+    data class SetFillMode(
+        val fillMode: Boolean,
+    ) : RemoteIntent
+
+    data class SetControlPanelCollapsed(
+        val isCollapsed: Boolean,
+    ) : RemoteIntent
+
     data object ToggleControlPanelCollapsed : RemoteIntent
+
     data object ToggleDebugOverlay : RemoteIntent
+
     data object DisconnectAndNavigateBack : RemoteIntent
+
     data object DismissAppError : RemoteIntent
 }
 
 private enum class VideoRecoveryStage {
     Monitoring,
     KeyFrameRequested,
-    IceRestartRequested
+    IceRestartRequested,
 }
 
 class RemoteViewModel(
@@ -120,7 +150,7 @@ class RemoteViewModel(
     localSettingsStore: LocalSettingsStore,
     okHttpClient: OkHttpClient,
     json: Json,
-    private val appLogger: AppLogger? = null
+    private val appLogger: AppLogger? = null,
 ) : ViewModel() {
     companion object {
         private const val POINTER_SAMPLE_INTERVAL_120HZ_MS = 8L
@@ -145,19 +175,33 @@ class RemoteViewModel(
         private const val MAX_NEW_DISPLAY_LONG_EDGE = 1920
     }
 
-    private val _uiState = MutableStateFlow(RemoteUiState())
-    val viewportUiState: StateFlow<RemoteViewportUiState> = _uiState
-        .map { RemoteViewportUiState(it.videoSize, it.fillMode, it.isFlexDisplayEnabled, it.isAppProjectionMode, it.isNewDisplayMode) }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteViewportUiState())
-    val controlUiState: StateFlow<RemoteControlUiState> = _uiState
-        .map { RemoteControlUiState(it.status, it.isControlDialogOpen, it.isControlPanelCollapsed, it.fillMode, it.isFlexDisplayEnabled, it.isDebugModeEnabled, it.isDebugOverlayVisible, it.debugSnapshot, it.unifiedRecoveryDecision) }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteControlUiState())
-    val appPickerUiState: StateFlow<RemoteAppPickerUiState> = _uiState
-        .map { RemoteAppPickerUiState(it.availableApps, it.isLoadingApps, it.appError, it.isAppSelectDialogOpen) }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteAppPickerUiState())
+    private val mutableUiState = MutableStateFlow(RemoteUiState())
+    val viewportUiState: StateFlow<RemoteViewportUiState> =
+        mutableUiState
+            .map { RemoteViewportUiState(it.videoSize, it.fillMode, it.isFlexDisplayEnabled, it.isAppProjectionMode, it.isNewDisplayMode) }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteViewportUiState())
+    val controlUiState: StateFlow<RemoteControlUiState> =
+        mutableUiState
+            .map {
+                RemoteControlUiState(
+                    it.status,
+                    it.isControlDialogOpen,
+                    it.isControlPanelCollapsed,
+                    it.fillMode,
+                    it.isFlexDisplayEnabled,
+                    it.isDebugModeEnabled,
+                    it.isDebugOverlayVisible,
+                    it.debugSnapshot,
+                    it.unifiedRecoveryDecision,
+                )
+            }.distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteControlUiState())
+    val appPickerUiState: StateFlow<RemoteAppPickerUiState> =
+        mutableUiState
+            .map { RemoteAppPickerUiState(it.availableApps, it.isLoadingApps, it.appError, it.isAppSelectDialogOpen) }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RemoteAppPickerUiState())
     private val _effect = MutableSharedFlow<RemoteEffect>()
     val effect = _effect.asSharedFlow()
 
@@ -183,14 +227,18 @@ class RemoteViewModel(
     private var currentViewportSize = IntSize.Zero
     private var lastObservedVideoSize = IntSize.Zero
     private var preferredDisplayAspectSize = IntSize.Zero
-    private val localDisplayWidth = appContext.resources.displayMetrics.widthPixels
-        .takeIf { it > 0 }
-    private val localDisplayHeight = appContext.resources.displayMetrics.heightPixels
-        .takeIf { it > 0 }
-    private val localDisplayDensity = appContext.resources.displayMetrics.density
-        .takeIf { it > 0f }
-    private val localDisplayDpi = appContext.resources.displayMetrics.densityDpi
-        .takeIf { it != DisplayMetrics.DENSITY_DEFAULT && it > 0 }
+    private val localDisplayWidth =
+        appContext.resources.displayMetrics.widthPixels
+            .takeIf { it > 0 }
+    private val localDisplayHeight =
+        appContext.resources.displayMetrics.heightPixels
+            .takeIf { it > 0 }
+    private val localDisplayDensity =
+        appContext.resources.displayMetrics.density
+            .takeIf { it > 0f }
+    private val localDisplayDpi =
+        appContext.resources.displayMetrics.densityDpi
+            .takeIf { it != DisplayMetrics.DENSITY_DEFAULT && it > 0 }
     private var lastReportedDisplaySize: IntSize? = null
     private var lastRequestedDisplaySize: IntSize? = null
     private var reconnectAttempt = 0
@@ -212,17 +260,25 @@ class RemoteViewModel(
             launch {
                 signalClient.events.collect { event ->
                     when (event) {
-                        is SignalClient.Event.Answer -> webRtcManager.setRemoteAnswer(event.payload.type, event.payload.sdp, activeWebRtcGeneration)
+                        is SignalClient.Event.Answer ->
+                            webRtcManager.setRemoteAnswer(
+                                event.payload.type,
+                                event.payload.sdp,
+                                activeWebRtcGeneration,
+                            )
                         is SignalClient.Event.Candidate -> webRtcManager.addRemoteCandidate(event.payload, activeWebRtcGeneration)
                         is SignalClient.Event.Error -> {
                             if (event.retryable && webRtcManager.isPeerConnected()) {
-                                Log.w(LOG_TAG, "Signaling failed while WebRTC remains connected; keeping media session alive: ${event.message}")
-                                _uiState.update { current ->
+                                Log.w(
+                                    LOG_TAG,
+                                    "Signaling failed while WebRTC remains connected; keeping media session alive: ${event.message}",
+                                )
+                                mutableUiState.update { current ->
                                     current.copy(status = if (current.videoSize != IntSize.Zero) "已连接" else current.status)
                                 }
                                 startVideoRecoveryWatchdog("signal_failed_after_connect")
                             } else {
-                                _uiState.update { it.copy(status = event.message) }
+                                mutableUiState.update { it.copy(status = event.message) }
                                 stopHeartbeat()
                                 if (event.retryable) {
                                     scheduleReconnect()
@@ -232,7 +288,7 @@ class RemoteViewModel(
                             }
                         }
                         SignalClient.Event.Open -> {
-                            _uiState.update { it.copy(status = "创建会话...") }
+                            mutableUiState.update { it.copy(status = "创建会话...") }
                             startHeartbeat()
                             activeWebRtcGeneration = webRtcManager.createPeerConnection()
                             markVideoStreamConnecting(videoStreamStateMachine, activeWebRtcGeneration, System.currentTimeMillis())
@@ -240,17 +296,17 @@ class RemoteViewModel(
                         }
                         SignalClient.Event.Closed -> {
                             if (webRtcManager.isPeerConnected()) {
-                                _uiState.update { current ->
+                                mutableUiState.update { current ->
                                     current.copy(status = if (current.videoSize != IntSize.Zero) "已连接" else current.status)
                                 }
                                 startVideoRecoveryWatchdog("signal_closed_after_connect")
                             } else if (autoReconnectEnabled) {
                                 stopHeartbeat()
-                                _uiState.update { it.copy(status = "信令断开", videoSize = IntSize.Zero) }
+                                mutableUiState.update { it.copy(status = "信令断开", videoSize = IntSize.Zero) }
                                 scheduleReconnect()
                             } else {
                                 stopHeartbeat()
-                                _uiState.update { it.copy(videoSize = IntSize.Zero) }
+                                mutableUiState.update { it.copy(videoSize = IntSize.Zero) }
                             }
                         }
                     }
@@ -267,7 +323,7 @@ class RemoteViewModel(
                             reconnectAttempt = 0
                             stopReconnect()
                             stopPeerDisconnectedRecovery()
-                            _uiState.update { it.copy(status = "已连接") }
+                            mutableUiState.update { it.copy(status = "已连接") }
                             startVideoRecoveryWatchdog("peer_connected")
                         }
                         is WebRtcManager.Event.IceDisconnected -> {
@@ -276,10 +332,10 @@ class RemoteViewModel(
                         is WebRtcManager.Event.Disconnected -> {
                             stopPeerDisconnectedRecovery()
                             resetVideoStreamStateMachine(videoStreamStateMachine)
-                            _uiState.update { current ->
+                            mutableUiState.update { current ->
                                 current.copy(
                                     status = if (autoReconnectEnabled) "连接断开" else current.status,
-                                    videoSize = IntSize.Zero
+                                    videoSize = IntSize.Zero,
                                 )
                             }
                             stopVideoRecoveryWatchdog()
@@ -290,7 +346,7 @@ class RemoteViewModel(
                         is WebRtcManager.Event.Error -> {
                             stopPeerDisconnectedRecovery()
                             resetVideoStreamStateMachine(videoStreamStateMachine)
-                            _uiState.update { it.copy(status = event.message) }
+                            mutableUiState.update { it.copy(status = event.message) }
                             stopVideoRecoveryWatchdog()
                             if (autoReconnectEnabled) {
                                 scheduleReconnect()
@@ -300,7 +356,7 @@ class RemoteViewModel(
                             val videoSize = IntSize(event.width, event.height)
                             lastObservedVideoSize = videoSize
                             preferredDisplayAspectSize = videoSize
-                            _uiState.update { it.copy(videoSize = videoSize) }
+                            mutableUiState.update { it.copy(videoSize = videoSize) }
                             requestAdaptiveDisplayResize()
                             startVideoRecoveryWatchdog("first-frame")
                         }
@@ -310,11 +366,11 @@ class RemoteViewModel(
 
             launch {
                 localSettings.collect { settings ->
-                    _uiState.update {
+                    mutableUiState.update {
                         it.copy(
                             isDebugModeEnabled = settings.debugMode,
                             isDebugOverlayVisible = if (settings.debugMode) it.isDebugOverlayVisible else false,
-                            debugSnapshot = if (settings.debugMode) it.debugSnapshot else null
+                            debugSnapshot = if (settings.debugMode) it.debugSnapshot else null,
                         )
                     }
                     if (!settings.debugMode) {
@@ -325,7 +381,10 @@ class RemoteViewModel(
         }
 
         sessionStore.updateLastRemoteDevice(device)
-        appLogger?.i(LOG_TAG, "RemoteViewModel created, deviceId=${device.id}, appPackage=$initialAppPackage, newDisplay=$initialNewDisplay")
+        appLogger?.i(
+            LOG_TAG,
+            "RemoteViewModel created, deviceId=${device.id}, appPackage=$initialAppPackage, newDisplay=$initialNewDisplay",
+        )
         connect(appPackage = initialAppPackage, appName = initialAppName, newDisplay = initialNewDisplay)
     }
 
@@ -337,49 +396,57 @@ class RemoteViewModel(
             is RemoteIntent.SendPointer -> handlePointer(intent.payload)
             is RemoteIntent.SendKey -> webRtcManager.sendKeyMessage(intent.action)
             is RemoteIntent.SendDisplayResize -> webRtcManager.sendDisplayResize(intent.width, intent.height)
-            is RemoteIntent.SetControlDialogOpen -> _uiState.update { it.copy(isControlDialogOpen = intent.isOpen) }
-            is RemoteIntent.SetAppSelectDialogOpen -> _uiState.update { it.copy(isAppSelectDialogOpen = intent.isOpen) }
-            is RemoteIntent.SetFillMode -> _uiState.update { it.copy(fillMode = intent.fillMode) }
-            is RemoteIntent.SetControlPanelCollapsed -> _uiState.update { it.copy(isControlPanelCollapsed = intent.isCollapsed) }
-            RemoteIntent.ToggleControlPanelCollapsed -> _uiState.update { it.copy(isControlPanelCollapsed = !it.isControlPanelCollapsed) }
+            is RemoteIntent.SetControlDialogOpen -> mutableUiState.update { it.copy(isControlDialogOpen = intent.isOpen) }
+            is RemoteIntent.SetAppSelectDialogOpen -> mutableUiState.update { it.copy(isAppSelectDialogOpen = intent.isOpen) }
+            is RemoteIntent.SetFillMode -> mutableUiState.update { it.copy(fillMode = intent.fillMode) }
+            is RemoteIntent.SetControlPanelCollapsed -> mutableUiState.update { it.copy(isControlPanelCollapsed = intent.isCollapsed) }
+            RemoteIntent.ToggleControlPanelCollapsed -> {
+                mutableUiState.update {
+                    it.copy(isControlPanelCollapsed = !it.isControlPanelCollapsed)
+                }
+            }
             RemoteIntent.ToggleDebugOverlay -> toggleDebugOverlay()
             RemoteIntent.DisconnectAndNavigateBack -> disconnectAndNavigateBack()
-            RemoteIntent.DismissAppError -> _uiState.update { it.copy(appError = null) }
+            RemoteIntent.DismissAppError -> mutableUiState.update { it.copy(appError = null) }
         }
     }
 
     private fun loadApps() {
-        if (_uiState.value.isLoadingApps) return
-        _uiState.update { it.copy(isLoadingApps = true, appError = null) }
+        if (mutableUiState.value.isLoadingApps) return
+        mutableUiState.update { it.copy(isLoadingApps = true, appError = null) }
         viewModelScope.launch {
             runCatching { deviceRepository.loadApps(device.id) }
-                .onSuccess { apps -> _uiState.update { it.copy(availableApps = apps, isLoadingApps = false) } }
-                .onFailure { error -> _uiState.update { it.copy(appError = error.message ?: "加载应用失败", isLoadingApps = false) } }
+                .onSuccess { apps -> mutableUiState.update { it.copy(availableApps = apps, isLoadingApps = false) } }
+                .onFailure { error -> mutableUiState.update { it.copy(appError = error.message ?: "加载应用失败", isLoadingApps = false) } }
         }
     }
 
     private fun reconnectToApp(app: DeviceApp) {
         sessionStore.updateLastRemoteDevice(device)
         connect(app.packageName, app.name, newDisplay = true)
-        _uiState.update { it.copy(isAppSelectDialogOpen = false, isControlDialogOpen = false) }
+        mutableUiState.update { it.copy(isAppSelectDialogOpen = false, isControlDialogOpen = false) }
     }
 
     private fun reconnectToDevice() {
         sessionStore.updateLastRemoteDevice(device)
         connect(appPackage = null, appName = null, newDisplay = false)
-        _uiState.update { it.copy(isControlDialogOpen = false) }
+        mutableUiState.update { it.copy(isControlDialogOpen = false) }
     }
 
-    private fun connect(appPackage: String?, appName: String?, newDisplay: Boolean) {
+    private fun connect(
+        appPackage: String?,
+        appName: String?,
+        newDisplay: Boolean,
+    ) {
         appLogger?.i(LOG_TAG, "Connect requested, deviceId=${device.id}, appPackage=$appPackage, newDisplay=$newDisplay")
         currentAppPackage = appPackage
         currentAppName = appName
         currentNewDisplay = newDisplay
-        _uiState.update {
+        mutableUiState.update {
             it.copy(
                 isAppProjectionMode = appPackage.isNullOrBlank().not(),
                 isNewDisplayMode = newDisplay,
-                fillMode = false
+                fillMode = false,
             )
         }
         lastReportedDisplaySize = null
@@ -401,34 +468,39 @@ class RemoteViewModel(
         connectInternal(appPackage, appName, newDisplay)
     }
 
-    private fun connectInternal(appPackage: String?, appName: String?, newDisplay: Boolean) {
+    private fun connectInternal(
+        appPackage: String?,
+        appName: String?,
+        newDisplay: Boolean,
+    ) {
         connectJob?.cancel()
         val requestId = ++connectionRequestSequence
         activeConnectionRequestId = requestId
-        connectJob = viewModelScope.launch {
-            val currentBaseUrl = baseUrl.first()
-            token.first() ?: return@launch
-            if (!isActiveConnectionRequest(requestId)) return@launch
-            _uiState.update {
-                it.copy(
-                    status = if (appName.isNullOrBlank()) "正在连接..." else "正在投屏 $appName...",
-                    videoSize = IntSize.Zero
-                )
-            }
-            suppressReconnect = true
-            runCatching {
-                setupConnection(requestId, currentBaseUrl, appPackage, appName, newDisplay)
-            }.onFailure { error ->
+        connectJob =
+            viewModelScope.launch {
+                val currentBaseUrl = baseUrl.first()
+                token.first() ?: return@launch
                 if (!isActiveConnectionRequest(requestId)) return@launch
-                appLogger?.w(LOG_TAG, "Setup connection failed, requestId=$requestId, deviceId=${device.id}: ${error.message}", error)
-                _uiState.update { it.copy(status = error.message ?: "连接失败") }
+                mutableUiState.update {
+                    it.copy(
+                        status = if (appName.isNullOrBlank()) "正在连接..." else "正在投屏 $appName...",
+                        videoSize = IntSize.Zero,
+                    )
+                }
+                suppressReconnect = true
+                runCatching {
+                    setupConnection(requestId, currentBaseUrl, appPackage, appName, newDisplay)
+                }.onFailure { error ->
+                    if (!isActiveConnectionRequest(requestId)) return@launch
+                    appLogger?.w(LOG_TAG, "Setup connection failed, requestId=$requestId, deviceId=${device.id}: ${error.message}", error)
+                    mutableUiState.update { it.copy(status = error.message ?: "连接失败") }
+                    suppressReconnect = false
+                    scheduleReconnect()
+                    return@launch
+                }
+                if (!isActiveConnectionRequest(requestId)) return@launch
                 suppressReconnect = false
-                scheduleReconnect()
-                return@launch
             }
-            if (!isActiveConnectionRequest(requestId)) return@launch
-            suppressReconnect = false
-        }
     }
 
     private suspend fun setupConnection(
@@ -436,7 +508,7 @@ class RemoteViewModel(
         currentBaseUrl: String,
         appPackage: String?,
         appName: String?,
-        newDisplay: Boolean
+        newDisplay: Boolean,
     ) {
         stopHeartbeat()
         resetPointerControlState()
@@ -449,40 +521,48 @@ class RemoteViewModel(
             lastRequestedDisplaySize = initialDisplaySize
         }
         val reusableSessionId = currentSessionId?.takeIf { it.isNotBlank() }
-        val ticket = runCatching {
-            createWebRtcTicketForConnection(
-                sessionId = reusableSessionId,
-                appPackage = appPackage,
-                appName = appName,
-                newDisplay = newDisplay,
-                initialDisplaySize = initialDisplaySize
-            )
-        }.recoverCatching { error ->
-            if (reusableSessionId == null) {
-                throw error
-            }
-            appLogger?.w(LOG_TAG, "Reusable WebRTC session rejected, sessionId=$reusableSessionId, deviceId=${device.id}: ${error.message}", error)
-            currentSessionId = null
-            hasReleasedSession = false
-            createWebRtcTicketForConnection(
-                sessionId = null,
-                appPackage = appPackage,
-                appName = appName,
-                newDisplay = newDisplay,
-                initialDisplaySize = initialDisplaySize
-            )
-        }.getOrThrow()
+        val ticket =
+            runCatching {
+                createWebRtcTicketForConnection(
+                    sessionId = reusableSessionId,
+                    appPackage = appPackage,
+                    appName = appName,
+                    newDisplay = newDisplay,
+                    initialDisplaySize = initialDisplaySize,
+                )
+            }.recoverCatching { error ->
+                if (reusableSessionId == null) {
+                    throw error
+                }
+                appLogger?.w(
+                    LOG_TAG,
+                    "Reusable WebRTC session rejected, sessionId=$reusableSessionId, deviceId=${device.id}: ${error.message}",
+                    error,
+                )
+                currentSessionId = null
+                hasReleasedSession = false
+                createWebRtcTicketForConnection(
+                    sessionId = null,
+                    appPackage = appPackage,
+                    appName = appName,
+                    newDisplay = newDisplay,
+                    initialDisplaySize = initialDisplaySize,
+                )
+            }.getOrThrow()
         if (!isActiveConnectionRequest(requestId)) {
             releaseTicketSession(ticket.sessionId)
             return
         }
         currentSessionId = ticket.sessionId.takeIf { it.isNotBlank() }
-        appLogger?.i(LOG_TAG, "WebRTC ticket created, requestId=$requestId, deviceId=${device.id}, sessionId=${currentSessionId.orEmpty()}, newDisplay=$newDisplay")
+        appLogger?.i(
+            LOG_TAG,
+            "WebRTC ticket created, requestId=$requestId, deviceId=${device.id}, sessionId=${currentSessionId.orEmpty()}, newDisplay=$newDisplay",
+        )
         signalClient.connect(
             SignalClient.ConnectArgs(
                 baseUrl = currentBaseUrl,
-                ticket = ticket.ticket
-            )
+                ticket = ticket.ticket,
+            ),
         )
     }
 
@@ -491,7 +571,7 @@ class RemoteViewModel(
         appPackage: String?,
         appName: String?,
         newDisplay: Boolean,
-        initialDisplaySize: IntSize
+        initialDisplaySize: IntSize,
     ) = deviceRepository.createWebRtcTicket(
         deviceId = device.id,
         sessionId = sessionId,
@@ -500,23 +580,24 @@ class RemoteViewModel(
         newDisplay = newDisplay,
         newDisplayWidth = if (newDisplay) initialDisplaySize.width.takeIf { it > 0 } else null,
         newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
-        newDisplayDpi = if (newDisplay) localDisplayDpi else null
+        newDisplayDpi = if (newDisplay) localDisplayDpi else null,
     )
 
     private fun scheduleReconnect() {
         if (manualDisconnect || suppressReconnect || !autoReconnectEnabled || reconnectJob?.isActive == true) return
         stopPeerDisconnectedRecovery()
-        reconnectJob = viewModelScope.launch {
-            val delays = longArrayOf(1000L, 2000L, 5000L, 10000L)
-            val delayMs = delays[reconnectAttempt.coerceAtMost(delays.lastIndex)]
-            reconnectAttempt += 1
-            appLogger?.i(LOG_TAG, "Reconnect scheduled, deviceId=${device.id}, attempt=$reconnectAttempt, delayMs=$delayMs")
-            _uiState.update { it.copy(status = "连接中断，正在重连...") }
-            delay(delayMs)
-            if (!manualDisconnect && isActive) {
-                connectInternal(currentAppPackage, currentAppName, currentNewDisplay)
+        reconnectJob =
+            viewModelScope.launch {
+                val delays = longArrayOf(1000L, 2000L, 5000L, 10000L)
+                val delayMs = delays[reconnectAttempt.coerceAtMost(delays.lastIndex)]
+                reconnectAttempt += 1
+                appLogger?.i(LOG_TAG, "Reconnect scheduled, deviceId=${device.id}, attempt=$reconnectAttempt, delayMs=$delayMs")
+                mutableUiState.update { it.copy(status = "连接中断，正在重连...") }
+                delay(delayMs)
+                if (!manualDisconnect && isActive) {
+                    connectInternal(currentAppPackage, currentAppName, currentNewDisplay)
+                }
             }
-        }
     }
 
     private fun stopReconnect() {
@@ -529,27 +610,28 @@ class RemoteViewModel(
             return
         }
         markVideoStreamUnstable(videoStreamStateMachine, generation, System.currentTimeMillis())
-        _uiState.update { current ->
+        mutableUiState.update { current ->
             current.copy(status = if (current.videoSize != IntSize.Zero) "网络波动，等待媒体恢复..." else "网络波动，正在恢复连接...")
         }
         if (peerDisconnectedRecoveryJob?.isActive == true) {
             return
         }
-        peerDisconnectedRecoveryJob = viewModelScope.launch {
-            delay(PEER_DISCONNECTED_GRACE_MS)
-            peerDisconnectedRecoveryJob = null
-            if (manualDisconnect || suppressReconnect || !autoReconnectEnabled || generation != activeWebRtcGeneration) {
-                return@launch
+        peerDisconnectedRecoveryJob =
+            viewModelScope.launch {
+                delay(PEER_DISCONNECTED_GRACE_MS)
+                peerDisconnectedRecoveryJob = null
+                if (manualDisconnect || suppressReconnect || !autoReconnectEnabled || generation != activeWebRtcGeneration) {
+                    return@launch
+                }
+                if (webRtcManager.isPeerConnected()) {
+                    mutableUiState.update { it.copy(status = "已连接") }
+                    return@launch
+                }
+                appLogger?.w(LOG_TAG, "ICE disconnected grace expired, deviceId=${device.id}, generation=$generation")
+                if (tryIceRecovery("ice_disconnected_grace_expired").not()) {
+                    scheduleReconnectNow()
+                }
             }
-            if (webRtcManager.isPeerConnected()) {
-                _uiState.update { it.copy(status = "已连接") }
-                return@launch
-            }
-            appLogger?.w(LOG_TAG, "ICE disconnected grace expired, deviceId=${device.id}, generation=$generation")
-            if (tryIceRecovery("ice_disconnected_grace_expired").not()) {
-                scheduleReconnectNow()
-            }
-        }
     }
 
     private fun stopPeerDisconnectedRecovery() {
@@ -599,28 +681,32 @@ class RemoteViewModel(
 
     private fun ensurePointerSamplingLoop() {
         if (pointerSamplingJob?.isActive == true) return
-        pointerSamplingJob = viewModelScope.launch {
-            while (isActive) {
-                if (sampledPointerMoves.isEmpty()) break
-                if (webRtcManager.getPointerMoveBufferedAmount() > getCurrentPointerMoveBufferLimit()) {
+        pointerSamplingJob =
+            viewModelScope.launch {
+                while (isActive) {
+                    if (sampledPointerMoves.isEmpty()) break
+                    if (webRtcManager.getPointerMoveBufferedAmount() > getCurrentPointerMoveBufferLimit()) {
+                        delay(getCurrentPointerSampleIntervalMs())
+                        continue
+                    }
+                    val moves = sampledPointerMoves.values.toList()
+                    sampledPointerMoves.clear()
+                    moves.forEach { move -> webRtcManager.sendPointerMessage(move, reportFailure = false) }
                     delay(getCurrentPointerSampleIntervalMs())
-                    continue
                 }
-                val moves = sampledPointerMoves.values.toList()
-                sampledPointerMoves.clear()
-                moves.forEach { move -> webRtcManager.sendPointerMessage(move, reportFailure = false) }
-                delay(getCurrentPointerSampleIntervalMs())
+                pointerSamplingJob = null
             }
-            pointerSamplingJob = null
-        }
     }
 
-    private fun flushSampledPointerMove(pointerId: Int, preferPointerMoveChannel: Boolean = true) {
+    private fun flushSampledPointerMove(
+        pointerId: Int,
+        preferPointerMoveChannel: Boolean = true,
+    ) {
         val sampled = sampledPointerMoves.remove(pointerId) ?: return
         webRtcManager.sendPointerMessage(
             payload = sampled,
             preferPointerMoveChannel = preferPointerMoveChannel,
-            reportFailure = false
+            reportFailure = false,
         )
     }
 
@@ -632,11 +718,12 @@ class RemoteViewModel(
 
         val releases = pendingPointerReleases.values.toList()
         for (release in releases) {
-            val sent = webRtcManager.sendPointerMessage(
-                payload = release,
-                preferPointerMoveChannel = false,
-                reportFailure = reportFailure
-            )
+            val sent =
+                webRtcManager.sendPointerMessage(
+                    payload = release,
+                    preferPointerMoveChannel = false,
+                    reportFailure = reportFailure,
+                )
             if (sent) {
                 pendingPointerReleases.remove(release.pointerId)
             }
@@ -651,13 +738,14 @@ class RemoteViewModel(
 
     private fun ensurePointerReleaseRetryLoop() {
         if (pointerReleaseRetryJob?.isActive == true || pendingPointerReleases.isEmpty()) return
-        pointerReleaseRetryJob = viewModelScope.launch {
-            while (isActive && pendingPointerReleases.isNotEmpty()) {
-                delay(250L)
-                flushPendingPointerReleases(reportFailure = false)
+        pointerReleaseRetryJob =
+            viewModelScope.launch {
+                while (isActive && pendingPointerReleases.isNotEmpty()) {
+                    delay(250L)
+                    flushPendingPointerReleases(reportFailure = false)
+                }
+                pointerReleaseRetryJob = null
             }
-            pointerReleaseRetryJob = null
-        }
     }
 
     private fun stopPointerReleaseRetry() {
@@ -675,36 +763,35 @@ class RemoteViewModel(
 
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
-        heartbeatJob = viewModelScope.launch {
-            while (isActive) {
-                val sessionId = currentSessionId
-                if (!sessionId.isNullOrBlank()) {
-                    runCatching { deviceRepository.heartbeatScrcpySession(device.id, sessionId) }
-                        .onFailure { error ->
-                            Log.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
-                            appLogger?.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
-                        }
+        heartbeatJob =
+            viewModelScope.launch {
+                while (isActive) {
+                    val sessionId = currentSessionId
+                    if (!sessionId.isNullOrBlank()) {
+                        runCatching { deviceRepository.heartbeatScrcpySession(device.id, sessionId) }
+                            .onFailure { error ->
+                                Log.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
+                                appLogger?.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
+                            }
+                    }
+                    delay(15_000)
                 }
-                delay(15_000)
             }
-        }
     }
 
-    private fun getConfiguredPointerSampleIntervalMs(): Long {
-        return when (localSettings.value.pointerSamplingRateHz) {
+    private fun getConfiguredPointerSampleIntervalMs(): Long =
+        when (localSettings.value.pointerSamplingRateHz) {
             PointerSamplingRateHz.HZ_30 -> POINTER_SAMPLE_INTERVAL_30HZ_MS
             PointerSamplingRateHz.HZ_60 -> POINTER_SAMPLE_INTERVAL_60HZ_MS
             PointerSamplingRateHz.HZ_120 -> POINTER_SAMPLE_INTERVAL_120HZ_MS
         }
-    }
 
-    private fun getCurrentPointerMoveBufferLimit(): Long {
-        return if (localSettings.value.weakNetworkMode && !localSettings.value.adaptivePointerSampling) {
+    private fun getCurrentPointerMoveBufferLimit(): Long =
+        if (localSettings.value.weakNetworkMode && !localSettings.value.adaptivePointerSampling) {
             WEAK_NETWORK_POINTER_MOVE_BUFFER_LIMIT_BYTES
         } else {
             POINTER_MOVE_BUFFER_LIMIT_BYTES
         }
-    }
 
     private fun getAdaptivePointerSampleIntervalMs(): Long {
         val bufferedAmount = webRtcManager.getPointerMoveBufferedAmount()
@@ -744,12 +831,13 @@ class RemoteViewModel(
         }
         resetVideoRecoveryState()
         videoRecoveryJob?.cancel()
-        videoRecoveryJob = viewModelScope.launch {
-            while (isActive && !manualDisconnect) {
-                delay(VIDEO_RECOVERY_POLL_INTERVAL_MS)
-                observeVideoHealth("watchdog_$reason")
+        videoRecoveryJob =
+            viewModelScope.launch {
+                while (isActive && !manualDisconnect) {
+                    delay(VIDEO_RECOVERY_POLL_INTERVAL_MS)
+                    observeVideoHealth("watchdog_$reason")
+                }
             }
-        }
     }
 
     private fun stopVideoRecoveryWatchdog() {
@@ -764,7 +852,7 @@ class RemoteViewModel(
             return false
         }
         return runCatching {
-            _uiState.update { it.copy(status = "网络波动，正在尝试恢复连接...") }
+            mutableUiState.update { it.copy(status = "网络波动，正在尝试恢复连接...") }
             videoRecoveryStage = VideoRecoveryStage.IceRestartRequested
             stalledVideoObservationCount = 0
             webRtcManager.restartIce(activeWebRtcGeneration)
@@ -802,7 +890,7 @@ class RemoteViewModel(
         lastVideoHealthSnapshot = snapshot
         val now = System.currentTimeMillis()
 
-        val hasVideo = _uiState.value.videoSize != IntSize.Zero && snapshot.hasVideoFrame
+        val hasVideo = mutableUiState.value.videoSize != IntSize.Zero && snapshot.hasVideoFrame
         if (!snapshot.isPeerConnected || !hasVideo) {
             resetVideoRecoveryState(snapshot)
             return
@@ -814,7 +902,7 @@ class RemoteViewModel(
             markVideoStreamStableIfReady(snapshot.generation)
             resetVideoRecoveryState(snapshot)
             if (snapshot.isPeerConnected && hasVideo) {
-                _uiState.update { it.copy(status = "已连接") }
+                mutableUiState.update { it.copy(status = "已连接") }
             }
             return
         }
@@ -823,7 +911,7 @@ class RemoteViewModel(
         if (snapshot.lastFrameAtMillis <= 0L || frameStalledForMillis < VIDEO_FRAME_STALL_THRESHOLD_MS) {
             markVideoStreamStableIfReady(snapshot.generation)
             stalledVideoObservationCount = 0
-            _uiState.update { it.copy(status = "已连接") }
+            mutableUiState.update { it.copy(status = "已连接") }
             return
         }
 
@@ -834,7 +922,7 @@ class RemoteViewModel(
     private fun recoverVideoIfConfirmed(
         reason: String,
         snapshot: WebRtcManager.VideoFrameHealthSnapshot,
-        confirmationCount: Int = VIDEO_STALL_CONFIRMATION_COUNT
+        confirmationCount: Int = VIDEO_STALL_CONFIRMATION_COUNT,
     ) {
         if (stalledVideoObservationCount < confirmationCount) {
             return
@@ -844,23 +932,26 @@ class RemoteViewModel(
             VideoRecoveryStage.Monitoring -> {
                 markVideoStreamUnstable(videoStreamStateMachine, activeWebRtcGeneration, System.currentTimeMillis())
                 appLogger?.w(LOG_TAG, "Video stall confirmed, reason=$reason, deviceId=${device.id}, generation=$activeWebRtcGeneration")
-                _uiState.update { it.copy(status = "画面恢复中...") }
+                mutableUiState.update { it.copy(status = "画面恢复中...") }
                 viewModelScope.launch {
-                    val agentHealth = runCatching {
-                        currentSessionId?.takeIf { it.isNotBlank() }?.let { sessionId ->
-                            deviceRepository.getVideoStreamHealth(device.id, sessionId)
-                        }
-                    }.getOrNull()
-                    val decision = decideVideoRecovery(
-                        client = ClientVideoHealthSnapshot(
-                            state = "client_playback_stalled_confirmed",
-                            reason = reason,
-                            signalingAttached = signalClient.isOpen,
-                            peerConnected = snapshot.isPeerConnected
-                        ),
-                        agent = agentHealth
-                    )
-                    _uiState.update { it.copy(unifiedRecoveryDecision = decision) }
+                    val agentHealth =
+                        runCatching {
+                            currentSessionId?.takeIf { it.isNotBlank() }?.let { sessionId ->
+                                deviceRepository.getVideoStreamHealth(device.id, sessionId)
+                            }
+                        }.getOrNull()
+                    val decision =
+                        decideVideoRecovery(
+                            client =
+                                ClientVideoHealthSnapshot(
+                                    state = "client_playback_stalled_confirmed",
+                                    reason = reason,
+                                    signalingAttached = signalClient.isOpen,
+                                    peerConnected = snapshot.isPeerConnected,
+                                ),
+                            agent = agentHealth,
+                        )
+                    mutableUiState.update { it.copy(unifiedRecoveryDecision = decision) }
                     applyUnifiedVideoRecoveryDecision(decision)
                 }
             }
@@ -886,12 +977,16 @@ class RemoteViewModel(
     }
 
     private fun applyUnifiedVideoRecoveryDecision(decision: UnifiedVideoRecoveryDecision) {
-        appLogger?.w(LOG_TAG, "Unified video recovery decision, action=${decision.action}, origin=${decision.origin}, reason=${decision.reason}, deviceId=${device.id}")
+        appLogger?.w(
+            LOG_TAG,
+            "Unified video recovery decision, action=${decision.action}, origin=${decision.origin}, reason=${decision.reason}, deviceId=${device.id}",
+        )
         when (decision.action) {
             UnifiedVideoRecoveryAction.SourceRefresh,
             UnifiedVideoRecoveryAction.KeyFrameReplay,
             UnifiedVideoRecoveryAction.Renegotiate,
-            UnifiedVideoRecoveryAction.SignalingReattach -> {
+            UnifiedVideoRecoveryAction.SignalingReattach,
+            -> {
                 if (!tryVideoKeyFrameRecovery(decision.reason)) {
                     if (tryIceRecovery("key_frame_unavailable_${decision.reason}").not()) {
                         scheduleReconnectNow()
@@ -921,9 +1016,8 @@ class RemoteViewModel(
         }
     }
 
-    private fun observationCountFor(durationMs: Long): Int {
-        return ((durationMs + VIDEO_RECOVERY_POLL_INTERVAL_MS - 1) / VIDEO_RECOVERY_POLL_INTERVAL_MS).toInt().coerceAtLeast(1)
-    }
+    private fun observationCountFor(durationMs: Long): Int =
+        ((durationMs + VIDEO_RECOVERY_POLL_INTERVAL_MS - 1) / VIDEO_RECOVERY_POLL_INTERVAL_MS).toInt().coerceAtLeast(1)
 
     private fun scheduleReconnectNow() {
         if (manualDisconnect || suppressReconnect || !autoReconnectEnabled) {
@@ -932,19 +1026,20 @@ class RemoteViewModel(
         appLogger?.i(LOG_TAG, "Reconnect requested immediately, deviceId=${device.id}")
         stopPeerDisconnectedRecovery()
         reconnectJob?.cancel()
-        reconnectJob = viewModelScope.launch {
-            _uiState.update { it.copy(status = "连接恢复失败，正在重新连接...") }
-            connectInternal(currentAppPackage, currentAppName, currentNewDisplay)
-        }
+        reconnectJob =
+            viewModelScope.launch {
+                mutableUiState.update { it.copy(status = "连接恢复失败，正在重新连接...") }
+                connectInternal(currentAppPackage, currentAppName, currentNewDisplay)
+            }
     }
 
     private fun toggleDebugOverlay() {
-        if (!_uiState.value.isDebugModeEnabled) {
-            _uiState.update { it.copy(isDebugOverlayVisible = false) }
+        if (!mutableUiState.value.isDebugModeEnabled) {
+            mutableUiState.update { it.copy(isDebugOverlayVisible = false) }
             return
         }
-        val visible = !_uiState.value.isDebugOverlayVisible
-        _uiState.update { it.copy(isDebugOverlayVisible = visible, debugSnapshot = webRtcManager.getVideoFrameHealthSnapshot()) }
+        val visible = !mutableUiState.value.isDebugOverlayVisible
+        mutableUiState.update { it.copy(isDebugOverlayVisible = visible, debugSnapshot = webRtcManager.getVideoFrameHealthSnapshot()) }
         if (visible) {
             startDebugSnapshotLoop()
         } else {
@@ -954,35 +1049,35 @@ class RemoteViewModel(
 
     private fun startDebugSnapshotLoop() {
         debugSnapshotJob?.cancel()
-        debugSnapshotJob = viewModelScope.launch {
-            while (isActive) {
-                _uiState.update { it.copy(debugSnapshot = webRtcManager.getVideoFrameHealthSnapshot()) }
-                delay(1_000L)
+        debugSnapshotJob =
+            viewModelScope.launch {
+                while (isActive) {
+                    mutableUiState.update { it.copy(debugSnapshot = webRtcManager.getVideoFrameHealthSnapshot()) }
+                    delay(1_000L)
+                }
             }
-        }
     }
 
     private fun stopDebugSnapshotLoop(clearSnapshot: Boolean = true) {
         debugSnapshotJob?.cancel()
         debugSnapshotJob = null
         if (clearSnapshot) {
-            _uiState.update { it.copy(debugSnapshot = null, isDebugOverlayVisible = false) }
+            mutableUiState.update { it.copy(debugSnapshot = null, isDebugOverlayVisible = false) }
         }
     }
 
     private fun refreshFlexDisplayState() {
         if (!currentNewDisplay) {
-            _uiState.update { it.copy(isFlexDisplayEnabled = false) }
+            mutableUiState.update { it.copy(isFlexDisplayEnabled = false) }
             return
         }
         viewModelScope.launch {
             runCatching { deviceRepository.loadDeviceSettings(device.id) }
                 .onSuccess { settings ->
-                    _uiState.update { it.copy(isFlexDisplayEnabled = settings.flexDisplay) }
+                    mutableUiState.update { it.copy(isFlexDisplayEnabled = settings.flexDisplay) }
                     requestAdaptiveDisplayResize()
-                }
-                .onFailure {
-                    _uiState.update { it.copy(isFlexDisplayEnabled = false) }
+                }.onFailure {
+                    mutableUiState.update { it.copy(isFlexDisplayEnabled = false) }
                 }
         }
     }
@@ -1036,9 +1131,7 @@ class RemoteViewModel(
         }
     }
 
-    private fun isActiveConnectionRequest(requestId: Int): Boolean {
-        return requestId == activeConnectionRequestId && !manualDisconnect
-    }
+    private fun isActiveConnectionRequest(requestId: Int): Boolean = requestId == activeConnectionRequestId && !manualDisconnect
 
     private suspend fun releaseTicketSession(sessionId: String?) {
         val releasedSessionId = sessionId?.takeIf { it.isNotBlank() } ?: return
@@ -1046,7 +1139,7 @@ class RemoteViewModel(
     }
 
     private fun requestAdaptiveDisplayResize() {
-        if (!currentNewDisplay || !_uiState.value.isFlexDisplayEnabled) {
+        if (!currentNewDisplay || !mutableUiState.value.isFlexDisplayEnabled) {
             return
         }
         if (isAppProjectionMode()) {
@@ -1059,17 +1152,18 @@ class RemoteViewModel(
         }
 
         adaptiveDisplayResizeJob?.cancel()
-        adaptiveDisplayResizeJob = viewModelScope.launch {
-            delay(ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS)
-            val latestTargetSize = buildAdaptiveDisplaySize()
-            if (latestTargetSize.width <= 0 || latestTargetSize.height <= 0 || !shouldReportAdaptiveDisplaySize(latestTargetSize)) {
-                return@launch
-            }
+        adaptiveDisplayResizeJob =
+            viewModelScope.launch {
+                delay(ADAPTIVE_DISPLAY_RESIZE_DEBOUNCE_MS)
+                val latestTargetSize = buildAdaptiveDisplaySize()
+                if (latestTargetSize.width <= 0 || latestTargetSize.height <= 0 || !shouldReportAdaptiveDisplaySize(latestTargetSize)) {
+                    return@launch
+                }
 
-            lastRequestedDisplaySize = latestTargetSize
-            lastReportedDisplaySize = latestTargetSize
-            webRtcManager.sendDisplayResize(latestTargetSize.width, latestTargetSize.height)
-        }
+                lastRequestedDisplaySize = latestTargetSize
+                lastReportedDisplaySize = latestTargetSize
+                webRtcManager.sendDisplayResize(latestTargetSize.width, latestTargetSize.height)
+            }
     }
 
     private fun shouldReportAdaptiveDisplaySize(targetSize: IntSize): Boolean {
@@ -1093,60 +1187,65 @@ class RemoteViewModel(
             return buildAppProjectionDisplaySize()
         }
 
-        val aspectSource = when {
-            preferredDisplayAspectSize.width > 0 && preferredDisplayAspectSize.height > 0 -> preferredDisplayAspectSize
-            lastObservedVideoSize.width > 0 && lastObservedVideoSize.height > 0 -> lastObservedVideoSize
-            currentViewportSize.width > 0 && currentViewportSize.height > 0 -> currentViewportSize
-            localDisplayWidth != null && localDisplayHeight != null -> IntSize(localDisplayWidth, localDisplayHeight)
-            else -> IntSize(1280, 720)
-        }
+        val aspectSource =
+            when {
+                preferredDisplayAspectSize.width > 0 && preferredDisplayAspectSize.height > 0 -> preferredDisplayAspectSize
+                lastObservedVideoSize.width > 0 && lastObservedVideoSize.height > 0 -> lastObservedVideoSize
+                currentViewportSize.width > 0 && currentViewportSize.height > 0 -> currentViewportSize
+                localDisplayWidth != null && localDisplayHeight != null -> IntSize(localDisplayWidth, localDisplayHeight)
+                else -> IntSize(1280, 720)
+            }
 
-        val viewportSource = when {
-            currentViewportSize.width > 0 && currentViewportSize.height > 0 -> currentViewportSize
-            localDisplayWidth != null && localDisplayHeight != null -> IntSize(localDisplayWidth, localDisplayHeight)
-            else -> aspectSource
-        }
+        val viewportSource =
+            when {
+                currentViewportSize.width > 0 && currentViewportSize.height > 0 -> currentViewportSize
+                localDisplayWidth != null && localDisplayHeight != null -> IntSize(localDisplayWidth, localDisplayHeight)
+                else -> aspectSource
+            }
 
         val densityScale = (localDisplayDensity ?: 1f).coerceIn(1f, 2f)
-        val targetLongEdge = (maxOf(viewportSource.width, viewportSource.height) * densityScale)
-            .toInt()
-            .coerceIn(MIN_NEW_DISPLAY_LONG_EDGE, MAX_NEW_DISPLAY_LONG_EDGE)
+        val targetLongEdge =
+            (maxOf(viewportSource.width, viewportSource.height) * densityScale)
+                .toInt()
+                .coerceIn(MIN_NEW_DISPLAY_LONG_EDGE, MAX_NEW_DISPLAY_LONG_EDGE)
         val baseLongEdge = maxOf(aspectSource.width, aspectSource.height).coerceAtLeast(1)
         val scale = targetLongEdge.toFloat() / baseLongEdge.toFloat()
 
         return IntSize(
             width = roundDisplayDimension(aspectSource.width * scale),
-            height = roundDisplayDimension(aspectSource.height * scale)
+            height = roundDisplayDimension(aspectSource.height * scale),
         )
     }
 
     private fun buildAppProjectionDisplaySize(): IntSize {
-        val inspectedDisplay = when {
-            localDisplayWidth != null && localDisplayHeight != null -> IntSize(localDisplayWidth, localDisplayHeight)
-            currentViewportSize.width > 0 && currentViewportSize.height > 0 -> currentViewportSize
-            else -> IntSize(1280, 720)
-        }
+        val inspectedDisplay =
+            when {
+                localDisplayWidth != null && localDisplayHeight != null -> IntSize(localDisplayWidth, localDisplayHeight)
+                currentViewportSize.width > 0 && currentViewportSize.height > 0 -> currentViewportSize
+                else -> IntSize(1280, 720)
+            }
         val shortSide = minOf(inspectedDisplay.width, inspectedDisplay.height).coerceAtLeast(MIN_NEW_DISPLAY_DIMENSION)
         val longSide = maxOf(inspectedDisplay.width, inspectedDisplay.height).coerceAtLeast(MIN_NEW_DISPLAY_DIMENSION)
-        val preferLandscape = when {
-            preferredDisplayAspectSize.width > 0 && preferredDisplayAspectSize.height > 0 ->
-                preferredDisplayAspectSize.width >= preferredDisplayAspectSize.height
-            lastObservedVideoSize.width > 0 && lastObservedVideoSize.height > 0 ->
-                lastObservedVideoSize.width >= lastObservedVideoSize.height
-            currentViewportSize.width > 0 && currentViewportSize.height > 0 ->
-                currentViewportSize.width >= currentViewportSize.height
-            else -> false
-        }
+        val preferLandscape =
+            when {
+                preferredDisplayAspectSize.width > 0 && preferredDisplayAspectSize.height > 0 ->
+                    preferredDisplayAspectSize.width >= preferredDisplayAspectSize.height
+                lastObservedVideoSize.width > 0 && lastObservedVideoSize.height > 0 ->
+                    lastObservedVideoSize.width >= lastObservedVideoSize.height
+                currentViewportSize.width > 0 && currentViewportSize.height > 0 ->
+                    currentViewportSize.width >= currentViewportSize.height
+                else -> false
+            }
 
         return if (preferLandscape) {
             IntSize(
                 width = roundDisplayDimension(longSide.toFloat()),
-                height = roundDisplayDimension(shortSide.toFloat())
+                height = roundDisplayDimension(shortSide.toFloat()),
             )
         } else {
             IntSize(
                 width = roundDisplayDimension(shortSide.toFloat()),
-                height = roundDisplayDimension(longSide.toFloat())
+                height = roundDisplayDimension(longSide.toFloat()),
             )
         }
     }
@@ -1155,5 +1254,4 @@ class RemoteViewModel(
         val rounded = value.toInt().coerceAtLeast(MIN_NEW_DISPLAY_DIMENSION)
         return if (rounded % 2 == 0) rounded else rounded + 1
     }
-
 }

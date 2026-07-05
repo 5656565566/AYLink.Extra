@@ -52,9 +52,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileManagerScreen(
-    viewModel: FileManagerViewModel
-) {
+fun FileManagerScreen(viewModel: FileManagerViewModel) {
     val listState by viewModel.listUiState.collectAsStateWithLifecycle()
     val dialogState by viewModel.dialogUiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -77,30 +75,30 @@ fun FileManagerScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
     ) {
         Column(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         ) {
             // Path Bar
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
                     modifier = Modifier.padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(
                         onClick = { viewModel.handleIntent(FileManagerIntent.GoUp) },
-                        enabled = listState.currentPath != "/" && !listState.loading
+                        enabled = listState.currentPath != "/" && !listState.loading,
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Go Up")
                     }
                     Text(
                         text = listState.currentPath,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                     )
                 }
             }
@@ -108,13 +106,13 @@ fun FileManagerScreen(
             if (listState.errorMessage != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         text = listState.errorMessage.orEmpty(),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
@@ -130,13 +128,13 @@ fun FileManagerScreen(
                             imageVector = Icons.AutoMirrored.Filled.List,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             "文件夹为空",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -144,7 +142,7 @@ fun FileManagerScreen(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 80.dp), // Add padding for bottom navigation if needed or just breathing room
-                    verticalArrangement = Arrangement.spacedBy(1.dp) // Less gap for a list view
+                    verticalArrangement = Arrangement.spacedBy(1.dp), // Less gap for a list view
                 ) {
                     items(listState.files, key = { it.name }) { file ->
                         FileListItem(
@@ -156,7 +154,7 @@ fun FileManagerScreen(
                                     viewModel.handleIntent(FileManagerIntent.ShowActionMenu(file))
                                 }
                             },
-                            onMoreClick = { viewModel.handleIntent(FileManagerIntent.ShowActionMenu(file)) }
+                            onMoreClick = { viewModel.handleIntent(FileManagerIntent.ShowActionMenu(file)) },
                         )
                     }
                 }
@@ -166,13 +164,13 @@ fun FileManagerScreen(
         FileActionDialog(
             listState = listState,
             dialogState = dialogState,
-            onIntent = { viewModel.handleIntent(it) }
+            onIntent = { viewModel.handleIntent(it) },
         )
 
         FileRenameDialog(
             listState = listState,
             dialogState = dialogState,
-            onIntent = { viewModel.handleIntent(it) }
+            onIntent = { viewModel.handleIntent(it) },
         )
     }
 }
@@ -181,7 +179,7 @@ fun FileManagerScreen(
 private fun FileActionDialog(
     listState: FileManagerListUiState,
     dialogState: FileManagerDialogUiState,
-    onIntent: (FileManagerIntent) -> Unit
+    onIntent: (FileManagerIntent) -> Unit,
 ) {
     dialogState.selectedFile?.takeIf { dialogState.isActionMenuOpen }?.let { file ->
         val fullPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
@@ -193,7 +191,7 @@ private fun FileActionDialog(
                 Text(
                     text = file.name,
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -204,34 +202,34 @@ private fun FileActionDialog(
                 } else {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (!file.isDirectory) {
                             OutlinedButton(
                                 onClick = { onIntent(FileManagerIntent.OpenFile(fullPath)) },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
                             ) { Text("打开") }
                             OutlinedButton(
                                 onClick = { onIntent(FileManagerIntent.ShareFile(fullPath)) },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
                             ) { Text("分享") }
                             OutlinedButton(
                                 onClick = { onIntent(FileManagerIntent.DownloadFile(fullPath)) },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
                             ) { Text("下载到本地") }
                         }
                         OutlinedButton(
                             onClick = { onIntent(FileManagerIntent.CopyPath(fullPath)) },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         ) { Text("复制路径") }
                         OutlinedButton(
                             onClick = { onIntent(FileManagerIntent.ShowRenameDialog(file.name)) },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         ) { Text("重命名") }
                         OutlinedButton(
                             onClick = { onIntent(FileManagerIntent.DeleteFile(fullPath)) },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         ) { Text("删除") }
                     }
                 }
@@ -239,9 +237,9 @@ private fun FileActionDialog(
             footer = {
                 Button(
                     onClick = { onIntent(FileManagerIntent.HideActionMenu) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) { Text("取消") }
-            }
+            },
         )
     }
 }
@@ -250,7 +248,7 @@ private fun FileActionDialog(
 private fun FileRenameDialog(
     listState: FileManagerListUiState,
     dialogState: FileManagerDialogUiState,
-    onIntent: (FileManagerIntent) -> Unit
+    onIntent: (FileManagerIntent) -> Unit,
 ) {
     dialogState.selectedFile?.takeIf { dialogState.isRenameDialogOpen }?.let { file ->
         val oldPath = listState.currentPath + file.name + if (file.isDirectory) "/" else ""
@@ -264,35 +262,38 @@ private fun FileRenameDialog(
                     onValueChange = { onIntent(FileManagerIntent.UpdateRenameTargetName(it)) },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("新名称") },
-                    singleLine = true
+                    singleLine = true,
                 )
             },
             footer = {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
                         onClick = { onIntent(FileManagerIntent.HideRenameDialog) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
                     ) { Text("取消") }
                     Button(
                         onClick = { onIntent(FileManagerIntent.RenameFile(oldPath, dialogState.renameTargetName)) },
                         modifier = Modifier.weight(1f),
-                        enabled = dialogState.renameTargetName.isNotBlank() && dialogState.renameTargetName != file.name && !dialogState.actionLoading
+                        enabled =
+                            dialogState.renameTargetName.isNotBlank() &&
+                                dialogState.renameTargetName != file.name &&
+                                !dialogState.actionLoading,
                     ) {
                         if (dialogState.actionLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
                                 strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
+                                color = MaterialTheme.colorScheme.onPrimary,
                             )
                         } else {
                             Text("保存")
                         }
                     }
                 }
-            }
+            },
         )
     }
 }
@@ -301,48 +302,49 @@ private fun FileRenameDialog(
 fun FileListItem(
     file: FileEntry,
     onClick: () -> Unit,
-    onMoreClick: () -> Unit
+    onMoreClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (file.isDirectory) 1f else 0.5f),
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(40.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (file.isDirectory) Icons.AutoMirrored.Filled.List else Icons.Default.Info,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.width(16.dp))
-            
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = file.name,
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1
+                    maxLines = 1,
                 )
                 if (!file.isDirectory) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = formatFileSize(file.size),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -351,7 +353,7 @@ fun FileListItem(
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "More options",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -365,11 +367,15 @@ private fun formatFileSize(size: Long): String {
     return String.format(Locale.ROOT, "%.1f GB", size / 1024f / 1024f / 1024f)
 }
 
-private fun openLocalFile(context: Context, file: LocalFileHandle) {
-    val intent = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(file.uri, file.mimeType)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+private fun openLocalFile(
+    context: Context,
+    file: LocalFileHandle,
+) {
+    val intent =
+        Intent(Intent.ACTION_VIEW)
+            .setDataAndType(file.uri, file.mimeType)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching {
         context.startActivity(Intent.createChooser(intent, "打开文件"))
     }.onFailure {
@@ -377,12 +383,16 @@ private fun openLocalFile(context: Context, file: LocalFileHandle) {
     }
 }
 
-private fun shareLocalFile(context: Context, file: LocalFileHandle) {
-    val intent = Intent(Intent.ACTION_SEND)
-        .setType(file.mimeType)
-        .putExtra(Intent.EXTRA_STREAM, file.uri)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+private fun shareLocalFile(
+    context: Context,
+    file: LocalFileHandle,
+) {
+    val intent =
+        Intent(Intent.ACTION_SEND)
+            .setType(file.mimeType)
+            .putExtra(Intent.EXTRA_STREAM, file.uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching {
         context.startActivity(Intent.createChooser(intent, "分享文件"))
     }.onFailure {

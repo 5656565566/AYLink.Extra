@@ -9,18 +9,19 @@ import kotlinx.coroutines.flow.asStateFlow
 enum class ThemeMode {
     SYSTEM,
     LIGHT,
-    DARK
+    DARK,
 }
 
-enum class PointerSamplingRateHz(val hz: Int) {
+enum class PointerSamplingRateHz(
+    val hz: Int,
+) {
     HZ_120(120),
     HZ_60(60),
-    HZ_30(30);
+    HZ_30(30),
+    ;
 
     companion object {
-        fun fromValue(value: Int?): PointerSamplingRateHz {
-            return entries.firstOrNull { it.hz == value } ?: HZ_120
-        }
+        fun fromValue(value: Int?): PointerSamplingRateHz = entries.firstOrNull { it.hz == value } ?: HZ_120
     }
 }
 
@@ -31,27 +32,33 @@ data class LocalUiSettings(
     val adaptivePointerSampling: Boolean = true,
     val pointerSamplingRateHz: PointerSamplingRateHz = PointerSamplingRateHz.HZ_120,
     val weakNetworkMode: Boolean = false,
-    val debugMode: Boolean = false
+    val debugMode: Boolean = false,
 )
 
-class LocalSettingsStore(context: Context) {
+class LocalSettingsStore(
+    context: Context,
+) {
     private val preferences = context.getSharedPreferences("aylink_mobile_local_settings", Context.MODE_PRIVATE)
 
-    private val _settings = MutableStateFlow(
-        LocalUiSettings(
-            themeMode = preferences.getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name)
-                ?.let { runCatching { ThemeMode.valueOf(it) }.getOrDefault(ThemeMode.SYSTEM) }
-                ?: ThemeMode.SYSTEM,
-            useDynamicColor = preferences.getBoolean(KEY_DYNAMIC_COLOR, true),
-            resumeLastRemote = preferences.getBoolean(KEY_RESUME_LAST_REMOTE, true),
-            adaptivePointerSampling = preferences.getBoolean(KEY_ADAPTIVE_POINTER_SAMPLING, true),
-            pointerSamplingRateHz = PointerSamplingRateHz.fromValue(
-                preferences.getInt(KEY_POINTER_SAMPLING_RATE_HZ, PointerSamplingRateHz.HZ_120.hz)
+    private val _settings =
+        MutableStateFlow(
+            LocalUiSettings(
+                themeMode =
+                    preferences
+                        .getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name)
+                        ?.let { runCatching { ThemeMode.valueOf(it) }.getOrDefault(ThemeMode.SYSTEM) }
+                        ?: ThemeMode.SYSTEM,
+                useDynamicColor = preferences.getBoolean(KEY_DYNAMIC_COLOR, true),
+                resumeLastRemote = preferences.getBoolean(KEY_RESUME_LAST_REMOTE, true),
+                adaptivePointerSampling = preferences.getBoolean(KEY_ADAPTIVE_POINTER_SAMPLING, true),
+                pointerSamplingRateHz =
+                    PointerSamplingRateHz.fromValue(
+                        preferences.getInt(KEY_POINTER_SAMPLING_RATE_HZ, PointerSamplingRateHz.HZ_120.hz),
+                    ),
+                weakNetworkMode = preferences.getBoolean(KEY_WEAK_NETWORK_MODE, false),
+                debugMode = preferences.getBoolean(KEY_DEBUG_MODE, false),
             ),
-            weakNetworkMode = preferences.getBoolean(KEY_WEAK_NETWORK_MODE, false),
-            debugMode = preferences.getBoolean(KEY_DEBUG_MODE, false)
         )
-    )
 
     val settings: StateFlow<LocalUiSettings> = _settings.asStateFlow()
 

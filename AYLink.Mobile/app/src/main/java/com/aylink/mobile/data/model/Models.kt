@@ -2,8 +2,8 @@
 
 package com.aylink.mobile.data.model
 
-import androidx.compose.runtime.Immutable
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNames
@@ -11,12 +11,12 @@ import kotlinx.serialization.json.JsonNames
 @Serializable
 data class LoginRequest(
     val username: String,
-    val password: String
+    val password: String,
 )
 
 @Serializable
 data class RefreshTokenRequest(
-    val refreshToken: String
+    val refreshToken: String,
 )
 
 @Serializable
@@ -24,7 +24,7 @@ data class LoginResponse(
     val accessToken: String? = null,
     val accessTokenExpiresAt: String? = null,
     val refreshToken: String? = null,
-    val refreshTokenExpiresAt: String? = null
+    val refreshTokenExpiresAt: String? = null,
 )
 
 @Serializable
@@ -36,20 +36,20 @@ data class WebRtcTicketRequest(
     val newDisplay: Boolean = false,
     val newDisplayWidth: Int? = null,
     val newDisplayHeight: Int? = null,
-    val newDisplayDpi: Int? = null
+    val newDisplayDpi: Int? = null,
 )
 
 @Serializable
 data class WebRtcTicketResponse(
     val ticket: String,
     val sessionId: String = "",
-    val expiresInSeconds: Int
+    val expiresInSeconds: Int,
 )
 
 @Serializable
 data class ScrcpySessionActionRequest(
     val deviceId: String,
-    val sessionId: String = ""
+    val sessionId: String = "",
 )
 
 @Serializable
@@ -59,38 +59,38 @@ data class VideoStreamHealthSnapshot(
     val reason: String = "",
     val source: VideoSourceDiagnostics? = null,
     val sender: VideoSenderDiagnostics? = null,
-    val transport: VideoTransportDiagnostics? = null
+    val transport: VideoTransportDiagnostics? = null,
 )
 
 @Serializable
 data class VideoSourceDiagnostics(
     val state: String = "",
-    val reason: String = ""
+    val reason: String = "",
 )
 
 @Serializable
 data class VideoSenderDiagnostics(
     val state: String = "",
-    val peerConnected: Boolean = false
+    val peerConnected: Boolean = false,
 )
 
 @Serializable
 data class VideoTransportDiagnostics(
     val peerConnectionState: String = "",
     val signalingAttached: Boolean = false,
-    val sessionClosed: Boolean = false
+    val sessionClosed: Boolean = false,
 )
 
 @Serializable
 data class ApiErrorResponse(
-    val error: ApiErrorPayload? = null
+    val error: ApiErrorPayload? = null,
 )
 
 @Serializable
 data class ApiErrorPayload(
     val code: String? = null,
     val messageKey: String? = null,
-    val message: String? = null
+    val message: String? = null,
 )
 
 @Serializable
@@ -118,7 +118,7 @@ data class Device(
     val updatedAt: String? = null,
     @SerialName("groups")
     @JsonNames("Groups")
-    val groups: List<DeviceGroup> = emptyList()
+    val groups: List<DeviceGroup> = emptyList(),
 )
 
 @Serializable
@@ -140,7 +140,7 @@ data class DeviceApp(
     val name: String,
     @SerialName("packageName")
     @JsonNames("PackageName")
-    val packageName: String
+    val packageName: String,
 )
 
 @Serializable
@@ -153,7 +153,7 @@ data class DeviceAppInfo(
     val lastUpdateTime: String = "",
     val installerPackageName: String = "",
     val primaryApkPath: String = "",
-    val apkPaths: List<String> = emptyList()
+    val apkPaths: List<String> = emptyList(),
 )
 
 @Serializable
@@ -166,7 +166,7 @@ data class DeviceSettingsSummary(
     @SerialName("HidKeyboard")
     val hidKeyboard: Boolean = false,
     @SerialName("HidMouse")
-    val hidMouse: Boolean = false
+    val hidMouse: Boolean = false,
 )
 
 @Immutable
@@ -174,7 +174,7 @@ data class LocalFileHandle(
     val name: String,
     val uri: Uri,
     val mimeType: String,
-    val localPath: String
+    val localPath: String,
 )
 
 @Serializable
@@ -189,13 +189,13 @@ data class PointerControlMessage(
     val frameWidth: Int,
     val frameHeight: Int,
     val pressure: Float,
-    val buttons: Int
+    val buttons: Int,
 )
 
 @Serializable
 data class KeyControlMessage(
     val type: String = "key",
-    val action: String
+    val action: String,
 )
 
 @Serializable
@@ -203,7 +203,7 @@ data class DisplayControlMessage(
     val type: String = "display",
     val action: String = "resize",
     val width: Int,
-    val height: Int
+    val height: Int,
 )
 
 @Serializable
@@ -212,7 +212,7 @@ data class VideoControlMessage(
     val action: String = "reset",
     val width: Int,
     val height: Int,
-    val reason: String
+    val reason: String,
 )
 
 @Serializable
@@ -220,19 +220,19 @@ data class RtcCandidateMessage(
     val candidate: String,
     val sdpMid: String? = null,
     val sdpMLineIndex: Int? = null,
-    val usernameFragment: String? = null
+    val usernameFragment: String? = null,
 )
 
 @Serializable
 data class RtcAnswerMessage(
     val type: String,
-    val sdp: String
+    val sdp: String,
 )
 
 @Serializable
 data class RtcOfferMessage(
     val type: String,
-    val sdp: String
+    val sdp: String,
 )
 
 @Serializable
@@ -242,12 +242,12 @@ data class RtcSignalErrorMessage(
     val messageKey: String? = null,
     val message: String,
     val detail: String? = null,
-    val retryable: Boolean = false
+    val retryable: Boolean = false,
 )
 
 @Serializable
 data class AgentStatus(
     @SerialName("Status") val status: String,
     @SerialName("Mode") val mode: String,
-    @SerialName("Timestamp") val timestamp: String
+    @SerialName("Timestamp") val timestamp: String,
 )

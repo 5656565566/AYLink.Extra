@@ -6,7 +6,6 @@ import android.graphics.Typeface
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
-import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,11 +47,10 @@ import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
-fun TerminalScreen(
-    viewModel: TerminalViewModel
-) {
+fun TerminalScreen(viewModel: TerminalViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val clipboardManager = LocalClipboard.current
@@ -75,31 +73,32 @@ fun TerminalScreen(
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(16.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = uiState.device.name.ifBlank { uiState.device.serial },
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = uiState.statusText,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Button(
                 onClick = viewModel::reconnect,
-                enabled = !uiState.connecting
+                enabled = !uiState.connecting,
             ) {
                 Text(if (uiState.disconnected) "重新连接" else "重连")
             }
@@ -109,13 +108,13 @@ fun TerminalScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Surface(
                 color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
                     text = uiState.errorMessage.orEmpty(),
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
         }
@@ -123,23 +122,27 @@ fun TerminalScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         Surface(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            color = androidx.compose.ui.graphics.Color(0xFF101418)
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            color =
+                androidx.compose.ui.graphics
+                    .Color(0xFF101418),
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { viewContext ->
                     TerminalView(viewContext, null).apply {
-                        val bridge = TermuxTerminalBridge(
-                            context = viewContext,
-                            terminalView = this,
-                            clipboardManager = clipboardManager,
-                            coroutineScope = coroutineScope,
-                            onSendInput = viewModel::sendInput,
-                            onResize = viewModel::resize
-                        )
+                        val bridge =
+                            TermuxTerminalBridge(
+                                context = viewContext,
+                                terminalView = this,
+                                clipboardManager = clipboardManager,
+                                coroutineScope = coroutineScope,
+                                onSendInput = viewModel::sendInput,
+                                onResize = viewModel::resize,
+                            )
                         terminalBridge = bridge
                         setTerminalViewClient(bridge)
                         attachSession(bridge.session)
@@ -154,7 +157,7 @@ fun TerminalScreen(
                                 uiState.transcript
                             } else {
                                 "AYLink Terminal\r\n正在等待远端输出...\r\n"
-                            }
+                            },
                         )
                     }
                 },
@@ -165,14 +168,14 @@ fun TerminalScreen(
                             uiState.transcript
                         } else {
                             "AYLink Terminal\r\n正在等待远端输出...\r\n"
-                        }
+                        },
                     )
                     terminalView.post {
                         terminalView.requestFocus()
                         val imm = context.getSystemService(InputMethodManager::class.java)
                         imm?.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT)
                     }
-                }
+                },
             )
         }
 
@@ -181,7 +184,7 @@ fun TerminalScreen(
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             if (uiState.connecting) {
                 CircularProgressIndicator(modifier = Modifier.size(28.dp))
@@ -189,35 +192,40 @@ fun TerminalScreen(
             FilterChip(
                 selected = false,
                 onClick = { viewModel.sendInput("\u0003") },
-                label = { Text("Ctrl+C") }
+                label = { Text("Ctrl+C") },
             )
             FilterChip(
                 selected = false,
                 onClick = { viewModel.sendInput("\t") },
-                label = { Text("Tab") }
+                label = { Text("Tab") },
             )
             FilterChip(
                 selected = false,
                 onClick = { viewModel.sendInput("\u001B") },
-                label = { Text("Esc") }
+                label = { Text("Esc") },
             )
             FilterChip(
                 selected = false,
                 onClick = { viewModel.sendInput("\n") },
-                label = { Text("Enter") }
+                label = { Text("Enter") },
             )
             FilterChip(
                 selected = false,
                 onClick = {
                     coroutineScope.launch {
                         val clipEntry = clipboardManager.getClipEntry()
-                        val text = clipEntry?.clipData?.getItemAt(0)?.text?.toString()
+                        val text =
+                            clipEntry
+                                ?.clipData
+                                ?.getItemAt(0)
+                                ?.text
+                                ?.toString()
                         if (!text.isNullOrEmpty()) {
                             viewModel.sendInput(text)
                         }
                     }
                 },
-                label = { Text("粘贴") }
+                label = { Text("粘贴") },
             )
         }
 
@@ -226,7 +234,7 @@ fun TerminalScreen(
             Text(
                 text = "当前终端已切到 Termux 渲染，输入建议直接在终端区域完成。",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -238,21 +246,22 @@ private class TermuxTerminalBridge(
     private val clipboardManager: Clipboard,
     private val coroutineScope: CoroutineScope,
     private val onSendInput: (String) -> Unit,
-    private val onResize: (Int, Int) -> Unit
-) : TerminalViewClient, TerminalSessionClient {
-
+    private val onResize: (Int, Int) -> Unit,
+) : TerminalViewClient,
+    TerminalSessionClient {
     private val appContext = context.applicationContext
     var terminalView: TerminalView = terminalView
         private set
 
-    val session: TerminalSession = TerminalSession(
-        "/system/bin/sh",
-        "/",
-        arrayOf("-c", "cat >/dev/null"),
-        emptyArray(),
-        null,
-        this
-    )
+    val session: TerminalSession =
+        TerminalSession(
+            "/system/bin/sh",
+            "/",
+            arrayOf("-c", "cat >/dev/null"),
+            emptyArray(),
+            null,
+            this,
+        )
 
     private var emulatorReady = false
     private val pendingOutput = StringBuilder()
@@ -320,18 +329,23 @@ private class TermuxTerminalBridge(
 
     override fun copyModeChanged(copyMode: Boolean) = Unit
 
-    override fun onKeyDown(keyCode: Int, e: KeyEvent, currentSession: TerminalSession): Boolean {
-        val sequence = when (keyCode) {
-            KeyEvent.KEYCODE_ENTER -> "\n"
-            KeyEvent.KEYCODE_DEL -> "\u007F"
-            KeyEvent.KEYCODE_TAB -> "\t"
-            KeyEvent.KEYCODE_ESCAPE -> "\u001B"
-            KeyEvent.KEYCODE_DPAD_UP -> "\u001B[A"
-            KeyEvent.KEYCODE_DPAD_DOWN -> "\u001B[B"
-            KeyEvent.KEYCODE_DPAD_RIGHT -> "\u001B[C"
-            KeyEvent.KEYCODE_DPAD_LEFT -> "\u001B[D"
-            else -> null
-        }
+    override fun onKeyDown(
+        keyCode: Int,
+        e: KeyEvent,
+        currentSession: TerminalSession,
+    ): Boolean {
+        val sequence =
+            when (keyCode) {
+                KeyEvent.KEYCODE_ENTER -> "\n"
+                KeyEvent.KEYCODE_DEL -> "\u007F"
+                KeyEvent.KEYCODE_TAB -> "\t"
+                KeyEvent.KEYCODE_ESCAPE -> "\u001B"
+                KeyEvent.KEYCODE_DPAD_UP -> "\u001B[A"
+                KeyEvent.KEYCODE_DPAD_DOWN -> "\u001B[B"
+                KeyEvent.KEYCODE_DPAD_RIGHT -> "\u001B[C"
+                KeyEvent.KEYCODE_DPAD_LEFT -> "\u001B[D"
+                else -> null
+            }
         if (sequence != null) {
             onSendInput(sequence)
             return true
@@ -339,7 +353,10 @@ private class TermuxTerminalBridge(
         return false
     }
 
-    override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
+    override fun onKeyUp(
+        keyCode: Int,
+        e: KeyEvent,
+    ): Boolean = false
 
     override fun onLongPress(event: MotionEvent): Boolean = false
 
@@ -351,12 +368,17 @@ private class TermuxTerminalBridge(
 
     override fun readFnKey(): Boolean = false
 
-    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, currentSession: TerminalSession): Boolean {
-        val text = if (ctrlDown && codePoint in 64..95) {
-            (codePoint - 64).toChar().toString()
-        } else {
-            String(Character.toChars(codePoint))
-        }
+    override fun onCodePoint(
+        codePoint: Int,
+        ctrlDown: Boolean,
+        currentSession: TerminalSession,
+    ): Boolean {
+        val text =
+            if (ctrlDown && codePoint in 64..95) {
+                (codePoint - 64).toChar().toString()
+            } else {
+                String(Character.toChars(codePoint))
+            }
         onSendInput(text)
         return true
     }
@@ -380,7 +402,10 @@ private class TermuxTerminalBridge(
 
     override fun onSessionFinished(finishedSession: TerminalSession) = Unit
 
-    override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
+    override fun onCopyTextToClipboard(
+        session: TerminalSession,
+        text: String,
+    ) {
         coroutineScope.launch {
             val clipData = ClipData.newPlainText("terminal_copy", text)
             clipboardManager.setClipEntry(clipData.toClipEntry())
@@ -390,7 +415,12 @@ private class TermuxTerminalBridge(
     override fun onPasteTextFromClipboard(session: TerminalSession) {
         coroutineScope.launch {
             val clipEntry = clipboardManager.getClipEntry()
-            val text = clipEntry?.clipData?.getItemAt(0)?.text?.toString()
+            val text =
+                clipEntry
+                    ?.clipData
+                    ?.getItemAt(0)
+                    ?.text
+                    ?.toString()
             if (!text.isNullOrEmpty()) {
                 onSendInput(text)
             }
@@ -409,17 +439,39 @@ private class TermuxTerminalBridge(
 
     override fun getTerminalCursorStyle(): Int = TerminalEmulator.DEFAULT_TERMINAL_CURSOR_STYLE
 
-    override fun logError(tag: String, message: String) = Unit
+    override fun logError(
+        tag: String,
+        message: String,
+    ) = Unit
 
-    override fun logWarn(tag: String, message: String) = Unit
+    override fun logWarn(
+        tag: String,
+        message: String,
+    ) = Unit
 
-    override fun logInfo(tag: String, message: String) = Unit
+    override fun logInfo(
+        tag: String,
+        message: String,
+    ) = Unit
 
-    override fun logDebug(tag: String, message: String) = Unit
+    override fun logDebug(
+        tag: String,
+        message: String,
+    ) = Unit
 
-    override fun logVerbose(tag: String, message: String) = Unit
+    override fun logVerbose(
+        tag: String,
+        message: String,
+    ) = Unit
 
-    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) = Unit
+    override fun logStackTraceWithMessage(
+        tag: String,
+        message: String,
+        e: Exception,
+    ) = Unit
 
-    override fun logStackTrace(tag: String, e: Exception) = Unit
+    override fun logStackTrace(
+        tag: String,
+        e: Exception,
+    ) = Unit
 }

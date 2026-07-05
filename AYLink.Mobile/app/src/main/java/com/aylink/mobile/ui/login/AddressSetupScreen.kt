@@ -41,7 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun AddressSetupScreen(
     viewModel: LoginViewModel,
     onBack: (() -> Unit)? = null,
-    onContinue: () -> Unit
+    onContinue: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -56,48 +56,50 @@ fun AddressSetupScreen(
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
+        color = MaterialTheme.colorScheme.background,
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (onBack != null) {
                 IconButton(
                     onClick = onBack,
-                    modifier = Modifier.padding(16.dp).align(Alignment.TopStart)
+                    modifier = Modifier.padding(16.dp).align(Alignment.TopStart),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             }
-            
+
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
                 verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = null,
-                    modifier = Modifier
-                        .size(80.dp)
-                        .padding(bottom = 16.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    modifier =
+                        Modifier
+                            .size(80.dp)
+                            .padding(bottom = 16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
                 )
-                
+
                 Text(
                     text = "配置服务器",
                     style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
+                    color = MaterialTheme.colorScheme.onBackground,
                 )
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
+
                 Text(
                     text = "输入 AYLink Agent 的服务地址进行连接",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                
+
                 Spacer(modifier = Modifier.height(32.dp))
 
                 OutlinedTextField(
@@ -107,33 +109,36 @@ fun AddressSetupScreen(
                     label = { Text("Agent 地址") },
                     supportingText = { Text("例如: http://10.0.2.2:5500") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = {
-                            if (uiState.baseUrl.isNotBlank()) {
-                                viewModel.handleIntent(LoginIntent.SaveBaseUrl)
-                            }
-                        }
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                    keyboardOptions =
+                        KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Done,
+                        ),
+                    keyboardActions =
+                        KeyboardActions(
+                            onDone = {
+                                if (uiState.baseUrl.isNotBlank()) {
+                                    viewModel.handleIntent(LoginIntent.SaveBaseUrl)
+                                }
+                            },
+                        ),
+                    shape = RoundedCornerShape(12.dp),
                 )
 
                 uiState.errorMessage?.let { errorMessage ->
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp)
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp),
                     ) {
                         Text(
                             text = errorMessage,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             modifier = Modifier.padding(12.dp),
-                            style = MaterialTheme.typography.bodyMedium
+                            style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                 }
@@ -142,38 +147,41 @@ fun AddressSetupScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     if (onBack != null) {
                         Button(
                             onClick = onBack,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(56.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            shape = RoundedCornerShape(28.dp)
+                            modifier =
+                                Modifier
+                                    .weight(1f)
+                                    .height(56.dp),
+                            colors =
+                                ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            shape = RoundedCornerShape(28.dp),
                         ) {
                             Text(
                                 text = "取消",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             )
                         }
                     }
-                    
+
                     Button(
                         onClick = { viewModel.handleIntent(LoginIntent.SaveBaseUrl) },
                         enabled = uiState.baseUrl.isNotBlank(),
-                        modifier = Modifier
-                            .weight(if (onBack != null) 1f else 1f) // Fills width if no back button
-                            .height(56.dp),
-                        shape = RoundedCornerShape(28.dp)
+                        modifier =
+                            Modifier
+                                .weight(if (onBack != null) 1f else 1f) // Fills width if no back button
+                                .height(56.dp),
+                        shape = RoundedCornerShape(28.dp),
                     ) {
                         Text(
                             text = "继续",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(20.dp))

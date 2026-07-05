@@ -4,40 +4,86 @@ import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -45,17 +91,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aylink.mobile.data.model.Device
 import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.PointerControlMessage
@@ -77,52 +118,56 @@ fun AyDialog(
     title: String,
     onDismissRequest: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
-    footer: @Composable RowScope.() -> Unit
+    footer: @Composable RowScope.() -> Unit,
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
             shape = RoundedCornerShape(8.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 4.dp,
-            modifier = Modifier
-                .padding(24.dp)
-                .widthIn(max = 400.dp)
-                .fillMaxWidth()
+            modifier =
+                Modifier
+                    .padding(24.dp)
+                    .widthIn(max = 400.dp)
+                    .fillMaxWidth(),
         ) {
             Column {
                 Box(
-                    modifier = Modifier.padding(start = 24.dp, top = 16.dp, end = 24.dp, bottom = 16.dp)
+                    modifier = Modifier.padding(start = 24.dp, top = 16.dp, end = 24.dp, bottom = 16.dp),
                 ) {
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                     )
                 }
-                
+
                 Column(
-                    modifier = Modifier
-                        .padding(horizontal = 24.dp)
-                        .heightIn(max = 420.dp)
-                        .padding(bottom = 24.dp)
-                        .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState())
+                    modifier =
+                        Modifier
+                            .padding(horizontal = 24.dp)
+                            .heightIn(max = 420.dp)
+                            .padding(bottom = 24.dp)
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState()),
                 ) {
                     content()
                 }
-                
+
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         footer()
                     }
@@ -137,7 +182,7 @@ fun AyDialog(
 fun RemoteScreen(
     device: Device,
     viewModel: RemoteViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
 ) {
     val viewportState by viewModel.viewportUiState.collectAsStateWithLifecycle()
     val controlState by viewModel.controlUiState.collectAsStateWithLifecycle()
@@ -149,33 +194,37 @@ fun RemoteScreen(
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var viewportBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
     var rendererRef by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
-    val visibleViewportSize = remember(localView, viewportSize, viewportBoundsInWindow) {
-        calculateVisibleViewportSize(localView, viewportSize, viewportBoundsInWindow)
-    }
-    val videoBounds = remember(viewportSize, viewportState.videoSize) {
-        calculateVideoBounds(viewportSize, viewportState.videoSize, fillMode = false)
-    }
-    val videoOccupancyRatio = remember(viewportSize, videoBounds) {
-        val viewportArea = viewportSize.width.toFloat() * viewportSize.height.toFloat()
-        if (viewportArea <= 0f) {
-            1f
-        } else {
-            (videoBounds.width * videoBounds.height / viewportArea).coerceIn(0f, 1f)
+    val visibleViewportSize =
+        remember(localView, viewportSize, viewportBoundsInWindow) {
+            calculateVisibleViewportSize(localView, viewportSize, viewportBoundsInWindow)
         }
-    }
-    val desiredScreenOrientation = remember(visibleViewportSize, viewportState.videoSize, videoOccupancyRatio) {
-        if (!viewportState.isAppProjectionMode && !viewportState.isNewDisplayMode) {
-            resolveNormalCastScreenOrientation(videoSize = viewportState.videoSize)
-        } else if (viewportState.isAppProjectionMode && viewportState.isNewDisplayMode) {
-            resolveDesiredScreenOrientation(
-                viewportSize = visibleViewportSize,
-                videoSize = viewportState.videoSize,
-                occupancyRatio = videoOccupancyRatio
-            )
-        } else {
-            null
+    val videoBounds =
+        remember(viewportSize, viewportState.videoSize) {
+            calculateVideoBounds(viewportSize, viewportState.videoSize, fillMode = false)
         }
-    }
+    val videoOccupancyRatio =
+        remember(viewportSize, videoBounds) {
+            val viewportArea = viewportSize.width.toFloat() * viewportSize.height.toFloat()
+            if (viewportArea <= 0f) {
+                1f
+            } else {
+                (videoBounds.width * videoBounds.height / viewportArea).coerceIn(0f, 1f)
+            }
+        }
+    val desiredScreenOrientation =
+        remember(visibleViewportSize, viewportState.videoSize, videoOccupancyRatio) {
+            if (!viewportState.isAppProjectionMode && !viewportState.isNewDisplayMode) {
+                resolveNormalCastScreenOrientation(videoSize = viewportState.videoSize)
+            } else if (viewportState.isAppProjectionMode && viewportState.isNewDisplayMode) {
+                resolveDesiredScreenOrientation(
+                    viewportSize = visibleViewportSize,
+                    videoSize = viewportState.videoSize,
+                    occupancyRatio = videoOccupancyRatio,
+                )
+            } else {
+                null
+            }
+        }
     BackHandler {
         viewModel.handleIntent(RemoteIntent.DisconnectAndNavigateBack)
     }
@@ -202,21 +251,24 @@ fun RemoteScreen(
 
     DisposableEffect(activity, lifecycleOwner) {
         val previousOrientation = activity?.requestedOrientation
-        val hadKeepScreenOn = activity?.window
-            ?.attributes
-            ?.flags
-            ?.and(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
-        val observer = object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-                viewModel.onAppForegrounded()
-            }
+        val hadKeepScreenOn =
+            activity
+                ?.window
+                ?.attributes
+                ?.flags
+                ?.and(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
+        val observer =
+            object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    viewModel.onAppForegrounded()
+                }
 
-            override fun onStop(owner: LifecycleOwner) {
-                viewModel.onAppBackgrounded()
+                override fun onStop(owner: LifecycleOwner) {
+                    viewModel.onAppBackgrounded()
+                }
             }
-        }
         lifecycleOwner.lifecycle.addObserver(observer)
-        
+
         activity?.window?.let { window ->
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             val insetsController = WindowCompat.getInsetsController(window, window.decorView)
@@ -238,20 +290,24 @@ fun RemoteScreen(
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top + WindowInsetsSides.Bottom))
-            .onGloballyPositioned { coordinates ->
-                val position = coordinates.positionInWindow()
-                val size = coordinates.size
-                viewportBoundsInWindow = Rect(
-                    left = position.x,
-                    top = position.y,
-                    right = position.x + size.width,
-                    bottom = position.y + size.height
-                )
-            }
-            .background(Color.Black)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Top + WindowInsetsSides.Bottom,
+                    ),
+                ).onGloballyPositioned { coordinates ->
+                    val position = coordinates.positionInWindow()
+                    val size = coordinates.size
+                    viewportBoundsInWindow =
+                        Rect(
+                            left = position.x,
+                            top = position.y,
+                            right = position.x + size.width,
+                            bottom = position.y + size.height,
+                        )
+                }.background(Color.Black),
     ) {
         RemoteVideoSurface(
             viewportSize = viewportSize,
@@ -260,7 +316,7 @@ fun RemoteScreen(
             videoBounds = videoBounds,
             onViewportSizeChanged = { viewportSize = it },
             onRendererReady = { rendererRef = it },
-            viewModel = viewModel
+            viewModel = viewModel,
         )
 
         RemoteFloatingControl(
@@ -280,7 +336,7 @@ fun RemoteScreen(
             onToggleControlPanelCollapsed = { viewModel.handleIntent(RemoteIntent.SetControlPanelCollapsed(it)) },
             onToggleDebugOverlay = { viewModel.handleIntent(RemoteIntent.ToggleDebugOverlay) },
             onDismissAppPicker = { viewModel.handleIntent(RemoteIntent.SetAppSelectDialogOpen(false)) },
-            onDisconnect = { viewModel.handleIntent(RemoteIntent.DisconnectAndNavigateBack) }
+            onDisconnect = { viewModel.handleIntent(RemoteIntent.DisconnectAndNavigateBack) },
         )
 
         if (controlState.isDebugModeEnabled && controlState.isDebugOverlayVisible) {
@@ -297,22 +353,23 @@ private fun RemoteVideoSurface(
     videoBounds: VideoBounds,
     onViewportSizeChanged: (IntSize) -> Unit,
     onRendererReady: (SurfaceViewRenderer) -> Unit,
-    viewModel: RemoteViewModel
+    viewModel: RemoteViewModel,
 ) {
     val stretchScale = rememberVideoStretchScale(viewportSize, videoBounds, effectiveFillMode)
     val touchPointerState = remember { RemoteTouchPointerState() }
     var touchEpoch by remember { mutableIntStateOf(touchPointerState.epoch) }
     var touchReady by remember { mutableStateOf(false) }
     val touchSurfaceSnapshots = remember { mutableStateMapOf<Int, TouchSurfaceSnapshot>() }
-    val touchSurfaceSnapshot = remember(touchEpoch, viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
-        TouchSurfaceSnapshot(
-            epoch = touchEpoch,
-            viewportSize = viewportSize,
-            videoSize = viewportState.videoSize,
-            fillMode = effectiveFillMode,
-            videoBounds = videoBounds
-        )
-    }
+    val touchSurfaceSnapshot =
+        remember(touchEpoch, viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
+            TouchSurfaceSnapshot(
+                epoch = touchEpoch,
+                viewportSize = viewportSize,
+                videoSize = viewportState.videoSize,
+                fillMode = effectiveFillMode,
+                videoBounds = videoBounds,
+            )
+        }
     SideEffect {
         if (touchSurfaceSnapshot.isValid()) {
             touchSurfaceSnapshots[touchSurfaceSnapshot.epoch] = touchSurfaceSnapshot
@@ -326,9 +383,9 @@ private fun RemoteVideoSurface(
             sendPointer(
                 viewModel = viewModel,
                 event = event,
-                snapshot = snapshot.takeIf { canSend }
+                snapshot = snapshot.takeIf { canSend },
             )
-        }
+        },
     )
 
     LaunchedEffect(viewportSize, viewportState.videoSize, effectiveFillMode, videoBounds) {
@@ -352,18 +409,19 @@ private fun RemoteVideoSurface(
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clipToBounds()
-            .onSizeChanged(onViewportSizeChanged),
-        contentAlignment = Alignment.Center
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .clipToBounds()
+                .onSizeChanged(onViewportSizeChanged),
+        contentAlignment = Alignment.Center,
     ) {
         RemoteVideoRenderer(
             videoSize = viewportState.videoSize,
             videoBounds = videoBounds,
             stretchScale = stretchScale,
             onRendererReady = onRendererReady,
-            viewModel = viewModel
+            viewModel = viewModel,
         )
 
         RemoteTouchInputLayer(
@@ -374,7 +432,7 @@ private fun RemoteVideoSurface(
             touchPointerState = touchPointerState,
             touchEpoch = touchEpoch,
             touchReady = touchReady,
-            onPointerEvent = latestPointerDispatch
+            onPointerEvent = latestPointerDispatch,
         )
     }
 }
@@ -383,23 +441,24 @@ private fun RemoteVideoSurface(
 private fun rememberVideoStretchScale(
     viewportSize: IntSize,
     videoBounds: VideoBounds,
-    fillMode: Boolean
-): ScaleFactor {
-    return remember(viewportSize, videoBounds, fillMode) {
+    fillMode: Boolean,
+): ScaleFactor =
+    remember(viewportSize, videoBounds, fillMode) {
         ScaleFactor(
-            scaleX = if (!fillMode || videoBounds.width <= 0f) {
-                1f
-            } else {
-                viewportSize.width.toFloat().coerceAtLeast(1f) / videoBounds.width
-            },
-            scaleY = if (!fillMode || videoBounds.height <= 0f) {
-                1f
-            } else {
-                viewportSize.height.toFloat().coerceAtLeast(1f) / videoBounds.height
-            }
+            scaleX =
+                if (!fillMode || videoBounds.width <= 0f) {
+                    1f
+                } else {
+                    viewportSize.width.toFloat().coerceAtLeast(1f) / videoBounds.width
+                },
+            scaleY =
+                if (!fillMode || videoBounds.height <= 0f) {
+                    1f
+                } else {
+                    viewportSize.height.toFloat().coerceAtLeast(1f) / videoBounds.height
+                },
         )
     }
-}
 
 @Composable
 private fun RemoteVideoRenderer(
@@ -407,7 +466,7 @@ private fun RemoteVideoRenderer(
     videoBounds: VideoBounds,
     stretchScale: ScaleFactor,
     onRendererReady: (SurfaceViewRenderer) -> Unit,
-    viewModel: RemoteViewModel
+    viewModel: RemoteViewModel,
 ) {
     val density = LocalDensity.current
 
@@ -420,26 +479,25 @@ private fun RemoteVideoRenderer(
                 viewModel.webRtcManager.bindRemoteVideo(this)
             }
         },
-        modifier = Modifier
-            .then(
-                if (videoSize == IntSize.Zero) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.size(
-                        width = with(density) { videoBounds.width.toDp() },
-                        height = with(density) { videoBounds.height.toDp() }
-                    )
-                }
-            )
-            .graphicsLayer {
-                alpha = if (videoSize == IntSize.Zero) 0f else 1f
-                scaleX = stretchScale.scaleX
-                scaleY = stretchScale.scaleY
-            }
-            .clipToBounds(),
+        modifier =
+            Modifier
+                .then(
+                    if (videoSize == IntSize.Zero) {
+                        Modifier.fillMaxSize()
+                    } else {
+                        Modifier.size(
+                            width = with(density) { videoBounds.width.toDp() },
+                            height = with(density) { videoBounds.height.toDp() },
+                        )
+                    },
+                ).graphicsLayer {
+                    alpha = if (videoSize == IntSize.Zero) 0f else 1f
+                    scaleX = stretchScale.scaleX
+                    scaleY = stretchScale.scaleY
+                }.clipToBounds(),
         update = { renderer ->
             renderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
-        }
+        },
     )
 }
 
@@ -452,44 +510,45 @@ private fun RemoteTouchInputLayer(
     touchPointerState: RemoteTouchPointerState,
     touchEpoch: Int,
     touchReady: Boolean,
-    onPointerEvent: (RemoteTouchPointerEvent) -> Unit
+    onPointerEvent: (RemoteTouchPointerEvent) -> Unit,
 ) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(touchPointerState, viewportSize, videoSize, effectiveFillMode, videoBounds, touchEpoch, touchReady) {
-                awaitEachGesture {
-                    val emitPointer: (RemoteTouchPointerEvent) -> Unit = { event ->
-                        onPointerEvent(event)
-                    }
-                    try {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        if (!touchReady || !isValidTouchSurface(viewportSize, videoSize, effectiveFillMode, videoBounds)) {
-                            return@awaitEachGesture
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .pointerInput(touchPointerState, viewportSize, videoSize, effectiveFillMode, videoBounds, touchEpoch, touchReady) {
+                    awaitEachGesture {
+                        val emitPointer: (RemoteTouchPointerEvent) -> Unit = { event ->
+                            onPointerEvent(event)
                         }
-                        touchPointerState.beginGesture(down.id.value, down.position, emitPointer)
-
-                        do {
-                            val event = awaitPointerEvent(pass = PointerEventPass.Main)
-                            if (!touchReady || touchPointerState.epoch != touchEpoch) {
-                                touchPointerState.cancelActivePointers(emitPointer)
+                        try {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            if (!touchReady || !isValidTouchSurface(viewportSize, videoSize, effectiveFillMode, videoBounds)) {
                                 return@awaitEachGesture
                             }
-                            event.changes.forEach { change ->
-                                if (!change.previousPressed && change.pressed) {
-                                    touchPointerState.pointerDown(change.id.value, change.position, emitPointer)
-                                } else if (change.changedToUp()) {
-                                    touchPointerState.pointerUp(change.id.value, change.position, emitPointer)
-                                } else if (change.pressed) {
-                                    touchPointerState.pointerMove(change.id.value, change.position, emitPointer)
+                            touchPointerState.beginGesture(down.id.value, down.position, emitPointer)
+
+                            do {
+                                val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                                if (!touchReady || touchPointerState.epoch != touchEpoch) {
+                                    touchPointerState.cancelActivePointers(emitPointer)
+                                    return@awaitEachGesture
                                 }
-                            }
-                        } while (event.changes.any { it.pressed })
-                    } finally {
-                        touchPointerState.cancelActivePointers(emitPointer)
+                                event.changes.forEach { change ->
+                                    if (!change.previousPressed && change.pressed) {
+                                        touchPointerState.pointerDown(change.id.value, change.position, emitPointer)
+                                    } else if (change.changedToUp()) {
+                                        touchPointerState.pointerUp(change.id.value, change.position, emitPointer)
+                                    } else if (change.pressed) {
+                                        touchPointerState.pointerMove(change.id.value, change.position, emitPointer)
+                                    }
+                                }
+                            } while (event.changes.any { it.pressed })
+                        } finally {
+                            touchPointerState.cancelActivePointers(emitPointer)
+                        }
                     }
-                }
-            }
+                },
     )
 }
 
@@ -509,7 +568,7 @@ private fun RemoteFloatingControl(
     onToggleControlPanelCollapsed: (Boolean) -> Unit,
     onToggleDebugOverlay: () -> Unit,
     onDismissAppPicker: () -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -523,7 +582,7 @@ private fun RemoteFloatingControl(
     var previousViewportSize by remember { mutableStateOf(IntSize.Zero) }
     val fabAlpha by animateFloatAsState(
         targetValue = if (controlState.isControlPanelCollapsed) 0.72f else 0.9f,
-        label = "fabAlpha"
+        label = "fabAlpha",
     )
 
     fun expandedBounds(size: IntSize): Pair<Float, Float> {
@@ -536,7 +595,7 @@ private fun RemoteFloatingControl(
         val (maxX, maxY) = expandedBounds(viewportSize)
         return Offset(
             x = offset.x.coerceIn(fabMarginPx, maxX),
-            y = offset.y.coerceIn(fabMarginPx, maxY)
+            y = offset.y.coerceIn(fabMarginPx, maxY),
         )
     }
 
@@ -546,17 +605,18 @@ private fun RemoteFloatingControl(
         }
 
         val currentY = clampExpandedOffset(fabOffset).y
-        val dockX = if (collapsed) {
-            if (isFabDockedRight) {
-                viewportSize.width - collapsedPeekPx
+        val dockX =
+            if (collapsed) {
+                if (isFabDockedRight) {
+                    viewportSize.width - collapsedPeekPx
+                } else {
+                    collapsedPeekPx - fabSizePx
+                }
+            } else if (isFabDockedRight) {
+                viewportSize.width - fabSizePx - fabMarginPx
             } else {
-                collapsedPeekPx - fabSizePx
+                fabMarginPx
             }
-        } else if (isFabDockedRight) {
-            viewportSize.width - fabSizePx - fabMarginPx
-        } else {
-            fabMarginPx
-        }
 
         fabOffset = Offset(dockX, currentY)
         onToggleControlPanelCollapsed(collapsed)
@@ -587,20 +647,23 @@ private fun RemoteFloatingControl(
                 val (previousMaxX, previousMaxY) = expandedBounds(previousViewportSize)
                 val (currentMaxX, currentMaxY) = expandedBounds(viewportSize)
                 val expandedOffset = clampExpandedOffset(fabOffset)
-                val relativeX = if (previousMaxX > fabMarginPx) {
-                    ((expandedOffset.x - fabMarginPx) / (previousMaxX - fabMarginPx)).coerceIn(0f, 1f)
-                } else {
-                    1f
-                }
-                val relativeY = if (previousMaxY > fabMarginPx) {
-                    ((expandedOffset.y - fabMarginPx) / (previousMaxY - fabMarginPx)).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-                fabOffset = Offset(
-                    x = fabMarginPx + ((currentMaxX - fabMarginPx) * relativeX),
-                    y = fabMarginPx + ((currentMaxY - fabMarginPx) * relativeY)
-                )
+                val relativeX =
+                    if (previousMaxX > fabMarginPx) {
+                        ((expandedOffset.x - fabMarginPx) / (previousMaxX - fabMarginPx)).coerceIn(0f, 1f)
+                    } else {
+                        1f
+                    }
+                val relativeY =
+                    if (previousMaxY > fabMarginPx) {
+                        ((expandedOffset.y - fabMarginPx) / (previousMaxY - fabMarginPx)).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+                fabOffset =
+                    Offset(
+                        x = fabMarginPx + ((currentMaxX - fabMarginPx) * relativeX),
+                        y = fabMarginPx + ((currentMaxY - fabMarginPx) * relativeY),
+                    )
             }
             if (controlState.isControlPanelCollapsed) {
                 dockFab(collapsed = true)
@@ -613,31 +676,33 @@ private fun RemoteFloatingControl(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Surface(
-            modifier = Modifier
-                .offset { IntOffset(fabOffset.x.roundToInt(), fabOffset.y.roundToInt()) }
-                .size(fabSize)
-                .pointerInput(viewportSize, controlState.isControlPanelCollapsed) {
-                    detectDragGestures(
-                        onDragStart = {
-                            if (controlState.isControlPanelCollapsed) {
-                                dockFab(collapsed = false)
-                            }
-                        },
-                        onDragEnd = {
-                            isFabDockedRight = fabOffset.x + fabSizePx / 2f >= viewportSize.width / 2f
-                            dockFab(collapsed = true)
+            modifier =
+                Modifier
+                    .offset { IntOffset(fabOffset.x.roundToInt(), fabOffset.y.roundToInt()) }
+                    .size(fabSize)
+                    .pointerInput(viewportSize, controlState.isControlPanelCollapsed) {
+                        detectDragGestures(
+                            onDragStart = {
+                                if (controlState.isControlPanelCollapsed) {
+                                    dockFab(collapsed = false)
+                                }
+                            },
+                            onDragEnd = {
+                                isFabDockedRight = fabOffset.x + fabSizePx / 2f >= viewportSize.width / 2f
+                                dockFab(collapsed = true)
+                            },
+                        ) { change, dragAmount ->
+                            change.consume()
+                            fabOffset =
+                                clampExpandedOffset(
+                                    Offset(
+                                        x = fabOffset.x + dragAmount.x,
+                                        y = fabOffset.y + dragAmount.y,
+                                    ),
+                                )
+                            onToggleControlPanelCollapsed(false)
                         }
-                    ) { change, dragAmount ->
-                        change.consume()
-                        fabOffset = clampExpandedOffset(
-                            Offset(
-                                x = fabOffset.x + dragAmount.x,
-                                y = fabOffset.y + dragAmount.y
-                            )
-                        )
-                        onToggleControlPanelCollapsed(false)
-                    }
-                },
+                    },
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surface.copy(alpha = fabAlpha),
             tonalElevation = 8.dp,
@@ -648,18 +713,22 @@ private fun RemoteFloatingControl(
                 } else {
                     onToggleControlDialog(true)
                 }
-            }
+            },
         ) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 Icon(
-                    imageVector = if (controlState.isControlPanelCollapsed) {
-                        if (isFabDockedRight) Icons.AutoMirrored.Filled.KeyboardArrowLeft
-                        else Icons.AutoMirrored.Filled.KeyboardArrowRight
-                    } else {
-                        Icons.Default.Settings
-                    },
+                    imageVector =
+                        if (controlState.isControlPanelCollapsed) {
+                            if (isFabDockedRight) {
+                                Icons.AutoMirrored.Filled.KeyboardArrowLeft
+                            } else {
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight
+                            }
+                        } else {
+                            Icons.Default.Settings
+                        },
                     contentDescription = "Controls",
-                    tint = MaterialTheme.colorScheme.onSurface
+                    tint = MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
@@ -680,13 +749,13 @@ private fun RemoteFloatingControl(
         onReconnectToDevice = onReconnectToDevice,
         onOpenAppPicker = onOpenAppPicker,
         onToggleDebugOverlay = onToggleDebugOverlay,
-        onDisconnect = onDisconnect
+        onDisconnect = onDisconnect,
     )
 
     AppPickerSheet(
         appPickerState = appPickerState,
         onDismissAppPicker = onDismissAppPicker,
-        onReconnectToApp = onReconnectToApp
+        onReconnectToApp = onReconnectToApp,
     )
 }
 
@@ -704,21 +773,25 @@ private fun RemoteControlSheet(
     onReconnectToDevice: () -> Unit,
     onOpenAppPicker: () -> Unit,
     onToggleDebugOverlay: () -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
 ) {
     if (!controlState.isControlDialogOpen) return
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item {
                 Text("当前设备: ${device.name}", style = MaterialTheme.typography.titleMedium)
-                Text("连接状态: ${controlState.status}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "连接状态: ${controlState.status}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
@@ -728,7 +801,7 @@ private fun RemoteControlSheet(
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenon") } }) { Text("亮屏") }
                     OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenoff") } }) { Text("息屏") }
@@ -742,7 +815,7 @@ private fun RemoteControlSheet(
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(onClick = { runControlAction(false) { onSendKey("back") } }) { Text("返回") }
                     OutlinedButton(onClick = { runControlAction(false) { onSendKey("home") } }) { Text("主页") }
@@ -759,7 +832,7 @@ private fun RemoteControlSheet(
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumeup") } }) { Text("音量+") }
                     OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumedown") } }) { Text("音量-") }
@@ -773,14 +846,17 @@ private fun RemoteControlSheet(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (controlState.isFlexDisplayEnabled) "自适应显示器已启用，默认保持等比显示"
-                        else "强制拉伸填充全屏",
-                        modifier = Modifier.weight(1f)
+                        if (controlState.isFlexDisplayEnabled) {
+                            "自适应显示器已启用，默认保持等比显示"
+                        } else {
+                            "强制拉伸填充全屏"
+                        },
+                        modifier = Modifier.weight(1f),
                     )
                     Switch(
                         checked = controlState.fillMode,
                         onCheckedChange = { runControlAction(false) { onSetFillMode(it) } },
-                        enabled = true
+                        enabled = true,
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -802,11 +878,11 @@ private fun RemoteControlSheet(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
                         onClick = { runControlAction(true, onReconnectToDevice) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
                     ) { Text("整机投屏") }
 
                     OutlinedButton(
@@ -814,7 +890,7 @@ private fun RemoteControlSheet(
                             dismissControlDialog()
                             onOpenAppPicker()
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
                     ) { Text("应用投屏") }
                 }
                 Spacer(modifier = Modifier.height(24.dp))
@@ -827,7 +903,7 @@ private fun RemoteControlSheet(
                         onDisconnect()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("断开连接并返回")
                 }
@@ -840,7 +916,7 @@ private fun RemoteControlSheet(
 private fun AppPickerSheet(
     appPickerState: RemoteAppPickerUiState,
     onDismissAppPicker: () -> Unit,
-    onReconnectToApp: (DeviceApp) -> Unit
+    onReconnectToApp: (DeviceApp) -> Unit,
 ) {
     if (!appPickerState.isAppSelectDialogOpen) return
 
@@ -861,12 +937,12 @@ private fun AppPickerSheet(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(appPickerState.availableApps) { app ->
                         OutlinedButton(
                             onClick = { onReconnectToApp(app) },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(app.name)
                         }
@@ -878,7 +954,7 @@ private fun AppPickerSheet(
             Button(onClick = onDismissAppPicker, modifier = Modifier.fillMaxWidth()) {
                 Text("取消")
             }
-        }
+        },
     )
 }
 
@@ -886,19 +962,20 @@ private fun AppPickerSheet(
 private fun RemoteDebugOverlay(controlState: RemoteControlUiState) {
     val snapshot = controlState.debugSnapshot
     Surface(
-        modifier = Modifier
-            .padding(14.dp)
-            .widthIn(min = 240.dp, max = 360.dp),
+        modifier =
+            Modifier
+                .padding(14.dp)
+                .widthIn(min = 240.dp, max = 360.dp),
         shape = RoundedCornerShape(10.dp),
         color = Color.Black.copy(alpha = 0.76f),
         tonalElevation = 8.dp,
-        shadowElevation = 8.dp
+        shadowElevation = 8.dp,
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = "视频诊断",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                color = Color.White
+                color = Color.White,
             )
             DebugRow("连接", controlState.status)
             DebugRow("分辨率", snapshot?.let { if (it.width > 0 && it.height > 0) "${it.width} × ${it.height}" else "-" } ?: "-")
@@ -916,20 +993,23 @@ private fun RemoteDebugOverlay(controlState: RemoteControlUiState) {
 }
 
 @Composable
-private fun DebugRow(label: String, value: String) {
+private fun DebugRow(
+    label: String,
+    value: String,
+) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             text = label,
             modifier = Modifier.width(68.dp),
             style = MaterialTheme.typography.labelMedium,
-            color = Color.White.copy(alpha = 0.72f)
+            color = Color.White.copy(alpha = 0.72f),
         )
         Text(
             text = value,
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.labelMedium,
             fontFamily = FontFamily.Monospace,
-            color = Color.White.copy(alpha = 0.92f)
+            color = Color.White.copy(alpha = 0.92f),
         )
     }
 }
@@ -945,22 +1025,23 @@ private fun formatFrameAge(lastFrameAtMillis: Long): String {
 private fun sendPointer(
     viewModel: RemoteViewModel,
     event: RemoteTouchPointerEvent,
-    snapshot: TouchSurfaceSnapshot?
+    snapshot: TouchSurfaceSnapshot?,
 ) {
     val surface = snapshot ?: return
     if (!surface.isValid()) {
         return
     }
-    val bounds = if (surface.fillMode) {
-        VideoBounds(
-            left = 0f,
-            top = 0f,
-            width = surface.viewportSize.width.toFloat(),
-            height = surface.viewportSize.height.toFloat()
-        )
-    } else {
-        surface.videoBounds
-    }
+    val bounds =
+        if (surface.fillMode) {
+            VideoBounds(
+                left = 0f,
+                top = 0f,
+                width = surface.viewportSize.width.toFloat(),
+                height = surface.viewportSize.height.toFloat(),
+            )
+        } else {
+            surface.videoBounds
+        }
     val xRatio = ((event.point.x - bounds.left) / bounds.width).coerceIn(0f, 1f)
     val yRatio = ((event.point.y - bounds.top) / bounds.height).coerceIn(0f, 1f)
     val isReleasePhase = event.phase == "up" || event.phase == "cancel"
@@ -977,9 +1058,9 @@ private fun sendPointer(
                 frameWidth = surface.videoSize.width,
                 frameHeight = surface.videoSize.height,
                 pressure = if (isReleasePhase) 0f else 1f,
-                buttons = if (isReleasePhase) 0 else 1
-            )
-        )
+                buttons = if (isReleasePhase) 0 else 1,
+            ),
+        ),
     )
 }
 
@@ -987,7 +1068,7 @@ private fun isValidTouchSurface(
     viewportSize: IntSize,
     videoSize: IntSize,
     fillMode: Boolean,
-    videoBounds: VideoBounds
+    videoBounds: VideoBounds,
 ): Boolean {
     if (viewportSize.width <= 0 || viewportSize.height <= 0 || videoSize.width <= 0 || videoSize.height <= 0) {
         return false
@@ -998,18 +1079,23 @@ private fun isValidTouchSurface(
     return videoBounds.width > 0f && videoBounds.height > 0f
 }
 
-private fun calculateVideoBounds(viewportSize: IntSize, videoSize: IntSize, fillMode: Boolean): VideoBounds {
+private fun calculateVideoBounds(
+    viewportSize: IntSize,
+    videoSize: IntSize,
+    fillMode: Boolean,
+): VideoBounds {
     val viewportWidth = viewportSize.width.toFloat().coerceAtLeast(1f)
     val viewportHeight = viewportSize.height.toFloat().coerceAtLeast(1f)
     val videoWidth = videoSize.width.toFloat().coerceAtLeast(1f)
     val videoHeight = videoSize.height.toFloat().coerceAtLeast(1f)
-    
-    val scale = if (fillMode) {
-        maxOf(viewportWidth / videoWidth, viewportHeight / videoHeight)
-    } else {
-        minOf(viewportWidth / videoWidth, viewportHeight / videoHeight)
-    }
-    
+
+    val scale =
+        if (fillMode) {
+            maxOf(viewportWidth / videoWidth, viewportHeight / videoHeight)
+        } else {
+            minOf(viewportWidth / videoWidth, viewportHeight / videoHeight)
+        }
+
     val displayWidth = videoWidth * scale
     val displayHeight = videoHeight * scale
     val left = (viewportWidth - displayWidth) / 2f
@@ -1020,7 +1106,7 @@ private fun calculateVideoBounds(viewportSize: IntSize, videoSize: IntSize, fill
 private fun resolveDesiredScreenOrientation(
     viewportSize: IntSize,
     videoSize: IntSize,
-    occupancyRatio: Float
+    occupancyRatio: Float,
 ): Int? {
     if (viewportSize.width <= 0 || viewportSize.height <= 0 || videoSize.width <= 0 || videoSize.height <= 0) {
         return null
@@ -1066,7 +1152,7 @@ private fun resolveNormalCastScreenOrientation(videoSize: IntSize): Int? {
 private fun calculateVisibleViewportSize(
     view: android.view.View,
     fallbackSize: IntSize,
-    boundsInWindow: Rect?
+    boundsInWindow: Rect?,
 ): IntSize {
     if (fallbackSize.width <= 0 || fallbackSize.height <= 0) {
         return IntSize.Zero
@@ -1098,12 +1184,12 @@ private data class VideoBounds(
     val left: Float,
     val top: Float,
     val width: Float,
-    val height: Float
+    val height: Float,
 )
 
 private data class ScaleFactor(
     val scaleX: Float,
-    val scaleY: Float
+    val scaleY: Float,
 )
 
 private data class TouchSurfaceSnapshot(
@@ -1111,7 +1197,7 @@ private data class TouchSurfaceSnapshot(
     val viewportSize: IntSize,
     val videoSize: IntSize,
     val fillMode: Boolean,
-    val videoBounds: VideoBounds
+    val videoBounds: VideoBounds,
 ) {
     fun isValid(): Boolean = isValidTouchSurface(viewportSize, videoSize, fillMode, videoBounds)
 }

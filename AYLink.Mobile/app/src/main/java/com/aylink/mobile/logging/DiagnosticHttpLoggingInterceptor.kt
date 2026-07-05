@@ -4,7 +4,7 @@ import okhttp3.Interceptor
 import okhttp3.Response
 
 class DiagnosticHttpLoggingInterceptor(
-    private val logger: AppLogger
+    private val logger: AppLogger,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -14,7 +14,7 @@ class DiagnosticHttpLoggingInterceptor(
             val durationMs = (System.nanoTime() - startedAt) / 1_000_000
             logger.i(
                 LOG_TAG,
-                "HTTP ${request.method} ${request.url.encodedPath} -> ${response.code} in ${durationMs}ms"
+                "HTTP ${request.method} ${request.url.encodedPath} -> ${response.code} in ${durationMs}ms",
             )
             response
         } catch (error: Exception) {
@@ -22,7 +22,7 @@ class DiagnosticHttpLoggingInterceptor(
             logger.w(
                 LOG_TAG,
                 "HTTP ${request.method} ${request.url.encodedPath} failed in ${durationMs}ms: ${error.message}",
-                error
+                error,
             )
             throw error
         }

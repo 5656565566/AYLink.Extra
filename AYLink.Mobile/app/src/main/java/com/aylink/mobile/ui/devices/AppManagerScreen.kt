@@ -54,16 +54,17 @@ import com.aylink.mobile.ui.remote.AyDialog
 @Composable
 fun AppManagerScreen(
     viewModel: AppManagerViewModel,
-    onOpenRemote: (Device, String, String) -> Unit
+    onOpenRemote: (Device, String, String) -> Unit,
 ) {
     val listState by viewModel.listUiState.collectAsStateWithLifecycle()
     val dialogState by viewModel.dialogUiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            viewModel.handleIntent(AppManagerIntent.InstallApk(uri))
+    val apkPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                viewModel.handleIntent(AppManagerIntent.InstallApk(uri))
+            }
         }
-    }
 
     LaunchedEffect(viewModel.effect) {
         viewModel.effect.collect { effect ->
@@ -84,34 +85,35 @@ fun AppManagerScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
     ) {
         Column(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         ) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CompactTopButton(
                         onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream")) },
                         enabled = !dialogState.installLoading && !listState.loading,
                         text = if (dialogState.installLoading) "安装中..." else "安装 APK",
                         icon = Icons.Default.Add,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
                     ) {
                         if (dialogState.installLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
@@ -120,7 +122,7 @@ fun AppManagerScreen(
                         enabled = !dialogState.installLoading && !listState.loading,
                         text = "刷新",
                         icon = Icons.Default.Refresh,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -128,13 +130,13 @@ fun AppManagerScreen(
             if (listState.errorMessage != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         text = listState.errorMessage.orEmpty(),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
@@ -150,13 +152,13 @@ fun AppManagerScreen(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             "没有发现应用",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -164,12 +166,12 @@ fun AppManagerScreen(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 80.dp),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
                     items(listState.apps, key = { it.packageName }) { app ->
                         AppListItem(
                             app = app,
-                            onClick = { viewModel.handleIntent(AppManagerIntent.ShowAppInfo(app)) }
+                            onClick = { viewModel.handleIntent(AppManagerIntent.ShowAppInfo(app)) },
                         )
                     }
                 }
@@ -178,7 +180,7 @@ fun AppManagerScreen(
 
         AppInfoDialog(
             dialogState = dialogState,
-            onIntent = { viewModel.handleIntent(it) }
+            onIntent = { viewModel.handleIntent(it) },
         )
     }
 }
@@ -186,7 +188,7 @@ fun AppManagerScreen(
 @Composable
 private fun AppInfoDialog(
     dialogState: AppManagerDialogUiState,
-    onIntent: (AppManagerIntent) -> Unit
+    onIntent: (AppManagerIntent) -> Unit,
 ) {
     dialogState.selectedApp?.takeIf { dialogState.isAppInfoDialogOpen }?.let { app ->
         AyDialog(
@@ -196,13 +198,13 @@ private fun AppInfoDialog(
                 Text(
                     text = app.name.ifBlank { "未知应用" },
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = app.packageName,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -213,7 +215,7 @@ private fun AppInfoDialog(
                 } else {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         InfoRow("包名", dialogState.appInfo?.packageName ?: app.packageName)
                         InfoRow("版本名称", dialogState.appInfo?.versionName?.ifBlank { "-" } ?: "-")
@@ -227,7 +229,7 @@ private fun AppInfoDialog(
 
                         Button(
                             onClick = { onIntent(AppManagerIntent.StartRemoteForApp(app)) },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -235,19 +237,19 @@ private fun AppInfoDialog(
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             CompactDialogButton(
                                 onClick = { onIntent(AppManagerIntent.LaunchApp(app.packageName)) },
                                 text = "启动",
                                 icon = Icons.Default.PlayArrow,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
                             )
                             CompactDialogButton(
                                 onClick = { onIntent(AppManagerIntent.CopyPackageName(app.packageName)) },
                                 text = "复制包名",
                                 icon = Icons.Default.Info,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
                             )
                         }
                         CompactDialogButton(
@@ -255,13 +257,13 @@ private fun AppInfoDialog(
                             text = "卸载应用",
                             icon = Icons.Default.Warning,
                             modifier = Modifier.fillMaxWidth(),
-                            contentColor = MaterialTheme.colorScheme.error
+                            contentColor = MaterialTheme.colorScheme.error,
                         ) {
                             if (dialogState.actionLoading) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(16.dp),
                                     strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.error
+                                    color = MaterialTheme.colorScheme.error,
                                 )
                             }
                         }
@@ -271,9 +273,9 @@ private fun AppInfoDialog(
             footer = {
                 Button(
                     onClick = { onIntent(AppManagerIntent.HideAppInfo) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) { Text("关闭") }
-            }
+            },
         )
     }
 }
@@ -285,17 +287,17 @@ private fun CompactTopButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    trailing: @Composable (() -> Unit)? = null
+    trailing: @Composable (() -> Unit)? = null,
 ) {
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier.height(40.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+            horizontalArrangement = Arrangement.Center,
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(6.dp))
@@ -315,17 +317,17 @@ private fun CompactDialogButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier,
     contentColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
-    trailing: @Composable (() -> Unit)? = null
+    trailing: @Composable (() -> Unit)? = null,
 ) {
     OutlinedButton(
         onClick = onClick,
         modifier = modifier.height(40.dp),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = contentColor)
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = contentColor),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+            horizontalArrangement = Arrangement.Center,
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(6.dp))
@@ -341,47 +343,48 @@ private fun CompactDialogButton(
 @Composable
 fun AppListItem(
     app: DeviceApp,
-    onClick: () -> Unit
+    onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(40.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.Info,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.width(16.dp))
-            
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = app.name.ifBlank { "未知应用" },
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1
+                    maxLines = 1,
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = app.packageName,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -395,18 +398,21 @@ fun AppListItem(
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun InfoRow(
+    label: String,
+    value: String,
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
 }

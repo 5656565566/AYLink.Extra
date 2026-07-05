@@ -7,15 +7,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class SessionStore(context: Context) {
+class SessionStore(
+    context: Context,
+) {
     private val preferences = context.getSharedPreferences("aylink_mobile_session", Context.MODE_PRIVATE)
 
-    private val _baseUrl = MutableStateFlow(
-        preferences.getString(KEY_BASE_URL, null)?.trim()?.removeSuffix("/") ?: DEFAULT_BASE_URL
-    )
-    private val _username = MutableStateFlow(
-        preferences.getString(KEY_USERNAME, DEFAULT_USERNAME)?.trim().orEmpty().ifBlank { DEFAULT_USERNAME }
-    )
+    private val _baseUrl =
+        MutableStateFlow(
+            preferences.getString(KEY_BASE_URL, null)?.trim()?.removeSuffix("/") ?: DEFAULT_BASE_URL,
+        )
+    private val _username =
+        MutableStateFlow(
+            normalizeUsername(preferences.getString(KEY_USERNAME, DEFAULT_USERNAME)),
+        )
     private val _token = MutableStateFlow(preferences.getString(KEY_TOKEN, null))
     private val _refreshToken = MutableStateFlow(preferences.getString(KEY_REFRESH_TOKEN, null))
     private val _lastSelectedDevice = MutableStateFlow(readDevice(KEY_LAST_SELECTED_DEVICE))
@@ -46,7 +50,10 @@ class SessionStore(context: Context) {
         preferences.edit { putString(KEY_USERNAME, _username.value) }
     }
 
-    fun updateSession(accessToken: String?, refreshToken: String?) {
+    fun updateSession(
+        accessToken: String?,
+        refreshToken: String?,
+    ) {
         _token.value = accessToken
         _refreshToken.value = refreshToken
         preferences.edit {
@@ -89,9 +96,7 @@ class SessionStore(context: Context) {
         updateLastRemoteDevice(null)
     }
 
-    private fun readLastRemoteDevice(): Device? {
-        return readDevice(KEY_LAST_REMOTE_DEVICE)
-    }
+    private fun readLastRemoteDevice(): Device? = readDevice(KEY_LAST_REMOTE_DEVICE)
 
     private fun readDevice(prefix: String): Device? {
         if (!preferences.contains("${prefix}_id")) {
@@ -103,15 +108,21 @@ class SessionStore(context: Context) {
             serial = preferences.getString("${prefix}_serial", "").orEmpty(),
             status = preferences.getString("${prefix}_status", "unknown").orEmpty(),
             ipAddress = preferences.getString("${prefix}_ip", null),
-            port = if (preferences.contains("${prefix}_port")) {
-                preferences.getInt("${prefix}_port", 0)
-            } else {
-                null
-            }
+            port =
+                if (preferences.contains("${prefix}_port")) {
+                    preferences.getInt("${prefix}_port", 0)
+                } else {
+                    null
+                },
         )
     }
 
-    private fun writeDevice(prefix: String, device: Device?) {
+    private fun normalizeUsername(value: String?): String = value?.trim().orEmpty().ifBlank { DEFAULT_USERNAME }
+
+    private fun writeDevice(
+        prefix: String,
+        device: Device?,
+    ) {
         preferences.edit {
             if (device == null) {
                 remove("${prefix}_id")

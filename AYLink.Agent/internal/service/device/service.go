@@ -132,21 +132,7 @@ func (s *Service) List(ctx context.Context) ([]domaindevice.Device, error) {
 		}
 
 		if s.shouldAutoReconnect(device, now) {
-			device.Status = "offline"
-			device.UpdatedAt = now
-			if err := s.repo.Update(ctx, device); err != nil {
-				return nil, err
-			}
 			s.enqueueAutoReconnect(ctx, *device)
-			continue
-		}
-
-		if !strings.EqualFold(device.Status, "offline") {
-			device.Status = "offline"
-			device.UpdatedAt = now
-			if err := s.repo.Update(ctx, device); err != nil {
-				return nil, err
-			}
 		}
 	}
 

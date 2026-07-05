@@ -233,3 +233,39 @@ func TestListReturnsRepositoryUpdateErrorWhenOnlineStatePersistFails(t *testing.
 		t.Fatalf("expected update error, got %v", err)
 	}
 }
+
+func TestListKeepsStoredStatusWhenDeviceIsNotConfirmedOnline(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute)
+	ip := "192.168.0.10"
+	port := 5555
+	repo := &fakeRepository{
+		listResult: []domaindevice.Device{{
+			ID:        1,
+			Name:      "Pixel",
+			Serial:    "192.168.0.10:5555",
+			IPAddress: &ip,
+			Port:      &port,
+			Status:    "online",
+			LastSeen:  now,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}},
+	}
+	adb := &fakeADBManager{}
+	service := NewService(repo)
+	service.SetADBManager(adb)
+
+	devices, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("expected list success, got %v", err)
+	}
+	if len(devices) != 1 {
+		t.Fatalf("expected one device, got %d", len(devices))
+	}
+	if devices[0].Status != "online" {
+		t.Fatalf("expected stored status to be preserved, got %q", devices[0].Status)
+	}
+	if repo.updateCalled {
+		t.Fatal("expected list not to persist offline for an unconfirmed device")
+	}
+}

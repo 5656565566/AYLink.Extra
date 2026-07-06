@@ -137,6 +137,7 @@ private enum class VideoRecoveryStage {
     Monitoring,
     KeyFrameRequested,
     SourceRefreshRequested,
+    RenegotiationRequested,
     IceRestartRequested,
 }
 
@@ -892,6 +893,19 @@ class RemoteViewModel(
         return true
     }
 
+    private fun tryVideoRenegotiation(reason: String): Boolean {
+        if (!signalClient.isOpen || manualDisconnect || suppressReconnect) {
+            return false
+        }
+        return runCatching {
+            mutableUiState.update { it.copy(status = "画面恢复中...") }
+            videoRecoveryStage = VideoRecoveryStage.RenegotiationRequested
+            stalledVideoObservationCount = 0
+            webRtcManager.createOffer(activeWebRtcGeneration)
+            appLogger?.i(LOG_TAG, "Video renegotiation requested, reason=$reason, deviceId=${device.id}")
+        }.isSuccess
+    }
+
     private fun observeVideoHealth(reason: String) {
         if (manualDisconnect || suppressReconnect || !autoReconnectEnabled) {
             return
@@ -989,13 +1003,20 @@ class RemoteViewModel(
                     scheduleReconnectNow()
                 }
             }
+            VideoRecoveryStage.RenegotiationRequested,
             VideoRecoveryStage.IceRestartRequested -> {
                 val observationCount = observationCountFor(VIDEO_ICE_RECOVERY_OBSERVATION_MS)
                 if (stalledVideoObservationCount < observationCount) {
                     return
                 }
-                appLogger?.w(LOG_TAG, "ICE recovery observation expired, reason=$reason, deviceId=${device.id}")
-                scheduleReconnectNow()
+                appLogger?.w(LOG_TAG, "Video transport recovery observation expired, stage=$videoRecoveryStage, reason=$reason, deviceId=${device.id}")
+                if (videoRecoveryStage == VideoRecoveryStage.RenegotiationRequested) {
+                    if (tryIceRecovery("renegotiation_failed_$reason").not()) {
+                        scheduleReconnectNow()
+                    }
+                } else {
+                    scheduleReconnectNow()
+                }
             }
         }
     }
@@ -1013,16 +1034,21 @@ class RemoteViewModel(
                     }
                 }
             }
-            UnifiedVideoRecoveryAction.KeyFrameReplay,
-            UnifiedVideoRecoveryAction.Renegotiate,
-            UnifiedVideoRecoveryAction.SignalingReattach,
-            -> {
+            UnifiedVideoRecoveryAction.KeyFrameReplay -> {
                 if (!tryVideoKeyFrameRecovery(decision.reason)) {
                     if (tryIceRecovery("key_frame_unavailable_${decision.reason}").not()) {
                         scheduleReconnectNow()
                     }
                 }
             }
+            UnifiedVideoRecoveryAction.Renegotiate -> {
+                if (!tryVideoRenegotiation(decision.reason)) {
+                    if (tryIceRecovery("renegotiation_unavailable_${decision.reason}").not()) {
+                        scheduleReconnectNow()
+                    }
+                }
+            }
+            UnifiedVideoRecoveryAction.SignalingReattach -> scheduleReconnectNow()
             UnifiedVideoRecoveryAction.IceRestart -> {
                 if (tryIceRecovery(decision.reason).not()) {
                     scheduleReconnectNow()

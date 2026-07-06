@@ -68,7 +68,7 @@ export function decideVideoRecovery(
   const agentReason = String(agent?.reason || agent?.source?.reason || agent?.source?.state || '').trim();
   const clientDecodeOrRenderStalled = client.state === 'client_decode_stalled_confirmed' || client.state === 'client_render_stalled_confirmed';
 
-  if (clientDecodeOrRenderStalled && sourceState === 'static_but_alive') {
+  if (clientDecodeOrRenderStalled && sourceState === 'static_but_alive' && isAgentVideoPathHealthy(agent, client)) {
     return {
       state: 'observing',
       origin: 'source',
@@ -95,15 +95,6 @@ export function decideVideoRecovery(
     };
   }
 
-  if (clientDecodeOrRenderStalled) {
-    return {
-      state: 'stalled',
-      origin: 'client',
-      action: 'renegotiate',
-      reason: client.reason
-    };
-  }
-
   if (agentOrigin === 'transport' || client.peerConnectionState === 'failed' || client.peerConnectionState === 'disconnected') {
     return {
       state: 'degraded',
@@ -118,6 +109,15 @@ export function decideVideoRecovery(
       state: 'detached',
       origin: 'transport',
       action: 'signaling_reattach',
+      reason: client.reason
+    };
+  }
+
+  if (clientDecodeOrRenderStalled) {
+    return {
+      state: 'stalled',
+      origin: 'client',
+      action: 'renegotiate',
       reason: client.reason
     };
   }
@@ -137,6 +137,15 @@ export function decideVideoRecovery(
     action: 'keyframe_replay',
     reason: client.reason
   };
+}
+
+function isAgentVideoPathHealthy(agent: AgentVideoHealthSnapshot | null, client: ClientVideoHealthSnapshot): boolean {
+  const senderState = String(agent?.sender?.state || '').toLowerCase();
+  const transportState = String(agent?.transport?.peerConnectionState || '').toLowerCase();
+  if (agent?.transport?.sessionClosed === true || !client.signalingAttached) {
+    return false;
+  }
+  return senderState === 'ready' && transportState !== 'failed' && transportState !== 'closed';
 }
 
 function normalizeOrigin(value: string | undefined): UnifiedVideoHealthOrigin {

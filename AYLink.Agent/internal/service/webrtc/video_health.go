@@ -103,14 +103,14 @@ func classifyVideoStreamHealth(
 	if transport.PeerConnectionState == pion.PeerConnectionStateNew.String() || transport.PeerConnectionState == pion.PeerConnectionStateConnecting.String() {
 		return domainwebrtc.VideoStreamStateConnecting, domainwebrtc.VideoStreamHealthOriginTransport, transport.PeerConnectionState
 	}
-	if sender.State == "waiting_config" || sender.State == "waiting_keyframe" {
-		return domainwebrtc.VideoStreamStateConnecting, domainwebrtc.VideoStreamHealthOriginSender, sender.State
-	}
 	if isStalledVideoSource(source.State) {
 		return domainwebrtc.VideoStreamStateStalled, domainwebrtc.VideoStreamHealthOriginSource, source.Reason
 	}
 	if source.State == domainscrcpy.SourceHealthRecovering {
-		return domainwebrtc.VideoStreamStateObserving, domainwebrtc.VideoStreamHealthOriginSource, source.Reason
+		return domainwebrtc.VideoStreamStateRecovering, domainwebrtc.VideoStreamHealthOriginSource, source.Reason
+	}
+	if sender.State == "waiting_config" || sender.State == "waiting_keyframe" {
+		return domainwebrtc.VideoStreamStateConnecting, domainwebrtc.VideoStreamHealthOriginSender, sender.State
 	}
 	if sender.State == "ready" && sender.PeerConnected {
 		if transport.SignalingAttached {

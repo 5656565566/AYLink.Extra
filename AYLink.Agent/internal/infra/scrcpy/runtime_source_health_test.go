@@ -130,6 +130,37 @@ func TestRuntimeSourceHealthMarksRecoveringAfterRefresh(t *testing.T) {
 	}
 }
 
+func TestClassifySourceHealthRuntimeClosedBypassesRecoveringWindow(t *testing.T) {
+	now := time.Now()
+	health := domainscrcpy.SourceHealthSnapshot{
+		LastVideoRefreshAt: now.Add(-time.Second),
+		RuntimeClosed:      true,
+	}
+
+	state, reason := classifySourceHealth(health, now)
+	if state != domainscrcpy.SourceHealthSourceStalled {
+		t.Fatalf("expected runtime closed source stalled, got %s", state)
+	}
+	if reason != "runtime_closed" {
+		t.Fatalf("expected runtime closed reason, got %s", reason)
+	}
+}
+
+func TestClassifySourceHealthRefreshWindowExpiresToSourceStalledWithoutPackets(t *testing.T) {
+	now := time.Now()
+	health := domainscrcpy.SourceHealthSnapshot{
+		LastVideoRefreshAt: now.Add(-sourceHealthRecoveryWindow - time.Second),
+	}
+
+	state, reason := classifySourceHealth(health, now)
+	if state != domainscrcpy.SourceHealthSourceStalled {
+		t.Fatalf("expected source stalled after recovery window expires, got %s", state)
+	}
+	if reason != "no_video_packet" {
+		t.Fatalf("expected no video packet reason, got %s", reason)
+	}
+}
+
 func TestRuntimeReplaysFreshCachedVideoKeyFrame(t *testing.T) {
 	rt := &runtime{
 		done:             make(chan struct{}),

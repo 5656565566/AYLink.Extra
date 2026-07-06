@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { decideVideoRecovery } from './videoRecoveryDecision';
 
 describe('decideVideoRecovery', () => {
-  it('keeps confirmed static source under observation for client render stalls', () => {
+  it('reattaches signaling when static source is paired with detached transport', () => {
     const decision = decideVideoRecovery({
       state: 'client_render_stalled_confirmed',
       reason: 'client_render_stalled',
@@ -15,6 +15,48 @@ describe('decideVideoRecovery', () => {
       source: {
         state: 'static_but_alive',
         reason: 'holding_last_frame'
+      },
+      sender: {
+        state: 'ready',
+        peerConnected: true
+      },
+      transport: {
+        peerConnectionState: 'connected',
+        signalingAttached: false,
+        sessionClosed: false
+      }
+    });
+
+    expect(decision).toEqual({
+      state: 'degraded',
+      origin: 'transport',
+      action: 'signaling_reattach',
+      reason: 'signaling_detached'
+    });
+  });
+
+  it('keeps healthy static sources under observation for client render stalls', () => {
+    const decision = decideVideoRecovery({
+      state: 'client_render_stalled_confirmed',
+      reason: 'client_render_stalled',
+      signalingAttached: true,
+      peerConnectionState: 'connected'
+    }, {
+      state: 'observing',
+      origin: 'sender',
+      reason: 'ready',
+      source: {
+        state: 'static_but_alive',
+        reason: 'static_packets_alive'
+      },
+      sender: {
+        state: 'ready',
+        peerConnected: true
+      },
+      transport: {
+        peerConnectionState: 'connected',
+        signalingAttached: true,
+        sessionClosed: false
       }
     });
 
@@ -22,11 +64,11 @@ describe('decideVideoRecovery', () => {
       state: 'observing',
       origin: 'source',
       action: 'observe',
-      reason: 'signaling_detached'
+      reason: 'ready'
     });
   });
 
-  it('prefers client recovery for decode stalls when source is not static', () => {
+  it('reattaches signaling for decode stalls when transport is detached', () => {
     const decision = decideVideoRecovery({
       state: 'client_decode_stalled_confirmed',
       reason: 'client_decode_stalled',
@@ -39,6 +81,39 @@ describe('decideVideoRecovery', () => {
       source: {
         state: 'healthy',
         reason: 'packet_pts_advancing'
+      }
+    });
+
+    expect(decision).toEqual({
+      state: 'degraded',
+      origin: 'transport',
+      action: 'signaling_reattach',
+      reason: 'signaling_detached'
+    });
+  });
+
+  it('prefers client renegotiation for decode stalls when source and transport are healthy', () => {
+    const decision = decideVideoRecovery({
+      state: 'client_decode_stalled_confirmed',
+      reason: 'client_decode_stalled',
+      signalingAttached: true,
+      peerConnectionState: 'connected'
+    }, {
+      state: 'observing',
+      origin: 'sender',
+      reason: 'ready',
+      source: {
+        state: 'healthy',
+        reason: 'packet_pts_advancing'
+      },
+      sender: {
+        state: 'ready',
+        peerConnected: true
+      },
+      transport: {
+        peerConnectionState: 'connected',
+        signalingAttached: true,
+        sessionClosed: false
       }
     });
 

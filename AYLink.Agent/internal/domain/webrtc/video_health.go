@@ -10,6 +10,7 @@ const (
 	VideoStreamStateObserving  VideoStreamState = "observing"
 	VideoStreamStateStable     VideoStreamState = "stable"
 	VideoStreamStateStalled    VideoStreamState = "stalled"
+	VideoStreamStateRecovering VideoStreamState = "recovering"
 	VideoStreamStateDetached   VideoStreamState = "detached"
 )
 

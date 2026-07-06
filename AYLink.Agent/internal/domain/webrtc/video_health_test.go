@@ -9,6 +9,7 @@ func TestVideoStreamStateNamesMatchClientStateMachine(t *testing.T) {
 		VideoStreamStateObserving:  "observing",
 		VideoStreamStateStable:     "stable",
 		VideoStreamStateStalled:    "stalled",
+		VideoStreamStateRecovering: "recovering",
 		VideoStreamStateDetached:   "detached",
 	}
 

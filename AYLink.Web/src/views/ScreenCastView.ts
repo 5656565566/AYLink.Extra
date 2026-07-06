@@ -1400,6 +1400,11 @@ export default defineComponent({
       console.warn('[WebRTC] Applying unified video recovery decision.', decision);
       switch (decision.action) {
         case 'source_refresh':
+          if (requestVideoSourceRefresh(decision.reason)) {
+            return;
+          }
+          requestVideoKeyFrameReplay(decision.reason);
+          return;
         case 'keyframe_replay':
           requestVideoKeyFrameReplay(decision.reason);
           return;
@@ -1781,6 +1786,22 @@ export default defineComponent({
 
       sendMetaControlMessage(buildLocalMetaControlMessage(0x02), { requireDedicatedChannel: true });
       console.info('[WebRTC] Requested cached video key frame replay over meta control channel.', {
+        reason,
+        deviceId: deviceId.value,
+        tabKey: activeTabKey.value,
+        sessionId: currentScrcpySessionId
+      });
+      return true;
+    };
+
+    const requestVideoSourceRefresh = (reason: string) => {
+      const metaChannel = getMetaControlChannel();
+      if (!metaChannel || metaChannel.readyState !== 'open') {
+        return false;
+      }
+
+      sendMetaControlMessage(buildLocalMetaControlMessage(0x01), { requireDedicatedChannel: true });
+      console.warn('[WebRTC] Requested scrcpy video source refresh over meta control channel.', {
         reason,
         deviceId: deviceId.value,
         tabKey: activeTabKey.value,

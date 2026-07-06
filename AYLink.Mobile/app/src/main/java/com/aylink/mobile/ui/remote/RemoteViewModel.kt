@@ -136,6 +136,7 @@ sealed interface RemoteIntent {
 private enum class VideoRecoveryStage {
     Monitoring,
     KeyFrameRequested,
+    SourceRefreshRequested,
     IceRestartRequested,
 }
 
@@ -875,6 +876,22 @@ class RemoteViewModel(
         return true
     }
 
+    private fun tryVideoSourceRefresh(reason: String): Boolean {
+        if (manualDisconnect || suppressReconnect) {
+            return false
+        }
+        val requested = webRtcManager.requestVideoSourceRefresh(reason)
+        if (!requested) {
+            appLogger?.w(LOG_TAG, "Video source refresh unavailable, reason=$reason, deviceId=${device.id}")
+            return false
+        }
+
+        appLogger?.i(LOG_TAG, "Video source refresh requested, reason=$reason, deviceId=${device.id}")
+        videoRecoveryStage = VideoRecoveryStage.SourceRefreshRequested
+        stalledVideoObservationCount = 0
+        return true
+    }
+
     private fun observeVideoHealth(reason: String) {
         if (manualDisconnect || suppressReconnect || !autoReconnectEnabled) {
             return
@@ -955,13 +972,20 @@ class RemoteViewModel(
                     applyUnifiedVideoRecoveryDecision(decision)
                 }
             }
-            VideoRecoveryStage.KeyFrameRequested -> {
+            VideoRecoveryStage.KeyFrameRequested,
+            VideoRecoveryStage.SourceRefreshRequested -> {
                 val observationCount = observationCountFor(VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS)
                 if (stalledVideoObservationCount < observationCount) {
                     return
                 }
-                appLogger?.w(LOG_TAG, "Video key frame recovery failed, reason=$reason, deviceId=${device.id}")
-                if (tryIceRecovery("key_frame_recovery_failed_$reason").not()) {
+                appLogger?.w(LOG_TAG, "Video recovery failed, stage=$videoRecoveryStage, reason=$reason, deviceId=${device.id}")
+                val failedReason =
+                    if (videoRecoveryStage == VideoRecoveryStage.SourceRefreshRequested) {
+                        "source_refresh_failed_$reason"
+                    } else {
+                        "key_frame_recovery_failed_$reason"
+                    }
+                if (tryIceRecovery(failedReason).not()) {
                     scheduleReconnectNow()
                 }
             }
@@ -982,7 +1006,13 @@ class RemoteViewModel(
             "Unified video recovery decision, action=${decision.action}, origin=${decision.origin}, reason=${decision.reason}, deviceId=${device.id}",
         )
         when (decision.action) {
-            UnifiedVideoRecoveryAction.SourceRefresh,
+            UnifiedVideoRecoveryAction.SourceRefresh -> {
+                if (!tryVideoSourceRefresh(decision.reason) && !tryVideoKeyFrameRecovery(decision.reason)) {
+                    if (tryIceRecovery("source_refresh_unavailable_${decision.reason}").not()) {
+                        scheduleReconnectNow()
+                    }
+                }
+            }
             UnifiedVideoRecoveryAction.KeyFrameReplay,
             UnifiedVideoRecoveryAction.Renegotiate,
             UnifiedVideoRecoveryAction.SignalingReattach,

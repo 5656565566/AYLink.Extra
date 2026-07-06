@@ -148,8 +148,9 @@ func handleLocalMetaControlPayload(logger logging.Logger, runtime domainscrcpy.R
 		}
 	case localMetaMsgVideoRefresh:
 		if logger != nil {
-			logger.Warn("webrtc video refresh request ignored", "reason", "client_source_reset_forbidden", "source", "frontend_playback_health")
+			logger.Info("webrtc video source refresh requested", "source", "frontend_playback_health")
 		}
+		requestScrcpySourceRefresh(logger, runtime, "frontend_playback_health", "source", "frontend_playback_health")
 	}
 }
 

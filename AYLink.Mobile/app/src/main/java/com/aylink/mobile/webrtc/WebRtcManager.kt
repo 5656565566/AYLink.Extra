@@ -55,6 +55,7 @@ class WebRtcManager(
         private const val META_CONTROL_CHANNEL_LABEL = "control-meta"
         private const val POINTER_MOVE_CHANNEL_LABEL = "pointer-move"
         private const val LOCAL_META_CONTROL_PREFIX: Byte = -1
+        private const val LOCAL_META_MSG_VIDEO_REFRESH: Byte = 1
         private const val LOCAL_META_MSG_VIDEO_KEY_FRAME: Byte = 2
         private const val SCRCPY_MSG_INJECT_KEYCODE: Byte = 0
         private const val SCRCPY_MSG_INJECT_TOUCH_EVENT: Byte = 2
@@ -475,6 +476,17 @@ class WebRtcManager(
                 reportFailure = false,
             )
         appLogger?.i(LOG_TAG, "Video key frame replay request result=$requested, reason=$reason, generation=$connectionGeneration")
+        return requested
+    }
+
+    fun requestVideoSourceRefresh(reason: String): Boolean {
+        val requested =
+            sendBinary(
+                selectDedicatedMetaControlChannel(),
+                byteArrayOf(LOCAL_META_CONTROL_PREFIX, LOCAL_META_MSG_VIDEO_REFRESH),
+                reportFailure = false,
+            )
+        appLogger?.w(LOG_TAG, "Video source refresh request result=$requested, reason=$reason, generation=$connectionGeneration")
         return requested
     }
 

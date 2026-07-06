@@ -200,15 +200,27 @@ func TestLocalMetaKeyFrameRequestDoesNotRefreshPacketIdleSource(t *testing.T) {
 	}
 }
 
-func TestLocalMetaVideoRefreshRequestDoesNotResetSource(t *testing.T) {
+func TestLocalMetaVideoRefreshRequestResetsUnhealthySource(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthSourceStalled},
 	}
 
 	handleLocalMetaControlPayload(nil, runtime, []byte{localMetaControlPrefix, localMetaMsgVideoRefresh})
 
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected client video refresh request to reset unhealthy source, got %d", runtime.refreshCount)
+	}
+}
+
+func TestLocalMetaVideoRefreshRequestDoesNotResetStaticSource(t *testing.T) {
+	runtime := &fakeScrcpyRuntime{
+		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthStaticButAlive},
+	}
+
+	handleLocalMetaControlPayload(nil, runtime, []byte{localMetaControlPrefix, localMetaMsgVideoRefresh})
+
 	if runtime.refreshCount != 0 {
-		t.Fatalf("expected client video refresh request not to reset source, got %d", runtime.refreshCount)
+		t.Fatalf("expected client video refresh request not to reset static source, got %d", runtime.refreshCount)
 	}
 }
 

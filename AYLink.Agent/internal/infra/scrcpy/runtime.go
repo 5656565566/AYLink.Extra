@@ -421,17 +421,8 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 	return true
 }
 
-func (r *runtime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOptions) error {
-	refreshOptions := domainscrcpy.VideoRefreshOptions{}
-	for _, option := range options {
-		if option.BypassConfirmation {
-			refreshOptions.BypassConfirmation = true
-		}
-		if option.AllowPacketIdleRefresh {
-			refreshOptions.AllowPacketIdleRefresh = true
-		}
-	}
-
+func (r *runtime) RequestVideoRefresh(requests ...domainscrcpy.VideoRefreshRequest) error {
+	refreshRequest := mergeVideoRefreshRequests(requests)
 	r.refreshMu.Lock()
 	if r.refreshRequested {
 		if r.logger != nil {
@@ -442,39 +433,27 @@ func (r *runtime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOption
 	}
 	now := time.Now()
 	health := r.GetSourceHealth()
-	if !shouldRefreshUnhealthyVideoSource(health.State) {
+	decision := decideVideoRefresh(health, refreshRequest)
+	if !decision.Allow {
 		r.refreshAskCount = 0
 		r.lastRefreshAskAt = time.Time{}
 		if r.logger != nil {
 			r.logger.Info("scrcpy video refresh skipped",
-				"reason", "source_not_unhealthy",
+				"reason", decision.SkipReason,
 				"sourceHealth", string(health.State),
 				"sourceHealthReason", health.Reason,
+				"trigger", string(refreshRequest.Trigger),
 			)
 		}
 		r.refreshMu.Unlock()
 		return nil
 	}
-	if health.State == domainscrcpy.SourceHealthStaticButAlive && !shouldRefreshStaticButAliveSource(health, refreshOptions) {
-		r.refreshAskCount = 0
-		r.lastRefreshAskAt = time.Time{}
-		if r.logger != nil {
-			r.logger.Info("scrcpy video refresh skipped",
-				"reason", "source_static_but_alive",
-				"sourceHealth", string(health.State),
-				"sourceHealthReason", health.Reason,
-			)
-		}
-		r.refreshMu.Unlock()
-		return nil
-	}
-	bypassConfirmation := refreshOptions.BypassConfirmation || shouldBypassVideoRefreshConfirmation(health.State)
 	if !r.lastRefreshAskAt.IsZero() && now.Sub(r.lastRefreshAskAt) > videoRefreshConfirmationWindow {
 		r.refreshAskCount = 0
 	}
 	r.lastRefreshAskAt = now
 	r.refreshAskCount++
-	if !bypassConfirmation && r.refreshAskCount < videoRefreshConfirmations {
+	if !decision.BypassConfirmation && r.refreshAskCount < videoRefreshConfirmations {
 		if r.logger != nil {
 			r.logger.Info("scrcpy video refresh deferred",
 				"reason", "confirmation_pending",
@@ -516,7 +495,8 @@ func (r *runtime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOption
 				"queueCapacity", cap(r.controlWrites),
 				"sourceHealth", string(health.State),
 				"sourceHealthReason", health.Reason,
-				"bypassConfirmation", bypassConfirmation,
+				"bypassConfirmation", decision.BypassConfirmation,
+				"trigger", string(refreshRequest.Trigger),
 			)
 		}
 		_ = r.SendControl(domainscrcpy.BuildResetVideoControl())
@@ -525,25 +505,33 @@ func (r *runtime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOption
 	return nil
 }
 
-func shouldRefreshStaticButAliveSource(health domainscrcpy.SourceHealthSnapshot, options domainscrcpy.VideoRefreshOptions) bool {
-	return options.AllowPacketIdleRefresh && health.Reason == "holding_last_frame_packet_idle"
+type videoRefreshDecision struct {
+	Allow              bool
+	SkipReason         string
+	BypassConfirmation bool
 }
 
-func shouldRefreshUnhealthyVideoSource(state domainscrcpy.SourceHealthState) bool {
-	switch state {
-	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
-		return true
-	default:
-		return false
+func mergeVideoRefreshRequests(requests []domainscrcpy.VideoRefreshRequest) domainscrcpy.VideoRefreshRequest {
+	merged := domainscrcpy.VideoRefreshRequest{}
+	for _, request := range requests {
+		if request.Trigger != domainscrcpy.VideoRefreshTriggerUnspecified {
+			merged.Trigger = request.Trigger
+		}
 	}
+	return merged
 }
 
-func shouldBypassVideoRefreshConfirmation(state domainscrcpy.SourceHealthState) bool {
-	switch state {
+func decideVideoRefresh(health domainscrcpy.SourceHealthSnapshot, request domainscrcpy.VideoRefreshRequest) videoRefreshDecision {
+	switch health.State {
 	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
-		return true
+		return videoRefreshDecision{Allow: true, BypassConfirmation: true}
+	case domainscrcpy.SourceHealthStaticButAlive:
+		if health.Reason == "holding_last_frame_packet_idle" && request.Trigger == domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth {
+			return videoRefreshDecision{Allow: true, BypassConfirmation: true}
+		}
+		return videoRefreshDecision{SkipReason: "source_static_but_alive"}
 	default:
-		return false
+		return videoRefreshDecision{SkipReason: "source_not_unhealthy"}
 	}
 }
 
@@ -889,8 +877,8 @@ func (r *runtime) readAudioLoop() {
 	var encoder *opus.Encoder
 	if codec == domainscrcpy.AudioCodecRaw {
 		// 当使用 raw 格式时 scrcpy 输出 48000Hz 立体声 16位 PCM
-		// github.com/jj11hh/opus 使用全局共享的 Wasm 运行时和内存，
-		// 多个会话并发初始化/编码时会踩内存并导致 Windows 访问冲突。
+		// github.com/jj11hh/opus 使用全局共享的 Wasm 运行时和内存
+		// 多个会话并发初始化/编码时会踩内存并导致 Windows 访问冲突
 		opusWasmMu.Lock()
 		enc, err := opus.NewEncoder(opusSampleRate, opusChannels, opus.AppAudio)
 		opusWasmMu.Unlock()

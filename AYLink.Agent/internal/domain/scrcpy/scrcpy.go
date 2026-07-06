@@ -107,9 +107,16 @@ type SourceHealthSnapshot struct {
 	RuntimeClosed        bool
 }
 
-type VideoRefreshOptions struct {
-	BypassConfirmation     bool
-	AllowPacketIdleRefresh bool
+type VideoRefreshTrigger string
+
+const (
+	VideoRefreshTriggerUnspecified            VideoRefreshTrigger = ""
+	VideoRefreshTriggerBackendWatchdog        VideoRefreshTrigger = "backend_watchdog"
+	VideoRefreshTriggerFrontendPlaybackHealth VideoRefreshTrigger = "frontend_playback_health"
+)
+
+type VideoRefreshRequest struct {
+	Trigger VideoRefreshTrigger
 }
 
 type AudioCodec string
@@ -140,7 +147,7 @@ type Runtime interface {
 	SetClipboard(ctx context.Context, text string) error
 	PasteClipboard(ctx context.Context, text string) error
 	ReplayLatestVideoKeyFrame() bool
-	RequestVideoRefresh(options ...VideoRefreshOptions) error
+	RequestVideoRefresh(requests ...VideoRefreshRequest) error
 	SendControl([]byte) error
 	Close() error
 }

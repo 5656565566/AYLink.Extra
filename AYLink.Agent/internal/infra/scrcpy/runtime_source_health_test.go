@@ -471,20 +471,20 @@ func TestRuntimeVideoRefreshSkipsUnhealthyUnknownSource(t *testing.T) {
 	}
 }
 
-func TestRuntimeVideoRefreshBypassOptionSkipsConfirmationForHealthySource(t *testing.T) {
+func TestRuntimeVideoRefreshSkipsHealthySourceWithFrontendPlaybackTrigger(t *testing.T) {
 	now := time.Now()
 	rt := &runtime{
 		done: make(chan struct{}),
 		health: domainscrcpy.SourceHealthSnapshot{
 			State:              domainscrcpy.SourceHealthHealthy,
 			LastPacketAt:       now,
-			LastNewPTSAt:       now,
+			LastNewPTSAt:       now.Add(-sourceHealthPacketFreshness - time.Second),
 			LastPTS:            100,
 			HasSeenMediaPacket: true,
 		},
 	}
 
-	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshOptions{BypassConfirmation: true}); err != nil {
+	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshRequest{Trigger: domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth}); err != nil {
 		t.Fatalf("request refresh: %v", err)
 	}
 
@@ -498,39 +498,37 @@ func TestRuntimeVideoRefreshBypassOptionSkipsConfirmationForHealthySource(t *tes
 	}
 }
 
-func TestRuntimeVideoRefreshBypassOptionStillSkipsStaticButAliveSource(t *testing.T) {
+func TestRuntimeVideoRefreshSkipsStaticPacketsAliveWithFrontendPlaybackTrigger(t *testing.T) {
 	now := time.Now()
 	rt := &runtime{
 		done: make(chan struct{}),
 		health: domainscrcpy.SourceHealthSnapshot{
-			State:              domainscrcpy.SourceHealthStaticButAlive,
-			LastPacketAt:       now.Add(-30 * time.Second),
+			LastPacketAt:       now,
 			LastNewPTSAt:       now,
 			LastPTS:            100,
 			HasSeenMediaPacket: true,
 		},
 	}
 
-	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshOptions{BypassConfirmation: true}); err != nil {
+	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshRequest{Trigger: domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth}); err != nil {
 		t.Fatalf("request refresh: %v", err)
 	}
 
 	rt.refreshMu.Lock()
 	defer rt.refreshMu.Unlock()
 	if !rt.lastRefreshTime.IsZero() {
-		t.Fatalf("expected bypass refresh to keep static source protection")
+		t.Fatalf("expected static packets alive source refresh to be skipped")
 	}
 	if rt.refreshAskCount != 0 {
 		t.Fatalf("expected static source to clear confirmation counter, got %d", rt.refreshAskCount)
 	}
 }
 
-func TestRuntimeVideoRefreshAllowsPacketIdleStaticSourceWithOption(t *testing.T) {
+func TestRuntimeVideoRefreshAllowsPacketIdleStaticSourceWithFrontendPlaybackTrigger(t *testing.T) {
 	now := time.Now()
 	rt := &runtime{
 		done: make(chan struct{}),
 		health: domainscrcpy.SourceHealthSnapshot{
-			State:              domainscrcpy.SourceHealthStaticButAlive,
 			LastPacketAt:       now.Add(-sourceHealthPacketFreshness - time.Second),
 			LastNewPTSAt:       now.Add(-sourceHealthPacketFreshness - time.Second),
 			LastPTS:            100,
@@ -538,14 +536,40 @@ func TestRuntimeVideoRefreshAllowsPacketIdleStaticSourceWithOption(t *testing.T)
 		},
 	}
 
-	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshOptions{BypassConfirmation: true, AllowPacketIdleRefresh: true}); err != nil {
+	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshRequest{Trigger: domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth}); err != nil {
+		t.Fatalf("request refresh: %v", err)
+	}
+
+	rt.refreshMu.Lock()
+	defer rt.refreshMu.Unlock()
+	if rt.lastRefreshTime.IsZero() {
+		t.Fatalf("expected packet-idle static source refresh to dispatch for frontend playback health")
+	}
+	if rt.refreshAskCount != 0 {
+		t.Fatalf("expected confirmation counter to reset, got %d", rt.refreshAskCount)
+	}
+}
+
+func TestRuntimeVideoRefreshSkipsPacketIdleStaticSourceWithBackendWatchdogTrigger(t *testing.T) {
+	now := time.Now()
+	rt := &runtime{
+		done: make(chan struct{}),
+		health: domainscrcpy.SourceHealthSnapshot{
+			LastPacketAt:       now.Add(-sourceHealthPacketFreshness - time.Second),
+			LastNewPTSAt:       now.Add(-sourceHealthPacketFreshness - time.Second),
+			LastPTS:            100,
+			HasSeenMediaPacket: true,
+		},
+	}
+
+	if err := rt.RequestVideoRefresh(domainscrcpy.VideoRefreshRequest{Trigger: domainscrcpy.VideoRefreshTriggerBackendWatchdog}); err != nil {
 		t.Fatalf("request refresh: %v", err)
 	}
 
 	rt.refreshMu.Lock()
 	defer rt.refreshMu.Unlock()
 	if !rt.lastRefreshTime.IsZero() {
-		t.Fatalf("expected packet-idle static source refresh to be skipped")
+		t.Fatalf("expected backend watchdog to keep packet-idle static source protection")
 	}
 	if rt.refreshAskCount != 0 {
 		t.Fatalf("expected confirmation counter to reset, got %d", rt.refreshAskCount)

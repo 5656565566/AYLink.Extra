@@ -573,7 +573,7 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 	}
 
 	health := b.runtime.GetSourceHealth()
-	if !isUnhealthySourceForVideoRefresh(health.State) {
+	if !isStalledSourceForBridgeWatchdog(health.State) {
 		b.stallReadyCount = 0
 		b.logDebugLocked("webrtc video refresh skipped",
 			"reason", "rtcp_stalled_ready",
@@ -609,7 +609,7 @@ func (b *scrcpyVideoBridge) requestRefreshIfStalled() {
 	b.requestRefreshLocked("rtcp_stalled_ready")
 }
 
-func isUnhealthySourceForVideoRefresh(state domainscrcpy.SourceHealthState) bool {
+func isStalledSourceForBridgeWatchdog(state domainscrcpy.SourceHealthState) bool {
 	switch state {
 	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
 		return true
@@ -655,21 +655,19 @@ func requestScrcpySourceRefresh(logger logging.Logger, runtime domainscrcpy.Runt
 		"repeatedPTSCount", health.RepeatedPTSCount,
 	}, args...)
 
-	if !isUnhealthySourceForVideoRefresh(health.State) {
-		if logger != nil {
-			logger.Info("scrcpy source refresh skipped",
-				append([]any{
-					"skipReason", "source_not_unhealthy",
-				}, logArgs...)...,
-			)
-		}
-		return
-	}
-
 	if logger != nil {
-		logger.Info("scrcpy source refresh requested", logArgs...)
+		logger.Info("scrcpy source refresh delegated", logArgs...)
 	}
-	_ = runtime.RequestVideoRefresh()
+	_ = runtime.RequestVideoRefresh(domainscrcpy.VideoRefreshRequest{
+		Trigger: videoRefreshTriggerForReason(reason),
+	})
+}
+
+func videoRefreshTriggerForReason(reason string) domainscrcpy.VideoRefreshTrigger {
+	if reason == "frontend_playback_health" {
+		return domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth
+	}
+	return domainscrcpy.VideoRefreshTriggerBackendWatchdog
 }
 
 func formatSourceHealthAge(value time.Time) string {

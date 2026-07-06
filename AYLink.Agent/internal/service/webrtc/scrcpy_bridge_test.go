@@ -15,7 +15,7 @@ type fakeScrcpyRuntime struct {
 	health                  domainscrcpy.SourceHealthSnapshot
 	refreshCount            int
 	keyFrameReplay          bool
-	lastVideoRefreshOptions []domainscrcpy.VideoRefreshOptions
+	lastVideoRefreshRequest []domainscrcpy.VideoRefreshRequest
 }
 
 func (f *fakeScrcpyRuntime) SubscribeVideoPackets() (<-chan domainscrcpy.VideoPacket, func()) {
@@ -60,9 +60,9 @@ func (f *fakeScrcpyRuntime) ReplayLatestVideoKeyFrame() bool {
 	return f.keyFrameReplay
 }
 
-func (f *fakeScrcpyRuntime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOptions) error {
+func (f *fakeScrcpyRuntime) RequestVideoRefresh(requests ...domainscrcpy.VideoRefreshRequest) error {
 	f.refreshCount++
-	f.lastVideoRefreshOptions = append([]domainscrcpy.VideoRefreshOptions(nil), options...)
+	f.lastVideoRefreshRequest = append([]domainscrcpy.VideoRefreshRequest(nil), requests...)
 	return nil
 }
 
@@ -74,19 +74,22 @@ func (f *fakeScrcpyRuntime) Close() error {
 	return nil
 }
 
-func TestRequestScrcpySourceRefreshSkipsStaticButAliveSourceForBackendWatchdog(t *testing.T) {
+func TestRequestScrcpySourceRefreshPassesBackendWatchdogTrigger(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthStaticButAlive},
 	}
 
 	requestScrcpySourceRefresh(nil, runtime, "rtcp_stalled_ready")
 
-	if runtime.refreshCount != 0 {
-		t.Fatalf("expected static-but-alive source refresh to be skipped, got %d", runtime.refreshCount)
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected backend watchdog to delegate source refresh, got %d", runtime.refreshCount)
+	}
+	if len(runtime.lastVideoRefreshRequest) != 1 || runtime.lastVideoRefreshRequest[0].Trigger != domainscrcpy.VideoRefreshTriggerBackendWatchdog {
+		t.Fatalf("expected backend watchdog trigger, got %#v", runtime.lastVideoRefreshRequest)
 	}
 }
 
-func TestRequestScrcpySourceRefreshSkipsStaticButAliveSourceForFrontendPlaybackHealth(t *testing.T) {
+func TestRequestScrcpySourceRefreshPassesFrontendPlaybackHealthTrigger(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{
 			State:  domainscrcpy.SourceHealthStaticButAlive,
@@ -96,23 +99,11 @@ func TestRequestScrcpySourceRefreshSkipsStaticButAliveSourceForFrontendPlaybackH
 
 	requestScrcpySourceRefresh(nil, runtime, "frontend_playback_health")
 
-	if runtime.refreshCount != 0 {
-		t.Fatalf("expected frontend playback health to skip static-but-alive source, got %d", runtime.refreshCount)
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected frontend playback health to delegate source refresh, got %d", runtime.refreshCount)
 	}
-}
-
-func TestRequestScrcpySourceRefreshSkipsFrontendPacketIdleSource(t *testing.T) {
-	runtime := &fakeScrcpyRuntime{
-		health: domainscrcpy.SourceHealthSnapshot{
-			State:  domainscrcpy.SourceHealthStaticButAlive,
-			Reason: "holding_last_frame_packet_idle",
-		},
-	}
-
-	requestScrcpySourceRefresh(nil, runtime, "frontend_playback_health")
-
-	if runtime.refreshCount != 0 {
-		t.Fatalf("expected frontend playback health to skip packet-idle source refresh, got %d", runtime.refreshCount)
+	if len(runtime.lastVideoRefreshRequest) != 1 || runtime.lastVideoRefreshRequest[0].Trigger != domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth {
+		t.Fatalf("expected frontend playback health trigger, got %#v", runtime.lastVideoRefreshRequest)
 	}
 }
 
@@ -128,7 +119,7 @@ func TestRequestScrcpySourceRefreshRequestsWhenSourceStalled(t *testing.T) {
 	}
 }
 
-func TestRequestScrcpySourceRefreshKeepsConfirmationForFrontendPlaybackHealth(t *testing.T) {
+func TestRequestScrcpySourceRefreshPassesFrontendPlaybackHealthTriggerForPacketStalled(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthPacketStalled},
 	}
@@ -138,12 +129,12 @@ func TestRequestScrcpySourceRefreshKeepsConfirmationForFrontendPlaybackHealth(t 
 	if runtime.refreshCount != 1 {
 		t.Fatalf("expected frontend playback health to request source refresh, got %d", runtime.refreshCount)
 	}
-	if len(runtime.lastVideoRefreshOptions) != 0 {
-		t.Fatalf("expected frontend playback health to leave reset confirmation to agent, got %#v", runtime.lastVideoRefreshOptions)
+	if len(runtime.lastVideoRefreshRequest) != 1 || runtime.lastVideoRefreshRequest[0].Trigger != domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth {
+		t.Fatalf("expected frontend playback health trigger, got %#v", runtime.lastVideoRefreshRequest)
 	}
 }
 
-func TestRequestScrcpySourceRefreshKeepsConfirmationForBackendWatchdog(t *testing.T) {
+func TestRequestScrcpySourceRefreshPassesBackendWatchdogTriggerForPacketStalled(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthPacketStalled},
 	}
@@ -153,8 +144,8 @@ func TestRequestScrcpySourceRefreshKeepsConfirmationForBackendWatchdog(t *testin
 	if runtime.refreshCount != 1 {
 		t.Fatalf("expected backend watchdog to request source refresh, got %d", runtime.refreshCount)
 	}
-	if len(runtime.lastVideoRefreshOptions) != 0 {
-		t.Fatalf("expected backend watchdog to keep default confirmation, got %#v", runtime.lastVideoRefreshOptions)
+	if len(runtime.lastVideoRefreshRequest) != 1 || runtime.lastVideoRefreshRequest[0].Trigger != domainscrcpy.VideoRefreshTriggerBackendWatchdog {
+		t.Fatalf("expected backend watchdog trigger, got %#v", runtime.lastVideoRefreshRequest)
 	}
 }
 
@@ -200,7 +191,7 @@ func TestLocalMetaKeyFrameRequestDoesNotRefreshPacketIdleSource(t *testing.T) {
 	}
 }
 
-func TestLocalMetaVideoRefreshRequestResetsUnhealthySource(t *testing.T) {
+func TestLocalMetaVideoRefreshRequestUsesFrontendPlaybackHealthTrigger(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthSourceStalled},
 	}
@@ -208,23 +199,29 @@ func TestLocalMetaVideoRefreshRequestResetsUnhealthySource(t *testing.T) {
 	handleLocalMetaControlPayload(nil, runtime, []byte{localMetaControlPrefix, localMetaMsgVideoRefresh})
 
 	if runtime.refreshCount != 1 {
-		t.Fatalf("expected client video refresh request to reset unhealthy source, got %d", runtime.refreshCount)
+		t.Fatalf("expected client video refresh request to delegate source refresh, got %d", runtime.refreshCount)
+	}
+	if len(runtime.lastVideoRefreshRequest) != 1 || runtime.lastVideoRefreshRequest[0].Trigger != domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth {
+		t.Fatalf("expected frontend playback health trigger, got %#v", runtime.lastVideoRefreshRequest)
 	}
 }
 
-func TestLocalMetaVideoRefreshRequestDoesNotResetStaticSource(t *testing.T) {
+func TestLocalMetaVideoRefreshRequestDelegatesStaticSourceToRuntime(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthStaticButAlive},
 	}
 
 	handleLocalMetaControlPayload(nil, runtime, []byte{localMetaControlPrefix, localMetaMsgVideoRefresh})
 
-	if runtime.refreshCount != 0 {
-		t.Fatalf("expected client video refresh request not to reset static source, got %d", runtime.refreshCount)
+	if runtime.refreshCount != 1 {
+		t.Fatalf("expected client video refresh request to delegate static source decision, got %d", runtime.refreshCount)
+	}
+	if len(runtime.lastVideoRefreshRequest) != 1 || runtime.lastVideoRefreshRequest[0].Trigger != domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth {
+		t.Fatalf("expected frontend playback health trigger, got %#v", runtime.lastVideoRefreshRequest)
 	}
 }
 
-func TestIsUnhealthySourceForVideoRefresh(t *testing.T) {
+func TestIsStalledSourceForBridgeWatchdog(t *testing.T) {
 	tests := []struct {
 		state domainscrcpy.SourceHealthState
 		want  bool
@@ -238,8 +235,8 @@ func TestIsUnhealthySourceForVideoRefresh(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := isUnhealthySourceForVideoRefresh(tt.state); got != tt.want {
-			t.Fatalf("isUnhealthySourceForVideoRefresh(%s) = %v, want %v", tt.state, got, tt.want)
+		if got := isStalledSourceForBridgeWatchdog(tt.state); got != tt.want {
+			t.Fatalf("isStalledSourceForBridgeWatchdog(%s) = %v, want %v", tt.state, got, tt.want)
 		}
 	}
 }

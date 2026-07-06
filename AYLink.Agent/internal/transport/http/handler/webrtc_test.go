@@ -111,7 +111,7 @@ func (f *fakeHandlerScrcpyRuntime) PasteClipboard(context.Context, string) error
 
 func (f *fakeHandlerScrcpyRuntime) ReplayLatestVideoKeyFrame() bool { return false }
 
-func (f *fakeHandlerScrcpyRuntime) RequestVideoRefresh(options ...domainscrcpy.VideoRefreshOptions) error {
+func (f *fakeHandlerScrcpyRuntime) RequestVideoRefresh(requests ...domainscrcpy.VideoRefreshRequest) error {
 	return nil
 }
 

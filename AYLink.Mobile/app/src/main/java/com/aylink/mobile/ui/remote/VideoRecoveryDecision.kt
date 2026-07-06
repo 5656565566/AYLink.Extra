@@ -76,6 +76,12 @@ fun decideVideoRecovery(
             agent?.source?.state,
         ).firstOrNull { it.isNotBlank() }
             .orEmpty()
+    val sourceReason =
+        listOfNotNull(
+            agent?.source?.reason,
+            agent?.source?.state,
+        ).firstOrNull { it.isNotBlank() }
+            .orEmpty()
 
     if (
         isStaticButAliveSource(sourceState) &&
@@ -90,6 +96,15 @@ fun decideVideoRecovery(
             origin = UnifiedVideoHealthOrigin.Source,
             action = UnifiedVideoRecoveryAction.Observe,
             reason = agentReason.ifBlank { client.reason },
+        )
+    }
+
+    if (isPacketIdleSource(sourceState)) {
+        return UnifiedVideoRecoveryDecision(
+            state = UnifiedVideoStreamState.Stalled,
+            origin = UnifiedVideoHealthOrigin.Source,
+            action = UnifiedVideoRecoveryAction.SourceRefresh,
+            reason = sourceReason.ifBlank { agentReason.ifBlank { client.reason } },
         )
     }
 
@@ -144,6 +159,8 @@ fun decideVideoRecovery(
 }
 
 private fun isStaticButAliveSource(state: String): Boolean = state == "static_but_alive"
+
+private fun isPacketIdleSource(state: String): Boolean = state == "packet_idle"
 
 private fun isAgentVideoPathHealthy(
     senderState: String,

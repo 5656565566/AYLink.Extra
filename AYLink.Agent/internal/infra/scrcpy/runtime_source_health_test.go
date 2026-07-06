@@ -67,7 +67,7 @@ func TestRuntimeSourceHealthDetectsRepeatedZeroPTSStall(t *testing.T) {
 	}
 }
 
-func TestClassifySourceHealthTreatsOldPacketAfterMediaAsStaticButAlive(t *testing.T) {
+func TestClassifySourceHealthTreatsOldPacketAfterMediaAsPacketIdle(t *testing.T) {
 	now := time.Now()
 	health := domainscrcpy.SourceHealthSnapshot{
 		LastPacketAt:       now.Add(-30 * time.Second),
@@ -77,8 +77,8 @@ func TestClassifySourceHealthTreatsOldPacketAfterMediaAsStaticButAlive(t *testin
 	}
 
 	state, reason := classifySourceHealth(health, now)
-	if state != domainscrcpy.SourceHealthStaticButAlive {
-		t.Fatalf("expected static but alive, got %s", state)
+	if state != domainscrcpy.SourceHealthPacketIdle {
+		t.Fatalf("expected packet idle, got %s", state)
 	}
 	if reason != "holding_last_frame_packet_idle" {
 		t.Fatalf("expected holding last frame reason, got %s", reason)
@@ -418,7 +418,7 @@ func TestRuntimeVideoRefreshBypassesConfirmationWhenSourceStalledBeforeMedia(t *
 	}
 }
 
-func TestRuntimeVideoRefreshSkipsStaticButAliveAfterMediaPacketIdle(t *testing.T) {
+func TestRuntimeVideoRefreshSkipsPacketIdleWithoutFrontendPlaybackTrigger(t *testing.T) {
 	now := time.Now()
 	rt := &runtime{
 		done: make(chan struct{}),
@@ -439,10 +439,10 @@ func TestRuntimeVideoRefreshSkipsStaticButAliveAfterMediaPacketIdle(t *testing.T
 	rt.refreshMu.Lock()
 	defer rt.refreshMu.Unlock()
 	if !rt.lastRefreshTime.IsZero() {
-		t.Fatalf("expected static source refresh to be skipped")
+		t.Fatalf("expected packet-idle source refresh to be skipped without frontend playback trigger")
 	}
 	if rt.refreshAskCount != 0 {
-		t.Fatalf("expected static source to clear confirmation counter, got %d", rt.refreshAskCount)
+		t.Fatalf("expected packet-idle source to clear confirmation counter, got %d", rt.refreshAskCount)
 	}
 }
 

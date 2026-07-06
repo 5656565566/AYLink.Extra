@@ -64,6 +64,7 @@ export function decideVideoRecovery(
   const agentOrigin = normalizeOrigin(agent?.origin);
   const agentState = String(agent?.state || '').toLowerCase();
   const sourceState = String(agent?.source?.state || '').toLowerCase();
+  const sourceReason = String(agent?.source?.reason || agent?.source?.state || '').trim();
   const agentReason = String(agent?.reason || agent?.source?.reason || agent?.source?.state || '').trim();
   const clientDecodeOrRenderStalled = client.state === 'client_decode_stalled_confirmed' || client.state === 'client_render_stalled_confirmed';
 
@@ -73,6 +74,15 @@ export function decideVideoRecovery(
       origin: 'source',
       action: 'observe',
       reason: agentReason || client.reason
+    };
+  }
+
+  if (clientDecodeOrRenderStalled && sourceState === 'packet_idle') {
+    return {
+      state: 'stalled',
+      origin: 'source',
+      action: 'source_refresh',
+      reason: sourceReason || agentReason || client.reason
     };
   }
 

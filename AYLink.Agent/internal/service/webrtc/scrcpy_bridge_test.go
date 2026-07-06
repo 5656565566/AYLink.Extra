@@ -179,7 +179,7 @@ func TestLocalMetaKeyFrameRequestDoesNotRefreshStaticButAliveSource(t *testing.T
 func TestLocalMetaKeyFrameRequestDoesNotRefreshPacketIdleSource(t *testing.T) {
 	runtime := &fakeScrcpyRuntime{
 		health: domainscrcpy.SourceHealthSnapshot{
-			State:  domainscrcpy.SourceHealthStaticButAlive,
+			State:  domainscrcpy.SourceHealthPacketIdle,
 			Reason: "holding_last_frame_packet_idle",
 		},
 	}
@@ -228,6 +228,7 @@ func TestIsStalledSourceForBridgeWatchdog(t *testing.T) {
 	}{
 		{domainscrcpy.SourceHealthHealthy, false},
 		{domainscrcpy.SourceHealthStaticButAlive, false},
+		{domainscrcpy.SourceHealthPacketIdle, false},
 		{domainscrcpy.SourceHealthRecovering, false},
 		{domainscrcpy.SourceHealthPacketStalled, true},
 		{domainscrcpy.SourceHealthPTSStalled, true},

@@ -123,7 +123,7 @@ func classifyVideoStreamHealth(
 
 func isStalledVideoSource(state domainscrcpy.SourceHealthState) bool {
 	switch state {
-	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
+	case domainscrcpy.SourceHealthPacketIdle, domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
 		return true
 	default:
 		return false

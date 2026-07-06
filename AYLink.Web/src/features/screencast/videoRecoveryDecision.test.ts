@@ -49,4 +49,28 @@ describe('decideVideoRecovery', () => {
       reason: 'client_decode_stalled'
     });
   });
+
+  it('requests source refresh for packet-idle sources after confirmed client stalls', () => {
+    const decision = decideVideoRecovery({
+      state: 'client_render_stalled_confirmed',
+      reason: 'client_render_stalled',
+      signalingAttached: true,
+      peerConnectionState: 'connected'
+    }, {
+      state: 'observing',
+      origin: 'sender',
+      reason: 'ready',
+      source: {
+        state: 'packet_idle',
+        reason: 'holding_last_frame_packet_idle'
+      }
+    });
+
+    expect(decision).toEqual({
+      state: 'stalled',
+      origin: 'source',
+      action: 'source_refresh',
+      reason: 'holding_last_frame_packet_idle'
+    });
+  });
 });

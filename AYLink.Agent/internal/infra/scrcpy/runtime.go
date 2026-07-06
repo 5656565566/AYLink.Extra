@@ -525,10 +525,12 @@ func decideVideoRefresh(health domainscrcpy.SourceHealthSnapshot, request domain
 	switch health.State {
 	case domainscrcpy.SourceHealthPacketStalled, domainscrcpy.SourceHealthPTSStalled, domainscrcpy.SourceHealthSourceStalled:
 		return videoRefreshDecision{Allow: true, BypassConfirmation: true}
-	case domainscrcpy.SourceHealthStaticButAlive:
-		if health.Reason == "holding_last_frame_packet_idle" && request.Trigger == domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth {
+	case domainscrcpy.SourceHealthPacketIdle:
+		if request.Trigger == domainscrcpy.VideoRefreshTriggerFrontendPlaybackHealth {
 			return videoRefreshDecision{Allow: true, BypassConfirmation: true}
 		}
+		return videoRefreshDecision{SkipReason: "source_packet_idle"}
+	case domainscrcpy.SourceHealthStaticButAlive:
 		return videoRefreshDecision{SkipReason: "source_static_but_alive"}
 	default:
 		return videoRefreshDecision{SkipReason: "source_not_unhealthy"}
@@ -1586,7 +1588,7 @@ func classifySourceHealth(health domainscrcpy.SourceHealthSnapshot, now time.Tim
 		return domainscrcpy.SourceHealthPTSStalled, "pts_repeated"
 	}
 	if now.Sub(health.LastPacketAt) > sourceHealthPacketFreshness {
-		return domainscrcpy.SourceHealthStaticButAlive, "holding_last_frame_packet_idle"
+		return domainscrcpy.SourceHealthPacketIdle, "holding_last_frame_packet_idle"
 	}
 	if health.LastNewPTSAt.IsZero() || now.Sub(health.LastNewPTSAt) <= sourceHealthPacketFreshness {
 		return domainscrcpy.SourceHealthHealthy, "pts_advancing"

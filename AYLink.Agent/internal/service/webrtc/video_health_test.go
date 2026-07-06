@@ -34,6 +34,18 @@ func TestClassifyVideoStreamHealthReportsStalledForSourceStall(t *testing.T) {
 	}
 }
 
+func TestClassifyVideoStreamHealthReportsStalledForPacketIdleSource(t *testing.T) {
+	state, origin, reason := classifyVideoStreamHealth(
+		domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthPacketIdle, Reason: "holding_last_frame_packet_idle"},
+		domainwebrtc.VideoSenderDiagnostics{State: "ready", PeerConnected: true},
+		domainwebrtc.VideoTransportDiagnostics{PeerConnectionState: pion.PeerConnectionStateConnected.String(), SignalingAttached: true},
+	)
+
+	if state != domainwebrtc.VideoStreamStateStalled || origin != domainwebrtc.VideoStreamHealthOriginSource || reason != "holding_last_frame_packet_idle" {
+		t.Fatalf("expected stalled packet-idle source state, got state=%s origin=%s reason=%s", state, origin, reason)
+	}
+}
+
 func TestClassifyVideoStreamHealthReportsObservingForReadyAttachedStream(t *testing.T) {
 	state, origin, reason := classifyVideoStreamHealth(
 		domainscrcpy.SourceHealthSnapshot{State: domainscrcpy.SourceHealthHealthy, Reason: "pts_advancing"},

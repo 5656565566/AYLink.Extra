@@ -87,6 +87,7 @@ type SourceHealthState string
 const (
 	SourceHealthHealthy        SourceHealthState = "healthy"
 	SourceHealthStaticButAlive SourceHealthState = "static_but_alive"
+	SourceHealthPacketIdle     SourceHealthState = "packet_idle"
 	SourceHealthPacketStalled  SourceHealthState = "packet_stalled"
 	SourceHealthPTSStalled     SourceHealthState = "pts_stalled"
 	SourceHealthSourceStalled  SourceHealthState = "source_stalled"

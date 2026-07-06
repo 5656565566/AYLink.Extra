@@ -1249,11 +1249,11 @@ func (r *runtime) recordVideoPacketHealth(packet domainscrcpy.VideoPacket) {
 	pts := packet.PresentationTimestamp
 	hadSeenMediaPacket := r.health.HasSeenMediaPacket
 	r.health.HasSeenMediaPacket = true
-	if !hadSeenMediaPacket || pts > r.health.LastPTS {
+	if !hadSeenMediaPacket || pts != r.health.LastPTS {
 		r.health.LastPTS = pts
 		r.health.LastNewPTSAt = now
 		r.health.RepeatedPTSCount = 0
-	} else if pts == r.health.LastPTS {
+	} else {
 		r.health.RepeatedPTSCount++
 	}
 

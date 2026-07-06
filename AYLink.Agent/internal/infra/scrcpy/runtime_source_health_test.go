@@ -67,6 +67,32 @@ func TestRuntimeSourceHealthDetectsRepeatedZeroPTSStall(t *testing.T) {
 	}
 }
 
+func TestRuntimeSourceHealthResetsPTSBaselineAfterTimestampRollback(t *testing.T) {
+	rt := &runtime{done: make(chan struct{})}
+
+	rt.recordVideoPacketHealth(domainscrcpy.VideoPacket{
+		PresentationTimestamp: 100,
+		Codec:                 domainscrcpy.VideoCodecH264,
+	})
+	for i := 0; i < sourceHealthRepeatedPTSStallThreshold+1; i++ {
+		rt.recordVideoPacketHealth(domainscrcpy.VideoPacket{
+			PresentationTimestamp: 20,
+			Codec:                 domainscrcpy.VideoCodecH264,
+		})
+	}
+
+	health := rt.GetSourceHealth()
+	if health.LastPTS != 20 {
+		t.Fatalf("expected rollback pts to become the new baseline, got %d", health.LastPTS)
+	}
+	if health.State != domainscrcpy.SourceHealthPTSStalled {
+		t.Fatalf("expected repeated rollback pts to stall source, got %s", health.State)
+	}
+	if health.RepeatedPTSCount < sourceHealthRepeatedPTSStallThreshold {
+		t.Fatalf("expected repeated rollback pts count to reach threshold, got %d", health.RepeatedPTSCount)
+	}
+}
+
 func TestClassifySourceHealthTreatsOldPacketAfterMediaAsPacketIdle(t *testing.T) {
 	now := time.Now()
 	health := domainscrcpy.SourceHealthSnapshot{

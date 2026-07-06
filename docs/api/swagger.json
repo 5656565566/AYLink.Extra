@@ -5166,6 +5166,7 @@
                 "observing",
                 "stable",
                 "stalled",
+                "recovering",
                 "detached"
             ],
             "x-enum-varnames": [
@@ -5174,6 +5175,7 @@
                 "VideoStreamStateObserving",
                 "VideoStreamStateStable",
                 "VideoStreamStateStalled",
+                "VideoStreamStateRecovering",
                 "VideoStreamStateDetached"
             ]
         },

@@ -796,6 +796,7 @@ definitions:
     - observing
     - stable
     - stalled
+    - recovering
     - detached
     type: string
     x-enum-varnames:
@@ -804,6 +805,7 @@ definitions:
     - VideoStreamStateObserving
     - VideoStreamStateStable
     - VideoStreamStateStalled
+    - VideoStreamStateRecovering
     - VideoStreamStateDetached
   webrtc.VideoTransportDiagnostics:
     properties:

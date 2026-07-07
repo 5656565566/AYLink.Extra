@@ -247,7 +247,7 @@ func TestRuntimeThrottlesCachedVideoKeyFrameReplay(t *testing.T) {
 	}
 }
 
-func TestRuntimeRefusesStaleCachedVideoKeyFrameReplay(t *testing.T) {
+func TestRuntimeReplaysOldCachedVideoKeyFrame(t *testing.T) {
 	rt := &runtime{
 		done:             make(chan struct{}),
 		videoSubscribers: map[int]chan domainscrcpy.VideoPacket{1: make(chan domainscrcpy.VideoPacket, 4)},
@@ -265,12 +265,15 @@ func TestRuntimeRefusesStaleCachedVideoKeyFrameReplay(t *testing.T) {
 				IsKeyFrame: true,
 			},
 			generation: 1,
-			cachedAt:   time.Now().Add(-replayableKeyFrameMaxAge - time.Second),
+			cachedAt:   time.Now().Add(-24 * time.Hour),
 		},
 	}
 
-	if rt.ReplayLatestVideoKeyFrame() {
-		t.Fatalf("expected stale cached key frame replay to be refused")
+	if !rt.ReplayLatestVideoKeyFrame() {
+		t.Fatalf("expected old cached key frame replay")
+	}
+	if len(rt.videoSubscribers[1]) != 2 {
+		t.Fatalf("expected config and key frame packets to be queued, got %d", len(rt.videoSubscribers[1]))
 	}
 }
 

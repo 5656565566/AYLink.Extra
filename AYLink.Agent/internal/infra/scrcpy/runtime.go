@@ -29,7 +29,6 @@ const (
 	videoRefreshDebounce                         = 10 * time.Second
 	videoRefreshConfirmationWindow               = 12 * time.Second
 	videoRefreshConfirmations                    = 2
-	replayableKeyFrameMaxAge                     = 30 * time.Second
 	videoKeyFrameReplayCooldown                  = 500 * time.Millisecond
 	sourceHealthPacketFreshness                  = 3 * time.Second
 	sourceHealthRecoveryWindow                   = 8 * time.Second
@@ -367,18 +366,9 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 		return false
 	}
 	now := time.Now()
-	keyFrameAge := now.Sub(keyFramePacket.cachedAt)
-	if keyFramePacket.cachedAt.IsZero() || keyFrameAge > replayableKeyFrameMaxAge {
-		r.videoMu.Unlock()
-		if r.logger != nil {
-			r.logger.Info("scrcpy video key frame replay skipped",
-				"reason", "cached_keyframe_too_old",
-				"generation", keyFramePacket.generation,
-				"keyFrameAge", keyFrameAge.String(),
-				"maxAge", replayableKeyFrameMaxAge.String(),
-			)
-		}
-		return false
+	keyFrameAge := ""
+	if !keyFramePacket.cachedAt.IsZero() {
+		keyFrameAge = now.Sub(keyFramePacket.cachedAt).String()
 	}
 	lastReplayAt := r.getLastVideoKeyFrameReplayAt()
 	if !lastReplayAt.IsZero() && now.Sub(lastReplayAt) < videoKeyFrameReplayCooldown {
@@ -415,7 +405,7 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 		r.logger.Info("scrcpy video key frame replayed",
 			"generation", generation,
 			"subscriberCount", subscriberCount,
-			"keyFrameAge", keyFrameAge.String(),
+			"keyFrameAge", keyFrameAge,
 		)
 	}
 	return true

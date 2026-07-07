@@ -1396,26 +1396,35 @@ export default defineComponent({
       }
     };
 
-    const applyUnifiedVideoRecoveryDecision = async (decision: UnifiedVideoRecoveryDecision) => {
+    const applyUnifiedVideoRecoveryDecision = async (
+      decision: UnifiedVideoRecoveryDecision,
+      options: { keyFrameReplayAlreadyRequested?: boolean } = {}
+    ) => {
       console.warn('[WebRTC] Applying unified video recovery decision.', decision);
+      const requestReplayIfNeeded = () => {
+        if (options.keyFrameReplayAlreadyRequested) {
+          return false;
+        }
+        return requestVideoKeyFrameReplay(decision.reason);
+      };
       switch (decision.action) {
         case 'source_refresh':
           if (requestVideoSourceRefresh(decision.reason)) {
             return;
           }
-          requestVideoKeyFrameReplay(decision.reason);
+          requestReplayIfNeeded();
           return;
         case 'keyframe_replay':
-          requestVideoKeyFrameReplay(decision.reason);
+          requestReplayIfNeeded();
           return;
         case 'signaling_reattach':
           if (await tryReattachSignaling(decision.reason)) {
             return;
           }
-          requestVideoKeyFrameReplay(decision.reason);
+          requestReplayIfNeeded();
           return;
         case 'renegotiate':
-          requestVideoKeyFrameReplay(decision.reason);
+          requestReplayIfNeeded();
           if (await tryVideoRenegotiation(decision.reason)) {
             return;
           }
@@ -1446,6 +1455,12 @@ export default defineComponent({
         return;
       }
 
+      const recoveryReason = details.status === 'client_decode_stalled_confirmed'
+          ? 'client_decode_stalled'
+          : details.status === 'client_render_stalled_confirmed'
+            ? 'client_render_stalled'
+            : 'client_playback_starved';
+      const keyFrameReplayRequested = requestVideoKeyFrameReplay(recoveryReason);
       const now = Date.now();
       if (pendingVideoStreamStallObservationTimer != null || now - lastVideoStreamStallRecoveryAttemptAt < VIDEO_STREAM_STALL_RECOVERY_COOLDOWN_MS) {
         return;
@@ -1453,11 +1468,6 @@ export default defineComponent({
 
       lastVideoStreamStallRecoveryAttemptAt = now;
       const signalingAttached = !!ws && ws.readyState === WebSocket.OPEN;
-      const recoveryReason = details.status === 'client_decode_stalled_confirmed'
-          ? 'client_decode_stalled'
-          : details.status === 'client_render_stalled_confirmed'
-            ? 'client_render_stalled'
-            : 'client_playback_starved';
       void (async () => {
         const agentHealth = await fetchAgentVideoHealth();
         const decision = decideVideoRecovery({
@@ -1467,7 +1477,7 @@ export default defineComponent({
           peerConnectionState: details.peerConnectionState
         }, agentHealth);
         videoStreamHealth.setUnifiedDecision(decision);
-        await applyUnifiedVideoRecoveryDecision(decision);
+        await applyUnifiedVideoRecoveryDecision(decision, { keyFrameReplayAlreadyRequested: keyFrameReplayRequested });
       })();
       console.info('[WebRTC] Confirmed video stream stall; unified recovery decision requested.', details);
 

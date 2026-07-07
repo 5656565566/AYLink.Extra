@@ -29,7 +29,7 @@ const (
 	videoRefreshDebounce                         = 10 * time.Second
 	videoRefreshConfirmationWindow               = 12 * time.Second
 	videoRefreshConfirmations                    = 2
-	replayableKeyFrameMaxAge                     = 3 * time.Second
+	replayableKeyFrameMaxAge                     = 30 * time.Second
 	videoKeyFrameReplayCooldown                  = 500 * time.Millisecond
 	sourceHealthPacketFreshness                  = 3 * time.Second
 	sourceHealthRecoveryWindow                   = 8 * time.Second

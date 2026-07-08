@@ -764,24 +764,44 @@ func (h *DeviceHandler) InstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(256 << 20); err != nil {
+	reader, err := r.MultipartReader()
+	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART", "Errors.InvalidUpload", "上传请求无效")
 		return
 	}
 
-	file, fileHeader, err := r.FormFile("file")
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, "APP_FILE_REQUIRED", "AppPage.InstallFileRequired", "请选择 APK 文件")
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART", "Errors.InvalidUpload", "上传请求无效")
+			return
+		}
+		if part.FormName() != "file" {
+			_ = part.Close()
+			continue
+		}
+		fileName := strings.TrimSpace(part.FileName())
+		if fileName == "" {
+			_ = part.Close()
+			WriteError(w, http.StatusBadRequest, "APP_FILE_REQUIRED", "AppPage.InstallFileRequired", "请选择 APK 文件")
+			return
+		}
+
+		err = h.appService.Install(r.Context(), id, fileName, part)
+		_ = part.Close()
+		if err != nil {
+			h.writeAppError(w, err, "APK 安装失败")
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, OKResponse{OK: true})
 		return
 	}
-	defer file.Close()
 
-	if err := h.appService.Install(r.Context(), id, fileHeader.Filename, file); err != nil {
-		h.writeAppError(w, err, "APK 安装失败")
-		return
-	}
-
-	WriteJSON(w, http.StatusOK, OKResponse{OK: true})
+	WriteError(w, http.StatusBadRequest, "APP_FILE_REQUIRED", "AppPage.InstallFileRequired", "请选择 APK 文件")
 }
 
 // ListFiles 获取文件列表

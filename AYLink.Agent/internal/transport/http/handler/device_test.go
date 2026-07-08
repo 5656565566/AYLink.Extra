@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +78,32 @@ func (fakeAppService) Info(context.Context, int, string) (*appservice.AppInfoRes
 func (fakeAppService) Uninstall(context.Context, int, string) error { return nil }
 func (fakeAppService) Install(context.Context, int, string, io.Reader) error {
 	return nil
+}
+
+type recordingAppService struct {
+	installDeviceID int
+	installFileName string
+	installContent  string
+	installErr      error
+}
+
+func (recordingAppService) Launch(context.Context, int, string) error { return nil }
+func (recordingAppService) Download(context.Context, int, string) (*appservice.DownloadResult, error) {
+	panic("unexpected call")
+}
+func (recordingAppService) Info(context.Context, int, string) (*appservice.AppInfoResult, error) {
+	panic("unexpected call")
+}
+func (recordingAppService) Uninstall(context.Context, int, string) error { return nil }
+func (f *recordingAppService) Install(_ context.Context, deviceID int, fileName string, reader io.Reader) error {
+	f.installDeviceID = deviceID
+	f.installFileName = fileName
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+	f.installContent = string(content)
+	return f.installErr
 }
 
 type fakeFileService struct{}
@@ -260,6 +288,95 @@ func TestDeviceHandlerPreviewRejectsInvalidWidth(t *testing.T) {
 	}
 	if previewService.lastWidth != 0 {
 		t.Fatalf("expected preview service not to be called, got width %d", previewService.lastWidth)
+	}
+}
+
+func TestDeviceHandlerInstallAppStreamsMultipartPartToService(t *testing.T) {
+	appService := &recordingAppService{}
+	handler := NewDeviceHandler(
+		&fakeDeviceService{},
+		fakeDeviceAccessService{allowed: true},
+		nil,
+		&fakeDevicePreviewService{},
+		appService,
+		fakeFileService{},
+		fakeDeviceSettingsService{},
+		fakeScrcpyService{},
+	)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	field, err := writer.CreateFormField("ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := field.Write([]byte("metadata")); err != nil {
+		t.Fatal(err)
+	}
+	filePart, err := writer.CreateFormFile("file", "demo.apk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := filePart.Write([]byte("apk-content")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/7/apps/install", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.InstallApp(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if appService.installDeviceID != 7 || appService.installFileName != "demo.apk" || appService.installContent != "apk-content" {
+		t.Fatalf("expected install payload to be streamed, got device=%d name=%q content=%q", appService.installDeviceID, appService.installFileName, appService.installContent)
+	}
+	if req.MultipartForm != nil && (len(req.MultipartForm.Value) > 0 || len(req.MultipartForm.File) > 0) {
+		t.Fatalf("expected streaming multipart reader to avoid cached form data, got %+v", req.MultipartForm)
+	}
+}
+
+func TestDeviceHandlerInstallAppRequiresFilePart(t *testing.T) {
+	handler := NewDeviceHandler(
+		&fakeDeviceService{},
+		fakeDeviceAccessService{allowed: true},
+		nil,
+		&fakeDevicePreviewService{},
+		fakeAppService{},
+		fakeFileService{},
+		fakeDeviceSettingsService{},
+		fakeScrcpyService{},
+	)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	field, err := writer.CreateFormField("ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := field.Write([]byte("metadata")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/7/apps/install", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.InstallApp(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `APP_FILE_REQUIRED`) {
+		t.Fatalf("expected file-required payload, got %s", recorder.Body.String())
 	}
 }
 

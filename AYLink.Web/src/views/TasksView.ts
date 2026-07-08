@@ -18,12 +18,14 @@ export default defineComponent({
 
     interface SimpleTab extends SessionTabItem {
       title: string;
+      closable?: boolean;
       searchKeyword?: string;
       statusFilter?: TaskItemStatus | 'all';
     }
 
     const STORAGE_KEY = 'aylink_task_tabs';
     const ACTIVE_KEY = 'aylink_task_active_tab';
+    const DEFAULT_TAB_KEY = 'tasks-default';
 
     const tabs = ref<SimpleTab[]>([]);
     const activeTabKey = ref('');
@@ -38,7 +40,9 @@ export default defineComponent({
     });
 
     const activeTab = computed(() => tabs.value.find((tab) => tab.key === activeTabKey.value) ?? null);
-    const tabItems = computed(() => tabs.value);
+    const tabItems = computed(() => tabs.value.map((tab) => (
+      tab.key === DEFAULT_TAB_KEY ? { ...tab, closable: false } : tab
+    )));
     const statusOptions = computed(() => [
       { value: 'all' as const, label: t('TasksView.StatusAll', '全部') },
       { value: 'running' as const, label: t('TasksView.StatusRunning', '运行中') },
@@ -106,9 +110,29 @@ export default defineComponent({
     };
 
     const ensureDefaultTab = () => {
-      if (tabs.value.length === 0) {
-        tabs.value = [{ key: 'tasks-default', title: t('TasksView.OverviewTab', '总览'), statusFilter: 'all' }];
-        activeTabKey.value = 'tasks-default';
+      let changed = false;
+      const defaultTab = tabs.value.find((tab) => tab.key === DEFAULT_TAB_KEY);
+      if (defaultTab) {
+        if (defaultTab.closable !== false) {
+          defaultTab.closable = false;
+          changed = true;
+        }
+      } else {
+        tabs.value.unshift({
+          key: DEFAULT_TAB_KEY,
+          title: t('TasksView.OverviewTab', '总览'),
+          statusFilter: 'all',
+          closable: false
+        });
+        changed = true;
+      }
+
+      if (!activeTabKey.value || !tabs.value.some((tab) => tab.key === activeTabKey.value)) {
+        activeTabKey.value = DEFAULT_TAB_KEY;
+        changed = true;
+      }
+
+      if (changed) {
         persistTabs();
       }
     };
@@ -123,11 +147,15 @@ export default defineComponent({
     };
 
     const closeTab = (tabKey: string) => {
+      if (tabKey === DEFAULT_TAB_KEY) {
+        return;
+      }
+
       const index = tabs.value.findIndex((tab) => tab.key === tabKey);
       if (index < 0) return;
 
       tabs.value.splice(index, 1);
-      activeTabKey.value = tabs.value[index]?.key ?? tabs.value[index - 1]?.key ?? '';
+      activeTabKey.value = tabs.value[index]?.key ?? tabs.value[index - 1]?.key ?? DEFAULT_TAB_KEY;
       persistTabs();
     };
 

@@ -48,6 +48,18 @@
   z-index: 1;
 }
 
+.workspace-tab--active::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fluent-accent-default);
+  transform: translateY(-50%);
+}
+
 .workspace-tab--active:hover {
   background: var(--fluent-bg-layer);
 }

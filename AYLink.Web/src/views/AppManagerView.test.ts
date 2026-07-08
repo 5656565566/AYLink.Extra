@@ -6,6 +6,9 @@ import type { AppInfo, AppManagerTab } from '../types/apps';
 
 const {
   notificationShow,
+  notificationShowProgress,
+  notificationUpdate,
+  notificationDismiss,
   dialogConfirm,
   apiFetch,
   readApiErrorMessage,
@@ -14,6 +17,9 @@ const {
   runAction,
 } = vi.hoisted(() => ({
   notificationShow: vi.fn(),
+  notificationShowProgress: vi.fn(() => 1),
+  notificationUpdate: vi.fn(),
+  notificationDismiss: vi.fn(),
   dialogConfirm: vi.fn(async () => true),
   apiFetch: vi.fn(),
   readApiErrorMessage: vi.fn(async (_response: Response, fallback: string) => fallback),
@@ -41,7 +47,10 @@ vi.mock('../services/dialog', () => ({
 
 vi.mock('../services/notification', () => ({
   useNotification: () => ({
-    show: notificationShow
+    show: notificationShow,
+    showProgress: notificationShowProgress,
+    update: notificationUpdate,
+    dismiss: notificationDismiss
   })
 }));
 

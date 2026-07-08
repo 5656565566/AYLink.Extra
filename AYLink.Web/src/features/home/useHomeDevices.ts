@@ -51,7 +51,6 @@ export function useHomeDevices() {
   const loading = ref(true);
   const showAddDialog = ref(false);
   const showMoreActionsMenu = ref(false);
-  const showGroupPickerMenu = ref(false);
   const adding = ref(false);
   const addError = ref('');
   const renaming = ref(false);
@@ -75,7 +74,6 @@ export function useHomeDevices() {
   const selectedEncoder = ref('');
   const activeMenuDeviceId = ref<number | null>(null);
   const selectedGroupId = ref<number>(0);
-  const groupKeyword = ref('');
   const devicesRequest = createLatestRequestController();
   const groupOptionsRequest = createLatestRequestController();
   const encodersRequest = createLatestRequestController();
@@ -84,19 +82,6 @@ export function useHomeDevices() {
   const previewActiveRequests = new Map<number, AbortController>();
   let previewSchedulerHandle: number | null = null;
 
-  const filteredAvailableGroups = computed(() => {
-    const keyword = groupKeyword.value.trim().toLowerCase();
-    if (!keyword) {
-      return availableGroups.value;
-    }
-
-    return availableGroups.value.filter((group) => {
-      const haystack = `${group.Name} ${group.Source || ''}`.toLowerCase();
-      return haystack.includes(keyword);
-    });
-  });
-
-  const hasGroupKeyword = computed(() => groupKeyword.value.trim().length > 0);
   const filteredDeviceEncoders = computed(() => {
     const keyword = encoderSearchKeyword.value.trim().toLowerCase();
     if (!keyword) {
@@ -106,12 +91,16 @@ export function useHomeDevices() {
     return deviceEncoders.value.filter((encoder) => encoder.toLowerCase().includes(keyword));
   });
 
-  const selectedGroup = computed(() => {
-    if (selectedGroupId.value === 0) {
-      return null;
-    }
-    return availableGroups.value.find((group) => group.Id === selectedGroupId.value) || null;
-  });
+  const groupDropdownOptions = computed(() => [
+    {
+      value: 0,
+      label: t('HomeView.AllDevices', '全部设备'),
+    },
+    ...availableGroups.value.map((group) => ({
+      value: group.Id,
+      label: group.Name,
+    }))
+  ]);
 
   const visibleDevices = computed(() => {
     if (selectedGroupId.value === 0) {
@@ -362,14 +351,8 @@ export function useHomeDevices() {
     cancelPreviewRequests();
   };
 
-  const toggleGroupPickerMenu = async () => {
-    const willOpen = !showGroupPickerMenu.value;
-    if (willOpen) {
-      await Promise.all([fetchDevices(), fetchAvailableGroups()]);
-    }
-
-    showGroupPickerMenu.value = willOpen;
-    groupKeyword.value = '';
+  const prepareGroupDropdown = async () => {
+    await Promise.all([fetchDevices(), fetchAvailableGroups()]);
     showMoreActionsMenu.value = false;
     activeMenuDeviceId.value = null;
   };
@@ -377,8 +360,6 @@ export function useHomeDevices() {
   const selectGroup = (groupId: number) => {
     selectedGroupId.value = groupId;
     selectedDeviceIds.value = [];
-    showGroupPickerMenu.value = false;
-    groupKeyword.value = '';
   };
 
   const isDeviceSelected = (deviceId: number | string) => {
@@ -418,9 +399,6 @@ export function useHomeDevices() {
     if (!target.closest('.dropdown-container')) {
       activeMenuDeviceId.value = null;
       showMoreActionsMenu.value = false;
-    }
-    if (!target.closest('.group-select')) {
-      showGroupPickerMenu.value = false;
     }
   };
 
@@ -965,7 +943,6 @@ export function useHomeDevices() {
     loading,
     showAddDialog,
     showMoreActionsMenu,
-    showGroupPickerMenu,
     adding,
     addError,
     renaming,
@@ -990,17 +967,14 @@ export function useHomeDevices() {
     selectedEncoder,
     activeMenuDeviceId,
     selectedGroupId,
-    selectedGroup,
-    groupKeyword,
+    groupDropdownOptions,
     availableGroups,
-    filteredAvailableGroups,
-    hasGroupKeyword,
     canManageDevices,
     canControlDevices,
     canAccessFiles,
     canAccessTerminal,
     formatDeviceGroups,
-    toggleGroupPickerMenu,
+    prepareGroupDropdown,
     selectGroup,
     isDeviceSelected,
     toggleDeviceSelection,

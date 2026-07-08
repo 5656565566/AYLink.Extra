@@ -8,10 +8,12 @@ import { useAppManagerTabs } from '../features/apps/useAppManagerTabs';
 import { useDialog } from '../services/dialog';
 import { requestWorkspaceOpen } from '../services/workspaceNavigation';
 import { useNotification } from '../services/notification';
+import { useTaskService } from '../services/tasks';
 import type { AppDetails, AppInfo } from '../types/apps';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
 import { triggerBlobDownload, writeClipboardText } from '../lib/browser/operations';
+import { formatBytes, readResponseBlobWithProgress, uploadFormDataWithProgress } from '../lib/http/transfer';
 import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
 
 export default defineComponent({
@@ -28,6 +30,7 @@ export default defineComponent({
     const { t } = useI18n();
     const dialogService = useDialog();
     const notifications = useNotification();
+    const taskService = useTaskService();
     const { isRunning: actionInProgress, run: runAction } = useAsyncAction();
 
     const apkInput = ref<HTMLInputElement | null>(null);
@@ -190,13 +193,71 @@ export default defineComponent({
 
       const formData = new FormData();
       formData.append('file', file, file.name);
-
-      const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/install`, {
-        method: 'POST',
-        body: formData
+      const title = t('AppPage.InstallApk', '安装 APK');
+      const preparingMessage = t('AppPage.InstallPreparing', '准备上传 {0}', file.name);
+      const controller = new AbortController();
+      const task = taskService.start({
+        title,
+        description: preparingMessage,
+        source: t('AppPage.Title', '应用管理'),
+        isIndeterminate: true,
+        isCancelable: true,
+        cancelAction: () => controller.abort()
       });
-      if (!response.ok) {
-        throw new Error(await getResponseErrorMessage(response, t('AppPage.InstallFailed', 'APK 安装失败')));
+      const toastId = notifications.showProgress({
+        type: 'info',
+        title,
+        message: preparingMessage,
+        isIndeterminate: true,
+        isCancelable: true,
+        onCancel: () => taskService.requestCancel(task)
+      });
+
+      try {
+        const response = await uploadFormDataWithProgress(`/api/devices/${targetDeviceId}/apps/install`, formData, {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            const uploadComplete = progress.progress !== null && progress.progress >= 100;
+            const message = uploadComplete
+              ? t('AppPage.InstallWaiting', '上传完成，正在安装...')
+              : progress.total
+                ? t('AppPage.UploadingBytes', '正在上传 {0} / {1}', formatBytes(progress.loaded), formatBytes(progress.total))
+                : t('AppPage.UploadingBytesUnknown', '正在上传 {0}', formatBytes(progress.loaded));
+            taskService.update(task, {
+              detail: message,
+              progress: progress.progress ?? task.progress,
+              isIndeterminate: progress.progress === null || uploadComplete,
+              isCancelable: !uploadComplete
+            });
+            notifications.update(toastId, {
+              message,
+              progress: progress.progress ?? 0,
+              isIndeterminate: progress.progress === null || uploadComplete,
+              isCancelable: !uploadComplete
+            });
+          }
+        });
+        if (!response.ok) {
+          throw new Error(await getResponseErrorMessage(response, t('AppPage.InstallFailed', 'APK 安装失败')));
+        }
+
+        taskService.complete(task, t('AppPage.InstallSuccess', 'APK 安装成功'));
+        notifications.dismiss(toastId);
+      } catch (error) {
+        notifications.dismiss(toastId);
+        if (isAbortError(error)) {
+          const cancelledMessage = t('AppPage.InstallCancelled', '安装已取消');
+          taskService.cancel(task, cancelledMessage);
+          notifications.show({
+            type: 'warning',
+            title,
+            message: cancelledMessage
+          });
+          throw error;
+        }
+
+        taskService.fail(task, error instanceof Error ? error.message : t('AppPage.InstallFailed', 'APK 安装失败'));
+        throw error;
       }
     };
 
@@ -213,6 +274,10 @@ export default defineComponent({
         showSuccess(t('AppPage.InstallSuccess', 'APK 安装成功'));
         await loadApps(deviceId.value);
       } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+
         console.error('Failed to install apk', error);
         showError(error instanceof Error ? error.message : t('AppPage.InstallFailed', 'APK 安装失败'));
       }
@@ -228,17 +293,73 @@ export default defineComponent({
         throw new Error(t('AppPage.InvalidPackageName', '无效的应用包名'));
       }
 
-      const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageName })
+      const title = t('AppPage.DownloadApkTitle', '下载 APK');
+      const preparingMessage = t('AppPage.DownloadPreparing', '准备下载 {0}', `${packageName}.apk`);
+      const controller = new AbortController();
+      const task = taskService.start({
+        title,
+        description: preparingMessage,
+        source: t('AppPage.Title', '应用管理'),
+        isIndeterminate: true,
+        isCancelable: true,
+        cancelAction: () => controller.abort()
       });
-      if (!response.ok) {
-        throw new Error(await getResponseErrorMessage(response, t('AppPage.DownloadFailed', 'APK 下载失败')));
-      }
+      const toastId = notifications.showProgress({
+        type: 'info',
+        title,
+        message: preparingMessage,
+        isIndeterminate: true,
+        isCancelable: true,
+        onCancel: () => taskService.requestCancel(task)
+      });
 
-      const blob = await response.blob();
-      triggerBlobDownload(blob, `${packageName}.apk`, 'app.apk');
+      try {
+        const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packageName }),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(await getResponseErrorMessage(response, t('AppPage.DownloadFailed', 'APK 下载失败')));
+        }
+
+        const blob = await readResponseBlobWithProgress(response, {
+          onProgress: (progress) => {
+            const message = progress.total
+              ? t('AppPage.DownloadingBytes', '正在下载 {0} / {1}', formatBytes(progress.loaded), formatBytes(progress.total))
+              : t('AppPage.DownloadingBytesUnknown', '正在下载 {0}', formatBytes(progress.loaded));
+            taskService.update(task, {
+              detail: message,
+              progress: progress.progress ?? task.progress,
+              isIndeterminate: progress.progress === null
+            });
+            notifications.update(toastId, {
+              message,
+              progress: progress.progress ?? 0,
+              isIndeterminate: progress.progress === null
+            });
+          }
+        });
+        triggerBlobDownload(blob, `${packageName}.apk`, 'app.apk');
+        taskService.complete(task, t('AppPage.DownloadComplete', 'APK 下载完成'));
+        notifications.dismiss(toastId);
+      } catch (error) {
+        notifications.dismiss(toastId);
+        if (isAbortError(error)) {
+          const cancelledMessage = t('AppPage.DownloadCancelled', '下载已取消');
+          taskService.cancel(task, cancelledMessage);
+          notifications.show({
+            type: 'warning',
+            title,
+            message: cancelledMessage
+          });
+          throw error;
+        }
+
+        taskService.fail(task, error instanceof Error ? error.message : t('AppPage.DownloadFailed', 'APK 下载失败'));
+        throw error;
+      }
     };
 
     const launchApp = async (app: AppInfo) => {
@@ -388,6 +509,10 @@ export default defineComponent({
           }
         });
       } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+
         console.error('App action failed', error);
         showError(error instanceof Error ? error.message : t('Common.OperationFailed', '操作失败'));
       }

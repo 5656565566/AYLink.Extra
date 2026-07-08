@@ -56,6 +56,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .notification-title {
@@ -68,6 +69,43 @@
   font-size: 13px;
   color: var(--fluent-text-secondary, #cccccc);
   word-break: break-word;
+}
+
+.notification-progress {
+  position: relative;
+  height: 3px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--fluent-control-fill-secondary, rgba(255, 255, 255, 0.1));
+}
+
+.notification-progress__bar {
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: var(--fluent-accent-default, #60cdff);
+  transition: width 0.18s ease;
+}
+
+.notification-progress.indeterminate .notification-progress__bar {
+  animation: notification-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+.notification-action {
+  flex-shrink: 0;
+  align-self: center;
+  min-width: 44px;
+  border: 1px solid var(--fluent-stroke-default, rgba(255, 255, 255, 0.12));
+  border-radius: 4px;
+  padding: 4px 9px;
+  background: var(--fluent-control-fill-default, rgba(255, 255, 255, 0.06));
+  color: var(--fluent-text-primary, #ffffff);
+  cursor: pointer;
+}
+
+.notification-action:hover {
+  background: var(--fluent-control-fill-secondary, rgba(255, 255, 255, 0.1));
 }
 
 .notification-close {
@@ -113,4 +151,14 @@
 
 .notification-fade-move {
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes notification-progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
 }

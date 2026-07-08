@@ -1,0 +1,142 @@
+.fluent-dropdown {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  --fluent-dropdown-trigger-active: var(--fluent-control-fill-tertiary);
+}
+
+:root[data-theme="light"] .fluent-dropdown {
+  --fluent-dropdown-trigger-active: rgba(0, 0, 0, 0.08);
+}
+
+.fluent-dropdown__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 4px;
+  padding: 0 10px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.fluent-dropdown__trigger:hover {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.fluent-dropdown.is-open .fluent-dropdown__trigger {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.fluent-dropdown__trigger:active {
+  background: var(--fluent-dropdown-trigger-active);
+  border-color: var(--fluent-stroke-secondary);
+  transform: none;
+}
+
+.fluent-dropdown__trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fluent-dropdown__trigger svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--fluent-text-secondary);
+}
+
+.fluent-dropdown__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1000;
+  width: 100%;
+  min-width: 140px;
+  overflow: hidden;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 6px;
+  background: var(--fluent-bg-layer);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
+}
+
+.fluent-dropdown__search {
+  padding: 8px;
+  border-bottom: 1px solid var(--fluent-stroke-default);
+}
+
+.fluent-dropdown__search input {
+  width: 100%;
+  height: 30px;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 4px;
+  padding: 0 8px;
+  background: var(--fluent-control-fill-default);
+  color: var(--fluent-text-primary);
+  outline: none;
+}
+
+.fluent-dropdown__search input:focus {
+  border-color: var(--fluent-accent-default);
+  background: var(--fluent-control-fill-input-active);
+}
+
+.fluent-dropdown__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.fluent-dropdown__option {
+  position: relative;
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 10px 0 14px;
+  background: transparent;
+  color: var(--fluent-text-primary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fluent-dropdown__option:hover:not(:disabled),
+.fluent-dropdown__option.selected {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.fluent-dropdown__option.selected::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 4px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--fluent-accent-default);
+}
+
+.fluent-dropdown__option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fluent-dropdown__empty {
+  padding: 14px 10px;
+  color: var(--fluent-text-secondary);
+  font-size: 13px;
+  text-align: center;
+}

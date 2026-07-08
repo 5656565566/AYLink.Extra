@@ -8,6 +8,11 @@ export interface Notification {
   title: string;
   message: string;
   duration?: number;
+  progress?: number;
+  showProgress?: boolean;
+  isIndeterminate?: boolean;
+  isCancelable?: boolean;
+  onCancel?: () => void;
 }
 
 const notifications = ref<Notification[]>([]);
@@ -33,6 +38,25 @@ export function useNotification() {
     return id;
   };
 
+  const showProgress = (options: Omit<Notification, 'id' | 'showProgress'>) => {
+    return show({
+      ...options,
+      duration: options.duration ?? 0,
+      showProgress: true,
+      progress: options.progress ?? 0,
+      isIndeterminate: options.isIndeterminate ?? true
+    });
+  };
+
+  const update = (id: number, patch: Partial<Omit<Notification, 'id'>>) => {
+    const notification = notifications.value.find(n => n.id === id);
+    if (!notification) {
+      return;
+    }
+
+    Object.assign(notification, patch);
+  };
+
   const remove = (id: number) => {
     const index = notifications.value.findIndex(n => n.id === id);
     if (index !== -1) {
@@ -43,6 +67,9 @@ export function useNotification() {
   return {
     notifications,
     show,
+    showProgress,
+    update,
+    dismiss: remove,
     remove
   };
 }

@@ -4,48 +4,15 @@
       <div class="title-bar">
         <div class="group-select">
           <span class="label">{{ t('HomeView.DeviceGroup', '设备分组') }}</span>
-          <button class="group-picker-trigger" @click.stop="toggleGroupPickerMenu">
-            <span>{{ selectedGroup?.Name || t('HomeView.AllDevices', '全部设备') }}</span>
-            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <div v-if="showGroupPickerMenu" class="group-picker-menu" @click.stop>
-            <div class="group-picker-search">
-              <input
-                v-model="groupKeyword"
-                type="text"
-                :placeholder="t('HomeView.GroupSearchPlaceholder', '搜索分组名称')"
-                autofocus
-              />
-            </div>
-            <div class="group-picker-list">
-              <button
-                class="group-option"
-                :class="{ selected: selectedGroupId === 0 }"
-                @click="selectGroup(0)"
-              >
-                <span class="group-option__name">{{ t('HomeView.AllDevices', '全部设备') }}</span>
-              </button>
-              <div class="group-picker-results">
-                <button
-                  v-for="group in filteredAvailableGroups"
-                  :key="group.Id"
-                  class="group-option"
-                  :class="{ selected: selectedGroupId === group.Id }"
-                  @click="selectGroup(group.Id)"
-                >
-                  <span class="group-option__name">{{ group.Name }}</span>
-                </button>
-                <div v-if="availableGroups.length === 0" class="group-picker-empty">
-                  {{ t('Settings.EmptyDeviceGroups', '暂无设备分组') }}
-                </div>
-                <div v-else-if="hasGroupKeyword && filteredAvailableGroups.length === 0" class="group-picker-empty">
-                  {{ t('HomeView.NoGroupsMatched', '没有匹配的分组') }}
-                </div>
-              </div>
-            </div>
-          </div>
+          <FluentDropdown
+            :model-value="selectedGroupId"
+            :options="groupDropdownOptions"
+            searchable
+            width="180px"
+            :search-placeholder="t('HomeView.GroupSearchPlaceholder', '搜索分组名称')"
+            :empty-text="availableGroups.length === 0 ? t('Settings.EmptyDeviceGroups', '暂无设备分组') : t('HomeView.NoGroupsMatched', '没有匹配的分组')"
+            @open="prepareGroupDropdown"
+            @update:model-value="selectGroup(Number($event))" />
         </div>
         <div class="actions">
           <button v-if="canManageDevices" class="transparent" @click="showAddDialog = true">

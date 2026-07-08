@@ -30,7 +30,20 @@
         <div class="notification-content">
           <div v-if="item.title" class="notification-title">{{ item.title }}</div>
           <div class="notification-message">{{ item.message }}</div>
+          <div v-if="item.showProgress" class="notification-progress" :class="{ indeterminate: item.isIndeterminate }">
+            <div
+              class="notification-progress__bar"
+              :style="{ width: item.isIndeterminate ? '42%' : `${item.progress || 0}%` }">
+            </div>
+          </div>
         </div>
+        <button
+          v-if="item.isCancelable"
+          class="notification-action"
+          type="button"
+          @click="item.onCancel?.()">
+          {{ t('Common.Cancel', '取消') }}
+        </button>
         <button class="notification-close" @click="remove(item.id)">
           <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>

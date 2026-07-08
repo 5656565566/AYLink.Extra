@@ -7,9 +7,11 @@ import { apiFetch, readApiErrorMessage } from '../utils/api';
 import { useI18n } from '../composables/useI18n';
 import { useDialog } from '../services/dialog';
 import { useNotification } from '../services/notification';
+import { useTaskService } from '../services/tasks';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
 import { triggerBlobDownload, writeClipboardText } from '../lib/browser/operations';
+import { formatBytes, readResponseBlobWithProgress } from '../lib/http/transfer';
 import { normalizeDeviceId, normalizeRemotePath } from '../lib/input/normalize';
 
 export default defineComponent({
@@ -21,6 +23,7 @@ export default defineComponent({
     const { t } = useI18n();
     const dialogService = useDialog();
     const notifications = useNotification();
+    const taskService = useTaskService();
 
     const entries = ref<FileEntry[]>([]);
     const loading = ref(false);
@@ -176,17 +179,75 @@ export default defineComponent({
         throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
       }
 
-      const response = await apiFetch(`/api/devices/${targetDeviceId}/files/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: getEntryPath(entry) })
+      const fileName = entry.Name || 'download.bin';
+      const title = t('FilePage.DownloadTitle', '下载文件');
+      const preparingMessage = t('FilePage.DownloadPreparing', '准备下载 {0}', fileName);
+      const controller = new AbortController();
+      const task = taskService.start({
+        title,
+        description: preparingMessage,
+        source: t('FilePage.Title', '文件管理'),
+        isIndeterminate: true,
+        isCancelable: true,
+        cancelAction: () => controller.abort()
       });
-      if (!response.ok) {
-        throw new Error(await getResponseErrorMessage(response, t('FilePage.DownloadFailed', '下载失败')));
-      }
+      const toastId = notifications.showProgress({
+        type: 'info',
+        title,
+        message: preparingMessage,
+        isIndeterminate: true,
+        isCancelable: true,
+        onCancel: () => taskService.requestCancel(task)
+      });
 
-      const blob = await response.blob();
-      triggerBlobDownload(blob, entry.Name || 'download.bin', 'download.bin');
+      try {
+        const response = await apiFetch(`/api/devices/${targetDeviceId}/files/download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: getEntryPath(entry) }),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(await getResponseErrorMessage(response, t('FilePage.DownloadFailed', '下载失败')));
+        }
+
+        const blob = await readResponseBlobWithProgress(response, {
+          onProgress: (progress) => {
+            const message = progress.total
+              ? t('FilePage.DownloadingBytes', '正在下载 {0} / {1}', formatBytes(progress.loaded), formatBytes(progress.total))
+              : t('FilePage.DownloadingBytesUnknown', '正在下载 {0}', formatBytes(progress.loaded));
+            taskService.update(task, {
+              detail: message,
+              progress: progress.progress ?? task.progress,
+              isIndeterminate: progress.progress === null
+            });
+            notifications.update(toastId, {
+              message,
+              progress: progress.progress ?? 0,
+              isIndeterminate: progress.progress === null
+            });
+          }
+        });
+        triggerBlobDownload(blob, fileName, 'download.bin');
+        const completedMessage = t('FilePage.DownloadComplete', '{0} 下载完成', fileName);
+        taskService.complete(task, completedMessage);
+        notifications.dismiss(toastId);
+      } catch (error) {
+        notifications.dismiss(toastId);
+        if (isAbortError(error)) {
+          const cancelledMessage = t('FilePage.DownloadCancelled', '下载已取消');
+          taskService.cancel(task, cancelledMessage);
+          notifications.show({
+            type: 'warning',
+            title,
+            message: cancelledMessage
+          });
+          return;
+        }
+
+        taskService.fail(task, error instanceof Error ? error.message : t('FilePage.DownloadFailed', '下载失败'));
+        throw error;
+      }
     };
 
     const renameEntry = async (entry: FileEntry) => {

@@ -6,6 +6,9 @@ import type { FileEntry, FileManagerTab } from '../types/files';
 
 const {
   notificationShow,
+  notificationShowProgress,
+  notificationUpdate,
+  notificationDismiss,
   dialogConfirm,
   dialogPrompt,
   apiFetch,
@@ -15,6 +18,9 @@ const {
   loadFilesSpy,
 } = vi.hoisted(() => ({
   notificationShow: vi.fn(),
+  notificationShowProgress: vi.fn(() => 1),
+  notificationUpdate: vi.fn(),
+  notificationDismiss: vi.fn(),
   dialogConfirm: vi.fn(async () => true),
   dialogPrompt: vi.fn(async () => 'renamed.txt'),
   apiFetch: vi.fn(),
@@ -51,7 +57,10 @@ vi.mock('../services/dialog', () => ({
 
 vi.mock('../services/notification', () => ({
   useNotification: () => ({
-    show: notificationShow
+    show: notificationShow,
+    showProgress: notificationShowProgress,
+    update: notificationUpdate,
+    dismiss: notificationDismiss
   })
 }));
 

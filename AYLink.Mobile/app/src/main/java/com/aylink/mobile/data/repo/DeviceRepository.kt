@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody
 import okio.BufferedSink
+import okio.source
 import java.io.File
 import java.net.URLConnection
 import java.util.Locale
@@ -113,7 +114,7 @@ class DeviceRepository(
 
                     override fun writeTo(sink: BufferedSink) {
                         resolver.openInputStream(sourceUri)?.use { input ->
-                            sink.outputStream().use { output -> input.copyTo(output) }
+                            sink.writeAll(input.source())
                         } ?: error("无法读取所选 APK")
                     }
                 }

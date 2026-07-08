@@ -18,6 +18,7 @@ const canViewFiles = computed(() => hasPermission('files.access'));
 const canUseScreencast = computed(() => hasPermission('devices.control'));
 const canUseApps = computed(() => hasPermission('devices.control'));
 const canUseTerminal = computed(() => hasPermission('terminal.access'));
+const canViewTasks = computed(() => auth.isAuthenticated.value);
 const canViewSettings = computed(() => auth.isAuthenticated.value);
 
 const toggleSidebar = () => {
@@ -77,6 +78,15 @@ const toggleSidebar = () => {
             <path d="M5.5 3.5C4 3.5 3.5 4.5 3.5 6V7C3.5 7.5 3 8 2.5 8C3 8 3.5 8.5 3.5 9V10C3.5 11.5 4 12.5 5.5 12.5M10.5 3.5C12 3.5 12.5 4.5 12.5 6V7C12.5 7.5 13 8 13.5 8C13 8 12.5 8.5 12.5 9V10C12.5 11.5 12 12.5 10.5 12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span class="nav-label">{{ t('Nav.Terminal', '终端') }}</span>
+        </router-link>
+
+        <router-link v-if="canViewTasks" to="/tasks" class="nav-item" active-class="active">
+          <div class="nav-indicator"></div>
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M8 4.5V8.5L10.5 10.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span class="nav-label">{{ t('Nav.Tasks', '任务管理') }}</span>
         </router-link>
       </div>
 

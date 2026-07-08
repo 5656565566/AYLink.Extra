@@ -30,6 +30,15 @@ export const ANDROID_KEYCODE_VOLUME_DOWN = 25;
 
 export const ANDROID_KEYCODE_MUTE = 164;
 
+export const ANDROID_KEYCODE_FORWARD_DEL = 112;
+
+export const ANDROID_META_SHIFT_ON = 1;
+
+export interface AndroidKeyEventMapping {
+  keyCode: number;
+  metaState: number;
+}
+
 export const writeUInt16BE = (view: DataView, offset: number, value: number) => {
   view.setUint16(offset, Math.max(0, Math.min(0xffff, value)), false);
 };
@@ -127,6 +136,8 @@ export const mapBrowserCodeToAndroidKeyCode = (code: string) => {
       return 111;
     case 'Backspace':
       return 67;
+    case 'Delete':
+      return ANDROID_KEYCODE_FORWARD_DEL;
     case 'Tab':
       return 61;
     case 'Space':
@@ -148,6 +159,33 @@ export const mapBrowserCodeToAndroidKeyCode = (code: string) => {
     case 'AltLeft':
     case 'AltRight':
       return 57;
+    case 'Backquote':
+      return 68;
+    case 'Minus':
+    case 'NumpadSubtract':
+      return 69;
+    case 'Equal':
+      return 70;
+    case 'BracketLeft':
+      return 71;
+    case 'BracketRight':
+      return 72;
+    case 'Backslash':
+      return 73;
+    case 'Semicolon':
+      return 74;
+    case 'Quote':
+      return 75;
+    case 'Slash':
+    case 'NumpadDivide':
+      return 76;
+    case 'Comma':
+      return 55;
+    case 'Period':
+    case 'NumpadDecimal':
+      return 56;
+    case 'NumpadAdd':
+      return 81;
     default:
       break;
   }
@@ -164,4 +202,60 @@ export const mapBrowserCodeToAndroidKeyCode = (code: string) => {
   }
 
   return 0;
+};
+
+const mapBrowserKeyToAndroidKeyCode = (key: string) => {
+  switch (key) {
+    case 'Backspace':
+      return 67;
+    case 'Delete':
+      return ANDROID_KEYCODE_FORWARD_DEL;
+    case ',':
+    case '<':
+      return 55;
+    case '.':
+    case '>':
+      return 56;
+    case '/':
+    case '?':
+      return 76;
+    case '-':
+    case '_':
+      return 69;
+    case '=':
+    case '+':
+      return 70;
+    case '[':
+    case '{':
+      return 71;
+    case ']':
+    case '}':
+      return 72;
+    case '\\':
+    case '|':
+      return 73;
+    case ';':
+    case ':':
+      return 74;
+    case "'":
+    case '"':
+      return 75;
+    case '`':
+    case '~':
+      return 68;
+    default:
+      return 0;
+  }
+};
+
+export const mapKeyboardEventToAndroidKeyEvent = (event: KeyboardEvent): AndroidKeyEventMapping => {
+  const keyCode = mapBrowserCodeToAndroidKeyCode(event.code) || mapBrowserKeyToAndroidKeyCode(event.key);
+  if (!keyCode) {
+    return { keyCode: 0, metaState: 0 };
+  }
+
+  return {
+    keyCode,
+    metaState: event.shiftKey ? ANDROID_META_SHIFT_ON : 0
+  };
 };

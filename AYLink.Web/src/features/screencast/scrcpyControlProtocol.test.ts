@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ANDROID_META_SHIFT_ON,
   SCRCPY_ACTION_DOWN,
   SCRCPY_ACTION_MOVE,
   SCRCPY_MSG_INJECT_KEYCODE,
@@ -11,7 +12,8 @@ import {
   buildScreenPowerMessage,
   buildTouchMessage,
   mapAndroidCommandToKeycode,
-  mapBrowserCodeToAndroidKeyCode
+  mapBrowserCodeToAndroidKeyCode,
+  mapKeyboardEventToAndroidKeyEvent
 } from './scrcpyControlProtocol';
 
 describe('scrcpyControlProtocol', () => {
@@ -61,6 +63,44 @@ describe('scrcpyControlProtocol', () => {
     expect(mapBrowserCodeToAndroidKeyCode('KeyZ')).toBe(54);
     expect(mapBrowserCodeToAndroidKeyCode('Digit0')).toBe(7);
     expect(mapBrowserCodeToAndroidKeyCode('Digit9')).toBe(16);
+    expect(mapBrowserCodeToAndroidKeyCode('Comma')).toBe(55);
+    expect(mapBrowserCodeToAndroidKeyCode('Period')).toBe(56);
+    expect(mapBrowserCodeToAndroidKeyCode('Slash')).toBe(76);
+    expect(mapBrowserCodeToAndroidKeyCode('Minus')).toBe(69);
+    expect(mapBrowserCodeToAndroidKeyCode('Equal')).toBe(70);
+    expect(mapBrowserCodeToAndroidKeyCode('BracketLeft')).toBe(71);
+    expect(mapBrowserCodeToAndroidKeyCode('BracketRight')).toBe(72);
+    expect(mapBrowserCodeToAndroidKeyCode('Backslash')).toBe(73);
+    expect(mapBrowserCodeToAndroidKeyCode('Semicolon')).toBe(74);
+    expect(mapBrowserCodeToAndroidKeyCode('Quote')).toBe(75);
+    expect(mapBrowserCodeToAndroidKeyCode('Backquote')).toBe(68);
+    expect(mapBrowserCodeToAndroidKeyCode('Delete')).toBe(112);
     expect(mapBrowserCodeToAndroidKeyCode('F13')).toBe(0);
+  });
+
+  it('maps keyboard events with shift metastate for non-HID key injection', () => {
+    expect(mapKeyboardEventToAndroidKeyEvent(new KeyboardEvent('keydown', {
+      code: 'Digit1',
+      key: '!',
+      shiftKey: true
+    }))).toEqual({ keyCode: 8, metaState: ANDROID_META_SHIFT_ON });
+
+    expect(mapKeyboardEventToAndroidKeyEvent(new KeyboardEvent('keydown', {
+      code: 'Slash',
+      key: '?',
+      shiftKey: true
+    }))).toEqual({ keyCode: 76, metaState: ANDROID_META_SHIFT_ON });
+  });
+
+  it('falls back to keyboard event keys for delete keys when browser codes are unavailable', () => {
+    expect(mapKeyboardEventToAndroidKeyEvent(new KeyboardEvent('keydown', {
+      code: 'Unidentified',
+      key: 'Backspace'
+    }))).toEqual({ keyCode: 67, metaState: 0 });
+
+    expect(mapKeyboardEventToAndroidKeyEvent(new KeyboardEvent('keydown', {
+      code: 'Unidentified',
+      key: 'Delete'
+    }))).toEqual({ keyCode: 112, metaState: 0 });
   });
 });

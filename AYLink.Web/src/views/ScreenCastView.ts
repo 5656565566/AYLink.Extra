@@ -84,6 +84,7 @@ import {
   buildTouchMessage,
   mapAndroidCommandToKeycode,
   mapBrowserCodeToAndroidKeyCode,
+  mapKeyboardEventToAndroidKeyEvent,
   writeUInt16BE,
   writeUInt32BE,
   writeUInt64BE
@@ -1863,7 +1864,7 @@ export default defineComponent({
         return true;
       }
 
-      const keyCode = mapBrowserCodeToAndroidKeyCode(event.code);
+      const { keyCode, metaState } = mapKeyboardEventToAndroidKeyEvent(event);
       if (!keyCode) {
         return false;
       }
@@ -1872,7 +1873,8 @@ export default defineComponent({
         buildInjectKeycodeMessage(
           phase === 'down' ? SCRCPY_ACTION_DOWN : SCRCPY_ACTION_UP,
           keyCode,
-          phase === 'down' && event.repeat ? 1 : 0
+          phase === 'down' && event.repeat ? 1 : 0,
+          metaState
         )
       );
       return true;

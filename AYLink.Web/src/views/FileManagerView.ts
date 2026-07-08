@@ -11,7 +11,7 @@ import { useTaskService } from '../services/tasks';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
 import { triggerBlobDownload, writeClipboardText } from '../lib/browser/operations';
-import { formatBytes, readResponseBlobWithProgress } from '../lib/http/transfer';
+import { formatBytes, readResponseBlobWithProgress, uploadFormDataWithProgress } from '../lib/http/transfer';
 import { normalizeDeviceId, normalizeRemotePath } from '../lib/input/normalize';
 
 export default defineComponent({
@@ -27,9 +27,12 @@ export default defineComponent({
 
     const entries = ref<FileEntry[]>([]);
     const loading = ref(false);
+    const uploading = ref(false);
     const errorMessage = ref('');
     const filesRequest = createLatestRequestController();
     const selectedEntry = ref<FileEntry | null>(null);
+    const fileInput = ref<HTMLInputElement | null>(null);
+    const folderInput = ref<HTMLInputElement | null>(null);
     const contextMenu = ref({
       show: false,
       x: 0,
@@ -250,6 +253,185 @@ export default defineComponent({
       }
     };
 
+    const triggerUploadFiles = () => {
+      if (!activeTab.value || uploading.value) {
+        return;
+      }
+
+      fileInput.value?.click();
+    };
+
+    const triggerUploadFolder = () => {
+      if (!activeTab.value || uploading.value) {
+        return;
+      }
+
+      folderInput.value?.click();
+    };
+
+    const buildUploadUrl = (targetDeviceId: string, uploadDirectory: string, relativePath: string) => {
+      const query = new URLSearchParams({
+        path: normalizePath(uploadDirectory)
+      });
+      if (relativePath) {
+        query.set('relativePath', relativePath);
+      }
+      return `/api/devices/${targetDeviceId}/files/upload?${query.toString()}`;
+    };
+
+    const uploadSelectedFiles = async (files: File[], preserveRelativePath: boolean) => {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      const uploadDirectory = currentPath.value;
+      const uploadItems = files.filter((file) => file.size >= 0);
+      if (!targetDeviceId || uploadItems.length === 0) {
+        return;
+      }
+
+      uploading.value = true;
+      const totalBytes = uploadItems.reduce((sum, file) => sum + file.size, 0);
+      const title = uploadItems.length > 1
+        ? t('FilePage.UploadFilesTitle', '上传文件')
+        : t('FilePage.UploadFileTitle', '上传文件');
+      const preparingMessage = uploadItems.length > 1
+        ? t('FilePage.UploadPreparingMultiple', '准备上传 {0} 个文件', uploadItems.length)
+        : t('FilePage.UploadPreparing', '准备上传 {0}', uploadItems[0]?.name ?? '');
+      const controller = new AbortController();
+      const task = taskService.start({
+        title,
+        description: preparingMessage,
+        source: t('FilePage.Title', '文件管理'),
+        isIndeterminate: true,
+        isCancelable: true,
+        cancelAction: () => controller.abort()
+      });
+      const toastId = notifications.showProgress({
+        type: 'info',
+        title,
+        message: preparingMessage,
+        isIndeterminate: true,
+        isCancelable: true,
+        onCancel: () => taskService.requestCancel(task)
+      });
+
+      let completedBytes = 0;
+      try {
+        for (let index = 0; index < uploadItems.length; index += 1) {
+          const file = uploadItems[index];
+          const relativePath = preserveRelativePath ? file.webkitRelativePath || file.name : '';
+          const formData = new FormData();
+          formData.append('file', file, file.name);
+
+          const response = await uploadFormDataWithProgress(buildUploadUrl(targetDeviceId, uploadDirectory, relativePath), formData, {
+            signal: controller.signal,
+            onProgress: (progress) => {
+              const currentFileLoaded = progress.progress !== null
+                ? file.size * progress.progress / 100
+                : Math.min(progress.loaded, file.size);
+              const uploadedBytes = Math.min(totalBytes, completedBytes + currentFileLoaded);
+              const overallProgress = totalBytes > 0 ? uploadedBytes / totalBytes * 100 : progress.progress;
+              const uploadComplete = progress.progress !== null && progress.progress >= 100;
+              const prefix = uploadItems.length > 1
+                ? t('FilePage.UploadingFileIndex', '正在上传 {0}/{1}: {2}', index + 1, uploadItems.length, file.name)
+                : t('FilePage.UploadingFileName', '正在上传 {0}', file.name);
+              const message = uploadComplete
+                ? uploadItems.length > 1
+                  ? t('FilePage.UploadWritingDeviceIndex', '正在写入设备 {0}/{1}: {2}', index + 1, uploadItems.length, file.name)
+                  : t('FilePage.UploadWritingDevice', '上传完成，正在写入设备...')
+                : progress.total
+                  ? `${prefix} ${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}`
+                  : `${prefix} ${formatBytes(progress.loaded)}`;
+              taskService.update(task, {
+                detail: message,
+                progress: overallProgress ?? task.progress,
+                isIndeterminate: overallProgress === null || uploadComplete,
+                isCancelable: !uploadComplete
+              });
+              notifications.update(toastId, {
+                message,
+                progress: overallProgress ?? 0,
+                isIndeterminate: overallProgress === null || uploadComplete,
+                isCancelable: !uploadComplete
+              });
+            }
+          });
+          if (!response.ok) {
+            throw new Error(await getResponseErrorMessage(response, t('FilePage.UploadFailed', '上传失败')));
+          }
+
+          completedBytes += file.size;
+        }
+
+        const completedMessage = uploadItems.length > 1
+          ? t('FilePage.UploadMultipleComplete', '{0} 个文件上传完成', uploadItems.length)
+          : t('FilePage.UploadComplete', '{0} 上传完成', uploadItems[0]?.name ?? '');
+        taskService.complete(task, completedMessage);
+        notifications.dismiss(toastId);
+        notifications.show({
+          type: 'success',
+          title,
+          message: completedMessage
+        });
+        await loadFiles();
+      } catch (error) {
+        notifications.dismiss(toastId);
+        if (isAbortError(error)) {
+          const cancelledMessage = t('FilePage.UploadCancelled', '上传已取消');
+          taskService.cancel(task, cancelledMessage);
+          notifications.show({
+            type: 'warning',
+            title,
+            message: cancelledMessage
+          });
+          return;
+        }
+
+        taskService.fail(task, error instanceof Error ? error.message : t('FilePage.UploadFailed', '上传失败'));
+        throw error;
+      } finally {
+        uploading.value = false;
+      }
+    };
+
+    const handleFilesSelected = async (event: Event) => {
+      const input = event.target as HTMLInputElement;
+      const files = Array.from(input.files ?? []);
+      input.value = '';
+      if (files.length === 0) {
+        return;
+      }
+
+      try {
+        await uploadSelectedFiles(files, false);
+      } catch (error) {
+        console.error('Failed to upload files', error);
+        notifications.show({
+          type: 'error',
+          title: t('Common.OperationFailed', '操作失败'),
+          message: error instanceof Error ? error.message : t('FilePage.UploadFailed', '上传失败')
+        });
+      }
+    };
+
+    const handleFolderSelected = async (event: Event) => {
+      const input = event.target as HTMLInputElement;
+      const files = Array.from(input.files ?? []);
+      input.value = '';
+      if (files.length === 0) {
+        return;
+      }
+
+      try {
+        await uploadSelectedFiles(files, true);
+      } catch (error) {
+        console.error('Failed to upload folder', error);
+        notifications.show({
+          type: 'error',
+          title: t('Common.OperationFailed', '操作失败'),
+          message: error instanceof Error ? error.message : t('FilePage.UploadFailed', '上传失败')
+        });
+      }
+    };
+
     const renameEntry = async (entry: FileEntry) => {
       const nextName = (await dialogService.prompt(
         t('FilePage.RenameTitle', '重命名'),
@@ -385,9 +567,12 @@ export default defineComponent({
       activeTabKey,
       entries,
       loading,
+      uploading,
       errorMessage,
       selectedEntry,
       contextMenu,
+      fileInput,
+      folderInput,
       isFilesRouteActive,
       activeTab,
       currentPath,
@@ -419,6 +604,11 @@ export default defineComponent({
       activeDeviceId,
       getResponseErrorMessage,
       downloadEntry,
+      triggerUploadFiles,
+      triggerUploadFolder,
+      uploadSelectedFiles,
+      handleFilesSelected,
+      handleFolderSelected,
       renameEntry,
       deleteEntry,
       handleContextAction,

@@ -102,6 +102,35 @@ func (s *Service) Download(ctx context.Context, deviceID int, rawPath string) (*
 	}, nil
 }
 
+func (s *Service) Upload(ctx context.Context, deviceID int, rawDirectory string, relativePath string, fallbackName string, reader io.Reader) error {
+	serial, err := s.devices.ResolveSerialForAccess(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if reader == nil {
+		return ErrFileNameEmpty
+	}
+
+	directory, err := validateScopedPath(rawDirectory)
+	if err != nil {
+		return err
+	}
+	uploadRelativePath, err := normalizeUploadRelativePath(relativePath, fallbackName)
+	if err != nil {
+		return err
+	}
+	targetPath, err := validateScopedPath(normalizeDirectoryPath(directory) + uploadRelativePath)
+	if err != nil {
+		return err
+	}
+
+	targetDirectory := parentDirectory(targetPath)
+	if _, err := s.adb.RunCommand(ctx, serial, "mkdir -p "+quoteShellArg(targetDirectory)); err != nil {
+		return err
+	}
+	return s.adb.Push(ctx, serial, targetPath, reader, 0644)
+}
+
 func (s *Service) Rename(ctx context.Context, deviceID int, rawPath string, newName string) error {
 	serial, err := s.devices.ResolveSerialForAccess(ctx, deviceID)
 	if err != nil {
@@ -200,6 +229,36 @@ func baseName(path string) string {
 	return parts[len(parts)-1]
 }
 
+func normalizeUploadRelativePath(relativePath string, fallbackName string) (string, error) {
+	candidate := strings.TrimSpace(relativePath)
+	if candidate == "" {
+		fallback := strings.ReplaceAll(strings.TrimSpace(fallbackName), "\\", "/")
+		candidate = path.Base(fallback)
+	}
+
+	candidate = strings.ReplaceAll(candidate, "\\", "/")
+	if candidate == "" || strings.HasPrefix(candidate, "/") {
+		return "", ErrPathOutOfScope
+	}
+	for _, segment := range strings.Split(candidate, "/") {
+		if segment == "." || segment == ".." {
+			return "", ErrPathOutOfScope
+		}
+	}
+
+	cleaned := path.Clean(candidate)
+	if cleaned == "." || cleaned == "/" || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", ErrPathOutOfScope
+	}
+
+	for _, segment := range strings.Split(cleaned, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", ErrPathOutOfScope
+		}
+	}
+	return cleaned, nil
+}
+
 func validateScopedPath(rawPath string) (string, error) {
 	normalized := normalizeEntryPath(rawPath)
 	root := ensureTrailingSlash(allowedRootDirectory)
@@ -222,4 +281,8 @@ func pathpkgClean(value string) string {
 		return ensureTrailingSlash(allowedRootDirectory)
 	}
 	return cleaned
+}
+
+func quoteShellArg(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }

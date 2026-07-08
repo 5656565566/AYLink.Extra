@@ -13,6 +13,7 @@ const {
   dialogPrompt,
   apiFetch,
   readApiErrorMessage,
+  uploadFormDataWithProgress,
   activateTabSpy,
   closeTabSpy,
   loadFilesSpy,
@@ -25,6 +26,10 @@ const {
   dialogPrompt: vi.fn(async () => 'renamed.txt'),
   apiFetch: vi.fn(),
   readApiErrorMessage: vi.fn(async (_response: Response, fallback: string) => fallback),
+  uploadFormDataWithProgress: vi.fn(async (_url: string, _formData: FormData, options?: { onProgress?: (progress: { loaded: number; total: number | null; progress: number | null }) => void }) => {
+    options?.onProgress?.({ loaded: 12, total: 12, progress: 100 });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }),
   activateTabSpy: vi.fn(async () => {}),
   closeTabSpy: vi.fn(async () => {}),
   loadFilesSpy: vi.fn(async () => {}),
@@ -67,6 +72,12 @@ vi.mock('../services/notification', () => ({
 vi.mock('../utils/api', () => ({
   apiFetch,
   readApiErrorMessage,
+}));
+
+vi.mock('../lib/http/transfer', () => ({
+  formatBytes: (value: number) => `${value} B`,
+  readResponseBlobWithProgress: vi.fn(),
+  uploadFormDataWithProgress,
 }));
 
 vi.mock('../features/files/useFileManagerTabs', () => ({
@@ -178,5 +189,51 @@ describe('FileManagerView', () => {
       type: 'error',
       message: '下载失败'
     }));
+  });
+
+  it('uploads selected files to the current path', async () => {
+    const wrapper = mountView();
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: '/sdcard/', items: [] }), { status: 200 }));
+    const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+    const input = {
+      files: [file],
+      value: 'C:\\fakepath\\hello.txt'
+    } as unknown as HTMLInputElement;
+
+    await (wrapper.vm as unknown as { handleFilesSelected: (event: Event) => Promise<void> }).handleFilesSelected({ target: input } as unknown as Event);
+    await flushPromises();
+
+    expect(uploadFormDataWithProgress).toHaveBeenCalledTimes(1);
+    const [url, formData] = uploadFormDataWithProgress.mock.calls[0];
+    expect(url).toBe('/api/devices/device-a/files/upload?path=%2Fsdcard%2F');
+    const uploadedFile = (formData as FormData).get('file') as File;
+    expect(uploadedFile.name).toBe('hello.txt');
+    expect(uploadedFile.type).toBe('text/plain');
+    expect(apiFetch).toHaveBeenCalledWith('/api/devices/device-a/files/list', expect.objectContaining({
+      method: 'POST'
+    }));
+    expect(notificationShow).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'success'
+    }));
+  });
+
+  it('preserves folder relative paths when uploading a folder', async () => {
+    const wrapper = mountView();
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: '/sdcard/', items: [] }), { status: 200 }));
+    const file = new File(['image'], 'photo.png', { type: 'image/png' });
+    Object.defineProperty(file, 'webkitRelativePath', {
+      value: 'Album/Nested/photo.png'
+    });
+    const input = {
+      files: [file],
+      value: 'C:\\fakepath\\Album'
+    } as unknown as HTMLInputElement;
+
+    await (wrapper.vm as unknown as { handleFolderSelected: (event: Event) => Promise<void> }).handleFolderSelected({ target: input } as unknown as Event);
+    await flushPromises();
+
+    expect(uploadFormDataWithProgress).toHaveBeenCalledTimes(1);
+    const [url] = uploadFormDataWithProgress.mock.calls[0];
+    expect(url).toBe('/api/devices/device-a/files/upload?path=%2Fsdcard%2F&relativePath=Album%2FNested%2Fphoto.png');
   });
 });

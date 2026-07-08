@@ -918,6 +918,75 @@ func (h *DeviceHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, result.Reader)
 }
 
+// UploadFile 上传文件
+// @Summary 上传文件
+// @Description 将本地文件上传到指定设备目录，支持通过 relativePath 保留文件夹结构。
+// @Tags 文件管理
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param path query string true "目标目录"
+// @Param relativePath query string false "相对路径"
+// @Param file formData file true "文件"
+// @Success 200 {object} OKResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/files/upload [post]
+func (h *DeviceHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+	id, err := deviceIDFromPath(r.URL.Path)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
+
+	reader, err := r.MultipartReader()
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART", "Errors.InvalidUpload", "上传请求无效")
+		return
+	}
+
+	targetDirectory := r.URL.Query().Get("path")
+	relativePath := r.URL.Query().Get("relativePath")
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART", "Errors.InvalidUpload", "上传请求无效")
+			return
+		}
+		if part.FormName() != "file" {
+			_ = part.Close()
+			continue
+		}
+
+		err = h.fileService.Upload(r.Context(), id, targetDirectory, relativePath, part.FileName(), part)
+		_ = part.Close()
+		if err != nil {
+			h.writeFileError(w, err, "上传失败")
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, OKResponse{OK: true})
+		return
+	}
+
+	WriteError(w, http.StatusBadRequest, "FILE_UPLOAD_REQUIRED", "FilePage.UploadFileRequired", "请选择要上传的文件")
+}
+
 // RenameFile 重命名文件
 // @Summary 重命名文件
 // @Description 重命名指定设备上的文件或目录。
@@ -1163,6 +1232,25 @@ func (h *DeviceHandler) writeAppError(w http.ResponseWriter, err error, fallback
 		WriteError(w, http.StatusNotFound, "APP_PACKAGE_PATH_NOT_FOUND", "AppPage.PackagePathUnavailable", "未找到可下载的 APK 路径")
 	default:
 		WriteError(w, http.StatusInternalServerError, "APP_REQUEST_FAILED", "AppPage.RequestFailed", fallback)
+	}
+}
+
+func (h *DeviceHandler) writeFileError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, deviceservice.ErrDeviceNotFound):
+		WriteError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Devices.NotFound", "设备不存在")
+	case errors.Is(err, deviceservice.ErrDeviceOffline):
+		WriteError(w, http.StatusConflict, "DEVICE_OFFLINE", "Devices.Offline", "设备已断开，请稍后重试")
+	case errors.Is(err, deviceservice.ErrDeviceSerialEmpty):
+		WriteError(w, http.StatusBadRequest, "DEVICE_SERIAL_REQUIRED", "Devices.SerialRequired", "设备序列号不能为空")
+	case errors.Is(err, fileservice.ErrFileNameEmpty):
+		WriteError(w, http.StatusBadRequest, "FILE_UPLOAD_REQUIRED", "FilePage.UploadFileRequired", "请选择要上传的文件")
+	case errors.Is(err, fileservice.ErrPathOutOfScope):
+		WriteError(w, http.StatusBadRequest, "FILE_PATH_OUT_OF_SCOPE", "FilePage.PathOutOfScope", "路径超出允许范围")
+	case errors.Is(err, fileservice.ErrProtectedPath):
+		WriteError(w, http.StatusBadRequest, "FILE_PATH_PROTECTED", "FilePage.PathProtected", "该路径不允许操作")
+	default:
+		WriteError(w, http.StatusInternalServerError, "FILE_REQUEST_FAILED", "FilePage.RequestFailed", fallback)
 	}
 }
 

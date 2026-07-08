@@ -107,6 +107,14 @@ func (f *recordingAppService) Install(_ context.Context, deviceID int, fileName 
 }
 
 type fakeFileService struct{}
+type recordingFileService struct {
+	uploadDeviceID     int
+	uploadDirectory    string
+	uploadRelativePath string
+	uploadFallbackName string
+	uploadContent      string
+	uploadErr          error
+}
 type fakeScrcpyService struct{}
 type fakeDevicePreviewService struct {
 	lastWidth int
@@ -122,8 +130,36 @@ func (fakeFileService) List(context.Context, int, string) (*fileservice.ListResu
 func (fakeFileService) Download(context.Context, int, string) (*fileservice.DownloadResult, error) {
 	panic("unexpected call")
 }
+func (fakeFileService) Upload(context.Context, int, string, string, string, io.Reader) error {
+	panic("unexpected call")
+}
 func (fakeFileService) Rename(context.Context, int, string, string) error { return nil }
 func (fakeFileService) Delete(context.Context, int, string) error         { return nil }
+
+func (recordingFileService) List(context.Context, int, string) (*fileservice.ListResult, error) {
+	panic("unexpected call")
+}
+func (recordingFileService) Download(context.Context, int, string) (*fileservice.DownloadResult, error) {
+	panic("unexpected call")
+}
+func (f *recordingFileService) Upload(_ context.Context, deviceID int, directory string, relativePath string, fallbackName string, reader io.Reader) error {
+	f.uploadDeviceID = deviceID
+	f.uploadDirectory = directory
+	f.uploadRelativePath = relativePath
+	f.uploadFallbackName = fallbackName
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+	f.uploadContent = string(content)
+	return f.uploadErr
+}
+func (recordingFileService) Rename(context.Context, int, string, string) error {
+	panic("unexpected call")
+}
+func (recordingFileService) Delete(context.Context, int, string) error {
+	panic("unexpected call")
+}
 
 func (f fakeDeviceAccessService) CanAccessDevice(context.Context, *domainauth.Identity, int) (bool, error) {
 	return f.allowed, f.err
@@ -376,6 +412,95 @@ func TestDeviceHandlerInstallAppRequiresFilePart(t *testing.T) {
 		t.Fatalf("expected 400, got %d", recorder.Code)
 	}
 	if !strings.Contains(recorder.Body.String(), `APP_FILE_REQUIRED`) {
+		t.Fatalf("expected file-required payload, got %s", recorder.Body.String())
+	}
+}
+
+func TestDeviceHandlerUploadFileStreamsMultipartPartToService(t *testing.T) {
+	fileService := &recordingFileService{}
+	handler := NewDeviceHandler(
+		&fakeDeviceService{},
+		fakeDeviceAccessService{allowed: true},
+		nil,
+		&fakeDevicePreviewService{},
+		fakeAppService{},
+		fileService,
+		fakeDeviceSettingsService{},
+		fakeScrcpyService{},
+	)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	field, err := writer.CreateFormField("ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := field.Write([]byte("metadata")); err != nil {
+		t.Fatal(err)
+	}
+	filePart, err := writer.CreateFormFile("file", "photo.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := filePart.Write([]byte("image-content")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/7/files/upload?path=/sdcard/Download/&relativePath=Album/photo.png", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.UploadFile(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if fileService.uploadDeviceID != 7 || fileService.uploadDirectory != "/sdcard/Download/" || fileService.uploadRelativePath != "Album/photo.png" || fileService.uploadFallbackName != "photo.png" || fileService.uploadContent != "image-content" {
+		t.Fatalf("expected upload payload to be streamed, got device=%d directory=%q relative=%q fallback=%q content=%q", fileService.uploadDeviceID, fileService.uploadDirectory, fileService.uploadRelativePath, fileService.uploadFallbackName, fileService.uploadContent)
+	}
+	if req.MultipartForm != nil && (len(req.MultipartForm.Value) > 0 || len(req.MultipartForm.File) > 0) {
+		t.Fatalf("expected streaming multipart reader to avoid cached form data, got %+v", req.MultipartForm)
+	}
+}
+
+func TestDeviceHandlerUploadFileRequiresFilePart(t *testing.T) {
+	handler := NewDeviceHandler(
+		&fakeDeviceService{},
+		fakeDeviceAccessService{allowed: true},
+		nil,
+		&fakeDevicePreviewService{},
+		fakeAppService{},
+		&recordingFileService{},
+		fakeDeviceSettingsService{},
+		fakeScrcpyService{},
+	)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	field, err := writer.CreateFormField("ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := field.Write([]byte("metadata")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/7/files/upload?path=/sdcard/Download/", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.UploadFile(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `FILE_UPLOAD_REQUIRED`) {
 		t.Fatalf("expected file-required payload, got %s", recorder.Body.String())
 	}
 }

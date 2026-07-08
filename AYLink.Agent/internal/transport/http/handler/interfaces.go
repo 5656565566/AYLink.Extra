@@ -97,6 +97,7 @@ type AppService interface {
 type FileService interface {
 	List(ctx context.Context, deviceID int, rawPath string) (*fileservice.ListResult, error)
 	Download(ctx context.Context, deviceID int, rawPath string) (*fileservice.DownloadResult, error)
+	Upload(ctx context.Context, deviceID int, rawDirectory string, relativePath string, fallbackName string, reader io.Reader) error
 	Rename(ctx context.Context, deviceID int, rawPath string, newName string) error
 	Delete(ctx context.Context, deviceID int, rawPath string) error
 }

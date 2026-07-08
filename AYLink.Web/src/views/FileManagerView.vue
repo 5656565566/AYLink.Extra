@@ -29,6 +29,22 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M12.5 8C12.5 10.4853 10.4853 12.5 8 12.5C5.51472 12.5 3.5 10.4853 3.5 8C3.5 6.42557 4.30823 4.98188 5.61868 4.14811C5.85042 3.99818 5.92617 3.68412 5.77977 3.44759C5.63336 3.21106 5.32356 3.12933 5.09182 3.27926C3.4116 4.35627 2.5 6.13601 2.5 8C2.5 11.0376 4.96243 13.5 8 13.5C11.0376 13.5 13.5 11.0376 13.5 8C13.5 5.56611 11.9567 3.5042 9.77121 2.76634C9.51347 2.67931 9.22744 2.82522 9.13886 3.08055C9.05027 3.33588 9.19163 3.61908 9.44937 3.70611C11.2389 4.30799 12.5 6.00287 12.5 8Z"/></svg>
           {{ loading ? t('Common.Refreshing', '刷新中...') : t('Common.Refresh', '刷新') }}
         </button>
+        <button class="transparent" type="button" :disabled="!activeTab || uploading" @click="triggerUploadFiles">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 11.5V3.5M8 3.5L5 6.5M8 3.5L11 6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 10.5V12.5C3 13.0523 3.44772 13.5 4 13.5H12C12.5523 13.5 13 13.0523 13 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          {{ t('FilePage.UploadFiles', '上传文件') }}
+        </button>
+        <button class="transparent" type="button" :disabled="!activeTab || uploading" @click="triggerUploadFolder">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2.5 4.5C2.5 3.94772 2.94772 3.5 3.5 3.5H6.1L7.1 4.75H12.5C13.0523 4.75 13.5 5.19772 13.5 5.75V12C13.5 12.5523 13.0523 13 12.5 13H3.5C2.94772 13 2.5 12.5523 2.5 12V4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+            <path d="M8 11V7M8 7L6.5 8.5M8 7L9.5 8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          {{ t('FilePage.UploadFolder', '上传文件夹') }}
+        </button>
+        <input ref="fileInput" class="file-upload-input" type="file" multiple @change="handleFilesSelected" />
+        <input ref="folderInput" class="file-upload-input" type="file" multiple webkitdirectory @change="handleFolderSelected" />
       </div>
     </div>
 

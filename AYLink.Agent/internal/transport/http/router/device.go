@@ -27,6 +27,7 @@ const (
 	deviceRouteAppInstall
 	deviceRouteFilesList
 	deviceRouteFilesDownload
+	deviceRouteFilesUpload
 	deviceRouteFilesRename
 	deviceRouteFilesDelete
 )
@@ -106,6 +107,8 @@ func handleDeviceResourceRoute(w http.ResponseWriter, r *http.Request, handlers 
 		guards.requireFilesAccess(http.HandlerFunc(handlers.device.ListFiles)).ServeHTTP(w, r)
 	case deviceRouteFilesDownload:
 		guards.requireFilesAccess(http.HandlerFunc(handlers.device.DownloadFile)).ServeHTTP(w, r)
+	case deviceRouteFilesUpload:
+		guards.requireFilesAccess(http.HandlerFunc(handlers.device.UploadFile)).ServeHTTP(w, r)
 	case deviceRouteFilesRename:
 		guards.requireFilesAccess(http.HandlerFunc(handlers.device.RenameFile)).ServeHTTP(w, r)
 	case deviceRouteFilesDelete:
@@ -189,6 +192,8 @@ func classifyDeviceRoute(path string) deviceRouteKind {
 		return deviceRouteFilesList
 	case strings.HasSuffix(path, "/files/download"):
 		return deviceRouteFilesDownload
+	case strings.HasSuffix(path, "/files/upload"):
+		return deviceRouteFilesUpload
 	case strings.HasSuffix(path, "/files/rename"):
 		return deviceRouteFilesRename
 	case strings.HasSuffix(path, "/files/delete"):

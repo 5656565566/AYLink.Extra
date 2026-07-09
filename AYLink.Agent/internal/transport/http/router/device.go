@@ -26,6 +26,7 @@ const (
 	deviceRouteAppInfo
 	deviceRouteAppInstall
 	deviceRouteFilesList
+	deviceRouteFilesDownloadTicket
 	deviceRouteFilesDownload
 	deviceRouteFilesUpload
 	deviceRouteFilesRename
@@ -38,6 +39,7 @@ func registerDeviceRoutes(mux *http.ServeMux, handlers routeHandlers, guards rou
 	mux.Handle("/api/scrcpy-sessions/release", guards.authMiddleware(guards.requireDevicesControl(http.HandlerFunc(handlers.webrtc.Release))))
 	mux.Handle("/api/scrcpy-sessions/video-health", guards.authMiddleware(guards.requireDevicesControl(http.HandlerFunc(handlers.webrtc.VideoHealth))))
 	mux.HandleFunc("/webrtc", handlers.webrtc.ServeSignalWS)
+	mux.HandleFunc("/api/file-downloads/", handlers.device.DownloadFileByTicket)
 
 	mux.Handle("/api/devices/", guards.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleDeviceResourceRoute(w, r, handlers, guards)
@@ -105,6 +107,8 @@ func handleDeviceResourceRoute(w http.ResponseWriter, r *http.Request, handlers 
 		guards.requireDevicesControl(http.HandlerFunc(handlers.device.InstallApp)).ServeHTTP(w, r)
 	case deviceRouteFilesList:
 		guards.requireFilesAccess(http.HandlerFunc(handlers.device.ListFiles)).ServeHTTP(w, r)
+	case deviceRouteFilesDownloadTicket:
+		guards.requireFilesAccess(http.HandlerFunc(handlers.device.CreateFileDownloadTicket)).ServeHTTP(w, r)
 	case deviceRouteFilesDownload:
 		guards.requireFilesAccess(http.HandlerFunc(handlers.device.DownloadFile)).ServeHTTP(w, r)
 	case deviceRouteFilesUpload:
@@ -190,6 +194,8 @@ func classifyDeviceRoute(path string) deviceRouteKind {
 		return deviceRouteApps
 	case strings.HasSuffix(path, "/files/list"):
 		return deviceRouteFilesList
+	case strings.HasSuffix(path, "/files/download-ticket"):
+		return deviceRouteFilesDownloadTicket
 	case strings.HasSuffix(path, "/files/download"):
 		return deviceRouteFilesDownload
 	case strings.HasSuffix(path, "/files/upload"):

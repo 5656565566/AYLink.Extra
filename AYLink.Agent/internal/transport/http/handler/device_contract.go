@@ -32,6 +32,12 @@ type FilePathRequest struct {
 	Path string `json:"path"`
 }
 
+type FileDownloadTicketResponse struct {
+	Ticket    string `json:"ticket"`
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
 type RenameFileRequest struct {
 	Path    string `json:"path"`
 	NewName string `json:"newName"`

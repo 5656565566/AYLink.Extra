@@ -26,3 +26,20 @@ export function triggerBlobDownload(blob: Blob, fileName: string, fallbackFileNa
     window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   }
 }
+
+export function triggerUrlDownload(url: string, fileName: string, fallbackFileName: string) {
+  if (!document.body) {
+    throw new Error('Document body is not available for download dispatch.');
+  }
+
+  const anchor = document.createElement('a');
+
+  try {
+    anchor.href = url;
+    anchor.download = sanitizeDownloadFileName(fileName, fallbackFileName);
+    document.body.appendChild(anchor);
+    anchor.click();
+  } finally {
+    anchor.remove();
+  }
+}

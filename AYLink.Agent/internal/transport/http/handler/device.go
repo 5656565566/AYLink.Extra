@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	domaindevice "aylink-agent/internal/domain/device"
 	appservice "aylink-agent/internal/service/app"
@@ -23,6 +27,7 @@ type DeviceHandler struct {
 	fileService     FileService
 	settingsService DeviceSettingsService
 	scrcpyService   ScrcpyService
+	downloadTickets *fileDownloadTicketStore
 }
 
 func NewDeviceHandler(service DeviceService, accessService DeviceAccessService, groupService DeviceGroupService, previewService DevicePreviewService, appService AppService, fileService FileService, settingsService DeviceSettingsService, scrcpyService ScrcpyService) *DeviceHandler {
@@ -35,6 +40,72 @@ func NewDeviceHandler(service DeviceService, accessService DeviceAccessService, 
 		fileService:     fileService,
 		settingsService: settingsService,
 		scrcpyService:   scrcpyService,
+		downloadTickets: newFileDownloadTicketStore(2 * time.Minute),
+	}
+}
+
+type fileDownloadTicket struct {
+	deviceID  int
+	path      string
+	expiresAt time.Time
+}
+
+type fileDownloadTicketStore struct {
+	mu      sync.Mutex
+	ttl     time.Duration
+	tickets map[string]fileDownloadTicket
+}
+
+func newFileDownloadTicketStore(ttl time.Duration) *fileDownloadTicketStore {
+	return &fileDownloadTicketStore{
+		ttl:     ttl,
+		tickets: make(map[string]fileDownloadTicket),
+	}
+}
+
+func (s *fileDownloadTicketStore) Create(deviceID int, path string) (string, time.Time, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", time.Time{}, err
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(s.ttl)
+	ticket := base64.RawURLEncoding.EncodeToString(raw[:])
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpiredLocked(now)
+	s.tickets[ticket] = fileDownloadTicket{
+		deviceID:  deviceID,
+		path:      path,
+		expiresAt: expiresAt,
+	}
+	return ticket, expiresAt, nil
+}
+
+func (s *fileDownloadTicketStore) Consume(ticket string) (fileDownloadTicket, bool) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpiredLocked(now)
+
+	value, ok := s.tickets[ticket]
+	if !ok {
+		return fileDownloadTicket{}, false
+	}
+	delete(s.tickets, ticket)
+	if now.After(value.expiresAt) {
+		return fileDownloadTicket{}, false
+	}
+	return value, true
+}
+
+func (s *fileDownloadTicketStore) cleanupExpiredLocked(now time.Time) {
+	for ticket, value := range s.tickets {
+		if now.After(value.expiresAt) {
+			delete(s.tickets, ticket)
+		}
 	}
 }
 
@@ -896,7 +967,92 @@ func (h *DeviceHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.fileService.Download(r.Context(), id, payload.Path)
+	h.downloadFile(w, r, id, payload.Path)
+}
+
+// CreateFileDownloadTicket 创建一次性浏览器下载票据
+// @Summary 创建文件下载票据
+// @Description 为浏览器原生下载创建短期一次性票据。
+// @Tags 文件管理
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "设备 ID"
+// @Param body body FilePathRequest true "文件路径"
+// @Success 200 {object} FileDownloadTicketResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/devices/{id}/files/download-ticket [post]
+func (h *DeviceHandler) CreateFileDownloadTicket(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+	id, err := deviceIDFromPath(r.URL.Path)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, id); !ok {
+		return
+	}
+
+	var payload FilePathRequest
+	if err := decodeJSONBody(r, &payload); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
+
+	ticket, expiresAt, err := h.downloadTickets.Create(id, payload.Path)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "FILE_DOWNLOAD_TICKET_FAILED", "FilePage.DownloadFailed", "无法创建下载票据")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, FileDownloadTicketResponse{
+		Ticket:    ticket,
+		URL:       "/api/file-downloads/" + ticket,
+		ExpiresAt: expiresAt.Format(time.RFC3339),
+	})
+}
+
+// DownloadFileByTicket 使用一次性票据下载文件
+// @Summary 使用票据下载文件
+// @Description 供浏览器原生下载使用，票据短期有效且只能使用一次。
+// @Tags 文件管理
+// @Produce octet-stream
+// @Param ticket path string true "下载票据"
+// @Success 200 {file} binary
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/file-downloads/{ticket} [get]
+func (h *DeviceHandler) DownloadFileByTicket(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	ticket := strings.TrimPrefix(r.URL.Path, "/api/file-downloads/")
+	if strings.TrimSpace(ticket) == "" {
+		WriteError(w, http.StatusBadRequest, "INVALID_DOWNLOAD_TICKET", "FilePage.DownloadFailed", "无效的下载票据")
+		return
+	}
+
+	download, ok := h.downloadTickets.Consume(ticket)
+	if !ok {
+		WriteError(w, http.StatusNotFound, "DOWNLOAD_TICKET_NOT_FOUND", "FilePage.DownloadFailed", "下载票据不存在或已过期")
+		return
+	}
+
+	h.downloadFile(w, r, download.deviceID, download.path)
+}
+
+func (h *DeviceHandler) downloadFile(w http.ResponseWriter, r *http.Request, id int, path string) {
+	result, err := h.fileService.Download(r.Context(), id, path)
 	if err != nil {
 		switch {
 		case errors.Is(err, deviceservice.ErrDeviceNotFound):

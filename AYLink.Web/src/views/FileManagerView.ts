@@ -10,7 +10,7 @@ import { useNotification } from '../services/notification';
 import { useTaskService } from '../services/tasks';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
-import { triggerBlobDownload, writeClipboardText } from '../lib/browser/operations';
+import { triggerBlobDownload, triggerUrlDownload, writeClipboardText } from '../lib/browser/operations';
 import { formatBytes, readResponseBlobWithProgress, uploadFormDataWithProgress } from '../lib/http/transfer';
 import { normalizeDeviceId, normalizeRemotePath } from '../lib/input/normalize';
 
@@ -152,7 +152,7 @@ export default defineComponent({
       selectedEntry.value = entry;
 
       const menuWidth = 180;
-      const menuHeight = 210;
+      const menuHeight = 252;
       let x = event.clientX;
       let y = event.clientY;
 
@@ -251,6 +251,35 @@ export default defineComponent({
         taskService.fail(task, error instanceof Error ? error.message : t('FilePage.DownloadFailed', '下载失败'));
         throw error;
       }
+    };
+
+    const browserDownloadEntry = async (entry: FileEntry) => {
+      const targetDeviceId = normalizedActiveDeviceId.value;
+      if (!targetDeviceId) {
+        throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
+      }
+
+      const fileName = entry.Name || 'download.bin';
+      const response = await apiFetch(`/api/devices/${targetDeviceId}/files/download-ticket`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: getEntryPath(entry) })
+      });
+      if (!response.ok) {
+        throw new Error(await getResponseErrorMessage(response, t('FilePage.DownloadFailed', '下载失败')));
+      }
+
+      const payload = await response.json() as { url?: string };
+      if (!payload.url) {
+        throw new Error(t('FilePage.DownloadFailed', '下载失败'));
+      }
+
+      triggerUrlDownload(payload.url, fileName, 'download.bin');
+      notifications.show({
+        type: 'success',
+        title: t('FilePage.DownloadTitle', '下载文件'),
+        message: t('FilePage.BrowserDownloadStarted', '已交给浏览器下载')
+      });
     };
 
     const triggerUploadFiles = () => {
@@ -494,7 +523,7 @@ export default defineComponent({
       await loadFiles();
     };
 
-    const handleContextAction = async (action: 'open' | 'download' | 'copy-path' | 'rename' | 'delete') => {
+    const handleContextAction = async (action: 'open' | 'download' | 'browser-download' | 'copy-path' | 'rename' | 'delete') => {
       const entry = contextMenu.value.entry;
       if (!entry || !activeDeviceId.value) return;
 
@@ -508,6 +537,9 @@ export default defineComponent({
             break;
           case 'download':
             await downloadEntry(entry);
+            break;
+          case 'browser-download':
+            await browserDownloadEntry(entry);
             break;
           case 'rename':
             await renameEntry(entry);
@@ -604,6 +636,7 @@ export default defineComponent({
       activeDeviceId,
       getResponseErrorMessage,
       downloadEntry,
+      browserDownloadEntry,
       triggerUploadFiles,
       triggerUploadFolder,
       uploadSelectedFiles,

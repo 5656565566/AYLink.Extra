@@ -191,6 +191,28 @@ describe('FileManagerView', () => {
     }));
   });
 
+  it('creates a browser download ticket and dispatches native download', async () => {
+    const wrapper = mountView();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ url: '/api/file-downloads/ticket-value' }), { status: 200 }));
+
+    await (wrapper.vm as unknown as { browserDownloadEntry: (entry: FileEntry) => Promise<void> }).browserDownloadEntry({
+      Name: 'report.txt',
+      IsDirectory: false,
+      Size: 32,
+    });
+
+    expect(apiFetch).toHaveBeenCalledWith('/api/devices/device-a/files/download-ticket', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: '/sdcard/report.txt' })
+    }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(notificationShow).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'success'
+    }));
+    clickSpy.mockRestore();
+  });
+
   it('uploads selected files to the current path', async () => {
     const wrapper = mountView();
     apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: '/sdcard/', items: [] }), { status: 200 }));

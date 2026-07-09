@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -114,6 +115,11 @@ type recordingFileService struct {
 	uploadFallbackName string
 	uploadContent      string
 	uploadErr          error
+	downloadDeviceID   int
+	downloadPath       string
+	downloadName       string
+	downloadContent    string
+	downloadErr        error
 }
 type fakeScrcpyService struct{}
 type fakeDevicePreviewService struct {
@@ -139,8 +145,20 @@ func (fakeFileService) Delete(context.Context, int, string) error         { retu
 func (recordingFileService) List(context.Context, int, string) (*fileservice.ListResult, error) {
 	panic("unexpected call")
 }
-func (recordingFileService) Download(context.Context, int, string) (*fileservice.DownloadResult, error) {
-	panic("unexpected call")
+func (f *recordingFileService) Download(_ context.Context, deviceID int, path string) (*fileservice.DownloadResult, error) {
+	f.downloadDeviceID = deviceID
+	f.downloadPath = path
+	if f.downloadErr != nil {
+		return nil, f.downloadErr
+	}
+	name := f.downloadName
+	if name == "" {
+		name = "download.bin"
+	}
+	return &fileservice.DownloadResult{
+		Name:   name,
+		Reader: io.NopCloser(strings.NewReader(f.downloadContent)),
+	}, nil
 }
 func (f *recordingFileService) Upload(_ context.Context, deviceID int, directory string, relativePath string, fallbackName string, reader io.Reader) error {
 	f.uploadDeviceID = deviceID
@@ -463,6 +481,60 @@ func TestDeviceHandlerUploadFileStreamsMultipartPartToService(t *testing.T) {
 	}
 	if req.MultipartForm != nil && (len(req.MultipartForm.Value) > 0 || len(req.MultipartForm.File) > 0) {
 		t.Fatalf("expected streaming multipart reader to avoid cached form data, got %+v", req.MultipartForm)
+	}
+}
+
+func TestDeviceHandlerFileDownloadTicketIsSingleUse(t *testing.T) {
+	fileService := &recordingFileService{
+		downloadName:    "report.txt",
+		downloadContent: "file-content",
+	}
+	handler := NewDeviceHandler(
+		&fakeDeviceService{},
+		fakeDeviceAccessService{allowed: true},
+		nil,
+		&fakeDevicePreviewService{},
+		fakeAppService{},
+		fileService,
+		fakeDeviceSettingsService{},
+		fakeScrcpyService{},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/7/files/download-ticket", strings.NewReader(`{"path":"/sdcard/report.txt"}`))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1}))
+	recorder := httptest.NewRecorder()
+
+	handler.CreateFileDownloadTicket(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload FileDownloadTicketResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Ticket == "" || payload.URL == "" || payload.ExpiresAt == "" {
+		t.Fatalf("expected ticket payload, got %+v", payload)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, payload.URL, nil)
+	downloadRecorder := httptest.NewRecorder()
+	handler.DownloadFileByTicket(downloadRecorder, downloadReq)
+
+	if downloadRecorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", downloadRecorder.Code, downloadRecorder.Body.String())
+	}
+	if downloadRecorder.Body.String() != "file-content" {
+		t.Fatalf("expected downloaded content, got %q", downloadRecorder.Body.String())
+	}
+	if fileService.downloadDeviceID != 7 || fileService.downloadPath != "/sdcard/report.txt" {
+		t.Fatalf("expected ticket download target, got device=%d path=%q", fileService.downloadDeviceID, fileService.downloadPath)
+	}
+
+	reuseRecorder := httptest.NewRecorder()
+	handler.DownloadFileByTicket(reuseRecorder, downloadReq)
+	if reuseRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected consumed ticket to return 404, got %d", reuseRecorder.Code)
 	}
 }
 

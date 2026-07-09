@@ -120,6 +120,9 @@
         <div v-if="!contextMenu.entry?.IsDirectory" class="context-menu-item" @click="handleContextAction('download')">
           {{ t('FilePage.ActionDownload', '下载') }}
         </div>
+        <div v-if="!contextMenu.entry?.IsDirectory" class="context-menu-item" @click="handleContextAction('browser-download')">
+          {{ t('FilePage.ActionBrowserDownload', '浏览器下载') }}
+        </div>
         <div class="context-menu-item" @click="handleContextAction('copy-path')">
           {{ t('FilePage.ActionCopyPath', '复制路径') }}
         </div>

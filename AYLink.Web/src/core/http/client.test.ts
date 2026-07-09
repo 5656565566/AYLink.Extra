@@ -63,6 +63,32 @@ describe('http client', () => {
     expect(response.status).toBe(200);
   });
 
+  it('retries custom transports through the same unauthorized refresh flow', async () => {
+    const transport = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const refreshAccessToken = vi.fn(async () => true);
+
+    const client = await import('./client');
+    client.registerAuthSessionHandlers({
+      ensureFreshAccessToken: vi.fn(async () => true),
+      getAccessToken: () => 'access-token',
+      refreshAccessToken,
+      syncSessionFromStorage: vi.fn(),
+    });
+
+    const response = await client.sendApiRequestWithTransport('/api/devices/upload', {
+      method: 'POST',
+      body: new FormData(),
+    }, transport);
+
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(new Headers(transport.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer access-token');
+    expect(response.status).toBe(200);
+  });
+
   it('calls unauthorized handler when refresh fails', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);

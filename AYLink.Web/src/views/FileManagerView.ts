@@ -215,6 +215,7 @@ export default defineComponent({
         }
 
         const blob = await readResponseBlobWithProgress(response, {
+          signal: controller.signal,
           onProgress: (progress) => {
             const message = progress.total
               ? t('FilePage.DownloadingBytes', '正在下载 {0} / {1}', formatBytes(progress.loaded), formatBytes(progress.total))

@@ -1,4 +1,4 @@
-import { getAccessToken, ensureFreshAccessToken } from '../../services/auth';
+import { sendApiRequestWithTransport } from '../../core/http/client';
 
 export interface TransferProgress {
   loaded: number;
@@ -7,6 +7,7 @@ export interface TransferProgress {
 }
 
 export interface DownloadBlobOptions {
+  signal?: AbortSignal;
   onProgress?: (progress: TransferProgress) => void;
 }
 
@@ -52,73 +53,20 @@ function parseResponseHeaders(rawHeaders: string) {
   return headers;
 }
 
-export async function readResponseBlobWithProgress(response: Response, options: DownloadBlobOptions = {}) {
-  const total = parseContentLength(response);
-  const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
-
-  if (!response.body) {
-    const blob = await response.blob();
-    options.onProgress?.({
-      loaded: blob.size,
-      total: total ?? blob.size,
-      progress: 100,
-    });
-    return blob;
-  }
-
-  const reader = response.body.getReader();
-  const chunks: BlobPart[] = [];
-  let loaded = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    if (value) {
-      chunks.push(value as BlobPart);
-      loaded += value.byteLength;
-      options.onProgress?.({
-        loaded,
-        total,
-        progress: total ? loaded / total * 100 : null,
-      });
-    }
-  }
-
-  options.onProgress?.({
-    loaded,
-    total,
-    progress: 100,
-  });
-  return new Blob(chunks, { type: contentType });
-}
-
-export async function uploadFormDataWithProgress(url: string, formData: FormData, options: UploadFormDataOptions = {}) {
-  const hasFreshToken = await ensureFreshAccessToken();
-  if (!hasFreshToken) {
-    return new Response(null, { status: 401, statusText: 'Unauthorized' });
-  }
-
-  return new Promise<Response>((resolve, reject) => {
+function uploadWithProgressTransport(onProgress?: (progress: TransferProgress) => void) {
+  return (url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const cleanupCallbacks: Array<() => void> = [];
 
-    xhr.open(options.method || 'POST', url);
+    xhr.open(init.method || 'POST', url);
 
-    const token = getAccessToken();
-    if (token) {
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    }
-
-    Object.entries(options.headers || {}).forEach(([key, value]) => {
+    new Headers(init.headers || {}).forEach((value, key) => {
       xhr.setRequestHeader(key, value);
     });
 
     xhr.upload.onprogress = (event) => {
       const total = event.lengthComputable && event.total > 0 ? event.total : null;
-      options.onProgress?.({
+      onProgress?.({
         loaded: event.loaded,
         total,
         progress: total ? event.loaded / total * 100 : null,
@@ -144,17 +92,90 @@ export async function uploadFormDataWithProgress(url: string, formData: FormData
       reject(createAbortError());
     };
 
-    if (options.signal) {
-      if (options.signal.aborted) {
+    if (init.signal) {
+      if (init.signal.aborted) {
         xhr.abort();
         return;
       }
 
       const onAbort = () => xhr.abort();
-      options.signal.addEventListener('abort', onAbort, { once: true });
-      cleanupCallbacks.push(() => options.signal?.removeEventListener('abort', onAbort));
+      init.signal.addEventListener('abort', onAbort, { once: true });
+      cleanupCallbacks.push(() => init.signal?.removeEventListener('abort', onAbort));
     }
 
-    xhr.send(formData);
+    xhr.send(init.body as XMLHttpRequestBodyInit | null);
   });
+}
+
+export async function readResponseBlobWithProgress(response: Response, options: DownloadBlobOptions = {}) {
+  const total = parseContentLength(response);
+  const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
+  if (options.signal?.aborted) {
+    throw createAbortError();
+  }
+
+  if (!response.body) {
+    const blob = await response.blob();
+    if (options.signal?.aborted) {
+      throw createAbortError();
+    }
+    options.onProgress?.({
+      loaded: blob.size,
+      total: total ?? blob.size,
+      progress: 100,
+    });
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: BlobPart[] = [];
+  let loaded = 0;
+  let aborted = false;
+  const abortRead = () => {
+    aborted = true;
+    void reader.cancel(createAbortError()).catch(() => {});
+  };
+
+  options.signal?.addEventListener('abort', abortRead, { once: true });
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (aborted || options.signal?.aborted) {
+        throw createAbortError();
+      }
+      if (done) {
+        break;
+      }
+
+      if (value) {
+        chunks.push(value as BlobPart);
+        loaded += value.byteLength;
+        options.onProgress?.({
+          loaded,
+          total,
+          progress: total ? loaded / total * 100 : null,
+        });
+      }
+    }
+
+    options.onProgress?.({
+      loaded,
+      total,
+      progress: 100,
+    });
+    return new Blob(chunks, { type: contentType });
+  } finally {
+    options.signal?.removeEventListener('abort', abortRead);
+    reader.releaseLock();
+  }
+}
+
+export async function uploadFormDataWithProgress(url: string, formData: FormData, options: UploadFormDataOptions = {}) {
+  return sendApiRequestWithTransport(url, {
+    method: options.method || 'POST',
+    headers: options.headers,
+    signal: options.signal,
+    body: formData,
+  }, uploadWithProgressTransport(options.onProgress));
 }

@@ -9,6 +9,8 @@ export interface ApiRequestOptions extends RequestInit {
   timeoutMs?: number;
 }
 
+export type ApiRequestTransport = (url: string, init: RequestInit) => Promise<Response>;
+
 interface AuthSessionHandlers {
   ensureFreshAccessToken: () => Promise<boolean>;
   getAccessToken: () => string;
@@ -74,7 +76,14 @@ function createAbortSignal(requestInit: RequestInit, timeoutMs?: number) {
   };
 }
 
-export async function sendApiRequest(url: string, options: ApiRequestOptions = {}, isRetry = false): Promise<Response> {
+const fetchTransport: ApiRequestTransport = (url, init) => fetch(url, init);
+
+async function sendApiRequestUsingTransport(
+  url: string,
+  options: ApiRequestOptions,
+  transport: ApiRequestTransport,
+  isRetry = false
+): Promise<Response> {
   const {
     requiresAuth = true,
     retryOnUnauthorized = true,
@@ -111,7 +120,7 @@ export async function sendApiRequest(url: string, options: ApiRequestOptions = {
   const { signal, cleanup } = createAbortSignal(requestInit, timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await transport(url, {
       ...requestInit,
       headers,
       signal,
@@ -130,7 +139,7 @@ export async function sendApiRequest(url: string, options: ApiRequestOptions = {
       }
 
       if (token && token !== authSessionHandlers?.getAccessToken()) {
-        return sendApiRequest(url, options, true);
+        return sendApiRequestUsingTransport(url, options, transport, true);
       }
 
       const refreshed = await authSessionHandlers?.refreshAccessToken();
@@ -138,12 +147,12 @@ export async function sendApiRequest(url: string, options: ApiRequestOptions = {
         throw createAbortError();
       }
       if (refreshed) {
-        return sendApiRequest(url, options, true);
+        return sendApiRequestUsingTransport(url, options, transport, true);
       }
 
       authSessionHandlers?.syncSessionFromStorage();
       if (token && token !== authSessionHandlers?.getAccessToken()) {
-        return sendApiRequest(url, options, true);
+        return sendApiRequestUsingTransport(url, options, transport, true);
       }
 
       if (handleUnauthorized) {
@@ -161,4 +170,16 @@ export async function sendApiRequest(url: string, options: ApiRequestOptions = {
   } finally {
     cleanup();
   }
+}
+
+export async function sendApiRequest(url: string, options: ApiRequestOptions = {}, isRetry = false): Promise<Response> {
+  return sendApiRequestUsingTransport(url, options, fetchTransport, isRetry);
+}
+
+export async function sendApiRequestWithTransport(
+  url: string,
+  options: ApiRequestOptions,
+  transport: ApiRequestTransport
+): Promise<Response> {
+  return sendApiRequestUsingTransport(url, options, transport);
 }

@@ -184,7 +184,7 @@ export default defineComponent({
 
     const webrtcSinglePortMuxPublishPort = ref('');
 
-    const isWebRtcServersListExpanded = ref(true);
+    const isWebRtcServersListExpanded = ref(false);
 
     const webrtcSaving = ref(false);
 
@@ -196,7 +196,7 @@ export default defineComponent({
 
     const localWebrtcServers = ref<WebRtcServerForm[]>([createDefaultWebRtcServerForm('stun')]);
 
-    const isLocalWebRtcServersListExpanded = ref(true);
+    const isLocalWebRtcServersListExpanded = ref(false);
 
     const showChangePasswordDialog = ref(false);
 
@@ -212,7 +212,7 @@ export default defineComponent({
     const groupManagementDevices = ref<SettingsDeviceItem[]>([]);
     const groupManagementUsers = ref<SettingsUserItem[]>([]);
     const groupManagementRoles = ref<SettingsRoleItem[]>([]);
-    const isGroupManagementListExpanded = ref(true);
+    const isGroupManagementListExpanded = ref(false);
     const groupSearchKeyword = ref('');
     const deviceSearchKeyword = ref('');
     const roleSearchKeyword = ref('');

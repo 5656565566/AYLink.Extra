@@ -66,6 +66,23 @@
           />
         </SettingItem>
         <SettingItem
+          :title="t('Settings.DebugMode', '调试模式')"
+          :description="t('Settings.DebugModeDescription', '开启后在投屏悬浮菜单中显示视频统计和诊断入口')"
+        >
+          <label class="toggle-switch" :class="{ active: debugMode }">
+            <input
+              class="toggle-switch__input"
+              type="checkbox"
+              :checked="debugMode"
+              @change="onDebugModeChange"
+            />
+            <span class="toggle-switch__slider"></span>
+          </label>
+        </SettingItem>
+      </SettingSection>
+
+      <SettingSection :title="t('Settings.Operation', '操作')">
+        <SettingItem
           :title="t('Settings.AdaptivePointerSampling', '自适应采样')"
           :description="t('Settings.AdaptivePointerSamplingDescription', '根据控制通道积压情况自动在 120 / 60 / 30Hz 间调整触控移动采样频率')"
         >
@@ -100,20 +117,6 @@
               :checked="weakNetworkMode"
               :disabled="adaptivePointerSampling"
               @change="onWeakNetworkModeChange"
-            />
-            <span class="toggle-switch__slider"></span>
-          </label>
-        </SettingItem>
-        <SettingItem
-          :title="t('Settings.DebugMode', '调试模式')"
-          :description="t('Settings.DebugModeDescription', '开启后在投屏悬浮菜单中显示视频统计和诊断入口')"
-        >
-          <label class="toggle-switch" :class="{ active: debugMode }">
-            <input
-              class="toggle-switch__input"
-              type="checkbox"
-              :checked="debugMode"
-              @change="onDebugModeChange"
             />
             <span class="toggle-switch__slider"></span>
           </label>

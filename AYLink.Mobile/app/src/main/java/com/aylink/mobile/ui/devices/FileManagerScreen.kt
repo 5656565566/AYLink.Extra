@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -56,6 +59,18 @@ fun FileManagerScreen(viewModel: FileManagerViewModel) {
     val listState by viewModel.listUiState.collectAsStateWithLifecycle()
     val dialogState by viewModel.dialogUiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val fileUploadPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isNotEmpty()) {
+                viewModel.handleIntent(FileManagerIntent.UploadFiles(uris))
+            }
+        }
+    val folderUploadPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri != null) {
+                viewModel.handleIntent(FileManagerIntent.UploadFolder(uri))
+            }
+        }
 
     LaunchedEffect(viewModel.effect) {
         viewModel.effect.collect { effect ->
@@ -100,6 +115,55 @@ fun FileManagerScreen(viewModel: FileManagerViewModel) {
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                     )
+                    OutlinedButton(
+                        onClick = { fileUploadPicker.launch(arrayOf("*/*")) },
+                        enabled = !listState.loading && !dialogState.uploadLoading,
+                    ) {
+                        Text(if (dialogState.uploadLoading) "上传中..." else "上传")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = { folderUploadPicker.launch(null) },
+                        enabled = !listState.loading && !dialogState.uploadLoading,
+                    ) {
+                        Text("文件夹")
+                    }
+                }
+            }
+
+            if (dialogState.uploadLoading) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        dialogState.uploadProgress?.let { progress ->
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = dialogState.uploadMessage ?: "正在上传...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            OutlinedButton(
+                                onClick = { viewModel.handleIntent(FileManagerIntent.CancelUpload) },
+                            ) {
+                                Text("取消")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -196,8 +260,24 @@ private fun FileActionDialog(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 if (dialogState.actionLoading) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        dialogState.downloadProgress?.let { progress ->
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } ?: CircularProgressIndicator()
+                        dialogState.downloadMessage?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 } else {
                     Column(

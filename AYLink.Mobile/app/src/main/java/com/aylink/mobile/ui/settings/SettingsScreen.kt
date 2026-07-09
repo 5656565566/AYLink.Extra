@@ -1,5 +1,10 @@
 package com.aylink.mobile.ui.settings
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +57,16 @@ fun SettingsScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var logActionMessage by remember { mutableStateOf<String?>(null) }
+    val downloadDirectoryPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri != null) {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(uri, flags)
+                }
+                settingsStore.updateDownloadDirectoryUri(uri.toString())
+            }
+        }
 
     Column(
         modifier =
@@ -109,6 +124,42 @@ fun SettingsScreen(
                 checked = settings.resumeLastRemote,
                 onCheckedChange = settingsStore::updateResumeLastRemote,
             )
+        }
+
+        SettingCard(
+            title = "文件下载",
+            description = "设置文件管理下载到本机时的保存位置",
+        ) {
+            Text(
+                text = "当前位置",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = formatDownloadDirectory(settings.downloadDirectoryUri),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = { downloadDirectoryPicker.launch(null) },
+                ) {
+                    Text("选择目录")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { settingsStore.updateDownloadDirectoryUri(null) },
+                    enabled = settings.downloadDirectoryUri != null,
+                ) {
+                    Text("恢复默认")
+                }
+            }
         }
 
         SettingCard(
@@ -205,6 +256,20 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+private fun formatDownloadDirectory(uriText: String?): String {
+    if (uriText.isNullOrBlank()) {
+        return "系统 Download"
+    }
+    val treeId =
+        runCatching {
+            DocumentsContract.getTreeDocumentId(Uri.parse(uriText))
+        }.getOrNull()
+    return treeId
+        ?.substringAfter(':')
+        ?.ifBlank { "自定义目录" }
+        ?: "自定义目录"
 }
 
 @Composable

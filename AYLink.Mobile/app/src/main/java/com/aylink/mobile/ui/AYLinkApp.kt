@@ -426,7 +426,11 @@ fun AYLinkApp(container: AppContainer) {
                         is Screen.FileManager -> {
                             val viewModel =
                                 rememberManagedViewModel("file-manager-$sessionScopeKey-${screen.device.id}") {
-                                    FileManagerViewModel(screen.device.id, container.deviceRepository)
+                                    FileManagerViewModel(
+                                        deviceId = screen.device.id,
+                                        deviceRepository = container.deviceRepository,
+                                        localSettingsStore = container.localSettingsStore,
+                                    )
                                 }
                             FileManagerScreen(viewModel = viewModel)
                         }

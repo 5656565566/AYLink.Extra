@@ -19,17 +19,27 @@ import com.aylink.mobile.data.model.WebRtcTicketResponse
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request.Builder
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 
 class AgentApi(
     private val client: OkHttpClient,
     private val json: Json,
 ) {
+    private val transferClient: OkHttpClient =
+        client
+            .newBuilder()
+            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .readTimeout(5, TimeUnit.MINUTES)
+            .writeTimeout(5, TimeUnit.MINUTES)
+            .build()
+
     suspend fun login(
         baseUrl: String,
         username: String,
@@ -236,7 +246,39 @@ class AgentApi(
             authorized("$baseUrl/api/devices/$deviceId/files/download", token)
                 .post(body)
                 .build()
-        return client.executeRaw(request)
+        return transferClient.executeRaw(request)
+    }
+
+    suspend fun uploadFile(
+        baseUrl: String,
+        token: String,
+        deviceId: Int,
+        path: String,
+        relativePath: String?,
+        fileName: String,
+        fileBody: RequestBody,
+    ) {
+        val uploadUrl =
+            "$baseUrl/api/devices/$deviceId/files/upload"
+                .toHttpUrl()
+                .newBuilder()
+                .addQueryParameter("path", path)
+                .apply {
+                    if (!relativePath.isNullOrBlank()) {
+                        addQueryParameter("relativePath", relativePath)
+                    }
+                }.build()
+        val body =
+            MultipartBody
+                .Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", fileName, fileBody)
+                .build()
+        val request =
+            authorized(uploadUrl.toString(), token)
+                .post(body)
+                .build()
+        transferClient.executeEmpty(request, json)
     }
 
     suspend fun installApp(
@@ -256,7 +298,7 @@ class AgentApi(
             authorized("$baseUrl/api/devices/$deviceId/apps/install", token)
                 .post(body)
                 .build()
-        client.executeEmpty(request, json)
+        transferClient.executeEmpty(request, json)
     }
 
     suspend fun createWebRtcTicket(

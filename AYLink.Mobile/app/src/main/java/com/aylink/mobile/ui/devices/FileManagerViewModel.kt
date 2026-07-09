@@ -1,12 +1,17 @@
 package com.aylink.mobile.ui.devices
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aylink.mobile.data.model.FileEntry
 import com.aylink.mobile.data.model.LocalFileHandle
 import com.aylink.mobile.data.repo.DeviceRepository
+import com.aylink.mobile.data.repo.FileTransferProgress
+import com.aylink.mobile.data.repo.LocalSettingsStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -18,8 +23,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.net.SocketTimeoutException
+import java.util.Locale
 
-// 这是远端 Android 设备的默认共享存储目录，不是当前手机客户端本地路径。
+// 这是远端 Android 设备的默认共享存储目录 不是当前手机客户端本地路径
 @SuppressLint("SdCardPath")
 private const val DEFAULT_REMOTE_STORAGE_PATH = "/sdcard/"
 
@@ -32,6 +39,11 @@ data class FileManagerUiState(
     val selectedFile: FileEntry? = null,
     val isActionMenuOpen: Boolean = false,
     val actionLoading: Boolean = false,
+    val uploadLoading: Boolean = false,
+    val uploadMessage: String? = null,
+    val uploadProgress: Float? = null,
+    val downloadMessage: String? = null,
+    val downloadProgress: Float? = null,
     val isRenameDialogOpen: Boolean = false,
     val renameTargetName: String = "",
 )
@@ -49,6 +61,11 @@ data class FileManagerDialogUiState(
     val selectedFile: FileEntry? = null,
     val isActionMenuOpen: Boolean = false,
     val actionLoading: Boolean = false,
+    val uploadLoading: Boolean = false,
+    val uploadMessage: String? = null,
+    val uploadProgress: Float? = null,
+    val downloadMessage: String? = null,
+    val downloadProgress: Float? = null,
     val isRenameDialogOpen: Boolean = false,
     val renameTargetName: String = "",
 )
@@ -67,6 +84,16 @@ sealed interface FileManagerIntent {
     ) : FileManagerIntent
 
     data object HideActionMenu : FileManagerIntent
+
+    data class UploadFiles(
+        val uris: List<Uri>,
+    ) : FileManagerIntent
+
+    data class UploadFolder(
+        val uri: Uri,
+    ) : FileManagerIntent
+
+    data object CancelUpload : FileManagerIntent
 
     data class DownloadFile(
         val path: String,
@@ -128,6 +155,7 @@ sealed interface FileManagerEffect {
 class FileManagerViewModel(
     private val deviceId: Int,
     private val deviceRepository: DeviceRepository,
+    private val localSettingsStore: LocalSettingsStore,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(FileManagerUiState())
     val uiState: StateFlow<FileManagerUiState> = _uiState.asStateFlow()
@@ -147,6 +175,11 @@ class FileManagerViewModel(
                     selectedFile = it.selectedFile,
                     isActionMenuOpen = it.isActionMenuOpen,
                     actionLoading = it.actionLoading,
+                    uploadLoading = it.uploadLoading,
+                    uploadMessage = it.uploadMessage,
+                    uploadProgress = it.uploadProgress,
+                    downloadMessage = it.downloadMessage,
+                    downloadProgress = it.downloadProgress,
                     isRenameDialogOpen = it.isRenameDialogOpen,
                     renameTargetName = it.renameTargetName,
                 )
@@ -159,9 +192,15 @@ class FileManagerViewModel(
 
     private val _effect = MutableSharedFlow<FileManagerEffect>()
     val effect = _effect.asSharedFlow()
+    private var uploadJob: Job? = null
 
     init {
         handleIntent(FileManagerIntent.Refresh)
+    }
+
+    override fun onCleared() {
+        uploadJob?.cancel()
+        super.onCleared()
     }
 
     fun handleIntent(intent: FileManagerIntent) {
@@ -183,6 +222,9 @@ class FileManagerViewModel(
                 }
             }
             FileManagerIntent.HideActionMenu -> _uiState.update { it.copy(isActionMenuOpen = false) }
+            is FileManagerIntent.UploadFiles -> uploadFiles(intent.uris)
+            is FileManagerIntent.UploadFolder -> uploadFolder(intent.uri)
+            FileManagerIntent.CancelUpload -> cancelUpload()
             is FileManagerIntent.DownloadFile -> downloadFile(intent.path)
             is FileManagerIntent.OpenFile -> openFile(intent.path)
             is FileManagerIntent.ShareFile -> shareFile(intent.path)
@@ -276,21 +318,148 @@ class FileManagerViewModel(
         }
     }
 
+    private fun uploadFiles(uris: List<Uri>) {
+        if (uris.isEmpty() || uploadJob?.isActive == true) {
+            return
+        }
+        _uiState.update {
+            it.copy(
+                uploadLoading = true,
+                uploadMessage = "准备上传",
+                uploadProgress = null,
+                errorMessage = null,
+            )
+        }
+        uploadJob =
+            viewModelScope.launch {
+                val targetPath = _uiState.value.currentPath
+                try {
+                    deviceRepository.uploadFiles(deviceId, targetPath, uris) { progress ->
+                        updateUploadProgress(progress)
+                    }
+                    _uiState.update {
+                        it.copy(
+                            uploadLoading = false,
+                            uploadMessage = null,
+                            uploadProgress = null,
+                        )
+                    }
+                    _effect.emit(FileManagerEffect.ShowToast("上传成功"))
+                    loadFiles(targetPath)
+                } catch (_: CancellationException) {
+                    clearUploadState()
+                    _effect.tryEmit(FileManagerEffect.ShowToast("上传已取消"))
+                } catch (error: Throwable) {
+                    _uiState.update {
+                        it.copy(
+                            uploadLoading = false,
+                            uploadMessage = null,
+                            uploadProgress = null,
+                            errorMessage = error.toTransferMessage("上传失败"),
+                        )
+                    }
+                } finally {
+                    uploadJob = null
+                }
+            }
+    }
+
+    private fun uploadFolder(uri: Uri) {
+        if (uploadJob?.isActive == true) {
+            return
+        }
+        _uiState.update {
+            it.copy(
+                uploadLoading = true,
+                uploadMessage = "准备上传",
+                uploadProgress = null,
+                errorMessage = null,
+            )
+        }
+        uploadJob =
+            viewModelScope.launch {
+                val targetPath = _uiState.value.currentPath
+                try {
+                    deviceRepository.uploadFolder(deviceId, targetPath, uri) { progress ->
+                        updateUploadProgress(progress)
+                    }
+                    _uiState.update {
+                        it.copy(
+                            uploadLoading = false,
+                            uploadMessage = null,
+                            uploadProgress = null,
+                        )
+                    }
+                    _effect.emit(FileManagerEffect.ShowToast("上传成功"))
+                    loadFiles(targetPath)
+                } catch (_: CancellationException) {
+                    clearUploadState()
+                    _effect.tryEmit(FileManagerEffect.ShowToast("上传已取消"))
+                } catch (error: Throwable) {
+                    _uiState.update {
+                        it.copy(
+                            uploadLoading = false,
+                            uploadMessage = null,
+                            uploadProgress = null,
+                            errorMessage = error.toTransferMessage("上传失败"),
+                        )
+                    }
+                } finally {
+                    uploadJob = null
+                }
+            }
+    }
+
+    private fun cancelUpload() {
+        uploadJob?.cancel()
+    }
+
     private fun downloadFile(path: String) {
-        _uiState.update { it.copy(actionLoading = true) }
+        _uiState.update {
+            it.copy(
+                actionLoading = true,
+                downloadMessage = "准备下载",
+                downloadProgress = null,
+            )
+        }
         viewModelScope.launch {
-            val result = runCatching { deviceRepository.downloadFileToDownloads(deviceId, path) }
+            val result =
+                runCatching {
+                    deviceRepository.downloadFileToDownloads(
+                        deviceId = deviceId,
+                        path = path,
+                        downloadDirectoryUri = currentDownloadDirectoryUri(),
+                    ) { progress ->
+                        updateDownloadProgress(progress)
+                    }
+                }
             result.onSuccess { file ->
-                _uiState.update { it.copy(actionLoading = false, isActionMenuOpen = false) }
+                _uiState.update {
+                    it.copy(
+                        actionLoading = false,
+                        isActionMenuOpen = false,
+                        downloadMessage = null,
+                        downloadProgress = null,
+                    )
+                }
                 _effect.emit(FileManagerEffect.ShowToast("已保存到 ${file.localPath}"))
             }
             result.onFailure { error ->
                 _uiState.update {
-                    it.copy(actionLoading = false, errorMessage = error.message ?: "下载失败")
+                    it.copy(
+                        actionLoading = false,
+                        downloadMessage = null,
+                        downloadProgress = null,
+                        errorMessage = error.toTransferMessage("下载失败"),
+                    )
                 }
             }
         }
     }
+
+    private fun currentDownloadDirectoryUri(): Uri? =
+        localSettingsStore.settings.value.downloadDirectoryUri
+            ?.let { uriText -> runCatching { Uri.parse(uriText) }.getOrNull() }
 
     private fun openFile(path: String) {
         _uiState.update { it.copy(actionLoading = true) }
@@ -354,4 +523,57 @@ class FileManagerViewModel(
             }
         }
     }
+
+    private fun updateUploadProgress(progress: FileTransferProgress) {
+        val message =
+            progress.total?.let {
+                "正在上传 ${formatBytes(progress.loaded)} / ${formatBytes(it)}"
+            } ?: "正在上传 ${formatBytes(progress.loaded)}"
+        _uiState.update {
+            it.copy(
+                uploadMessage = message,
+                uploadProgress = progress.fraction,
+            )
+        }
+    }
+
+    private fun clearUploadState() {
+        _uiState.update {
+            it.copy(
+                uploadLoading = false,
+                uploadMessage = null,
+                uploadProgress = null,
+            )
+        }
+    }
+
+    private fun updateDownloadProgress(progress: FileTransferProgress) {
+        val message =
+            progress.total?.let {
+                "正在下载 ${formatBytes(progress.loaded)} / ${formatBytes(it)}"
+            } ?: "正在下载 ${formatBytes(progress.loaded)}"
+        _uiState.update {
+            it.copy(
+                downloadMessage = message,
+                downloadProgress = progress.fraction,
+            )
+        }
+    }
+
+    private fun formatBytes(value: Long): String =
+        when {
+            value < 1024 -> "$value B"
+            value < 1024 * 1024 -> "${(value / 1024.0).formatOneDecimal()} KB"
+            value < 1024 * 1024 * 1024 -> "${(value / 1024.0 / 1024.0).formatOneDecimal()} MB"
+            else -> "${(value / 1024.0 / 1024.0 / 1024.0).formatOneDecimal()} GB"
+        }
+
+    private fun Double.formatOneDecimal(): String = String.format(Locale.ROOT, "%.1f", this)
+
+    private fun Throwable.toTransferMessage(fallback: String): String =
+        if (this is SocketTimeoutException) {
+            "$fallback：传输超时，请检查网络或代理/CDN 超时设置"
+        } else {
+            message ?: fallback
+        }
 }

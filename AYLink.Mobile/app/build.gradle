@@ -14,29 +14,29 @@ def appVersionName = (System.getenv("ANDROID_VERSION_NAME") ?: "0.1.0").trim()
 def appVersionCode = resolveAndroidVersionCode(System.getenv("ANDROID_VERSION_CODE"), appVersionName)
 
 android {
-    namespace 'com.aylink.mobile'
-    compileSdk 35
+    namespace = 'com.aylink.mobile'
+    compileSdk = 35
 
     defaultConfig {
-        applicationId "com.aylink.mobile"
-        minSdk 26
-        targetSdk 35
-        versionCode appVersionCode
-        versionName appVersionName
+        applicationId = "com.aylink.mobile"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = appVersionCode
+        versionName = appVersionName
 
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
-            useSupportLibrary true
+            useSupportLibrary = true
         }
     }
 
     signingConfigs {
         release {
             if (releaseStoreFile) {
-                storeFile file(releaseStoreFile)
-                storePassword releaseStorePassword
-                keyAlias releaseKeyAlias
-                keyPassword releaseKeyPassword
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -44,9 +44,9 @@ android {
     buildTypes {
         release {
             if (releaseStoreFile) {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
-            minifyEnabled false
+            minifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -55,8 +55,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
@@ -64,8 +64,8 @@ android {
     }
 
     buildFeatures {
-        compose true
-        buildConfig true
+        compose = true
+        buildConfig = true
     }
 
     packaging {

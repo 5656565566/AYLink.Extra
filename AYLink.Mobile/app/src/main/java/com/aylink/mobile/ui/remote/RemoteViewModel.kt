@@ -987,7 +987,8 @@ class RemoteViewModel(
                 }
             }
             VideoRecoveryStage.KeyFrameRequested,
-            VideoRecoveryStage.SourceRefreshRequested -> {
+            VideoRecoveryStage.SourceRefreshRequested,
+            -> {
                 val observationCount = observationCountFor(VIDEO_KEY_FRAME_RECOVERY_OBSERVATION_MS)
                 if (stalledVideoObservationCount < observationCount) {
                     return
@@ -1004,12 +1005,16 @@ class RemoteViewModel(
                 }
             }
             VideoRecoveryStage.RenegotiationRequested,
-            VideoRecoveryStage.IceRestartRequested -> {
+            VideoRecoveryStage.IceRestartRequested,
+            -> {
                 val observationCount = observationCountFor(VIDEO_ICE_RECOVERY_OBSERVATION_MS)
                 if (stalledVideoObservationCount < observationCount) {
                     return
                 }
-                appLogger?.w(LOG_TAG, "Video transport recovery observation expired, stage=$videoRecoveryStage, reason=$reason, deviceId=${device.id}")
+                appLogger?.w(
+                    LOG_TAG,
+                    "Video transport recovery observation expired, stage=$videoRecoveryStage, reason=$reason, deviceId=${device.id}",
+                )
                 if (videoRecoveryStage == VideoRecoveryStage.RenegotiationRequested) {
                     if (tryIceRecovery("renegotiation_failed_$reason").not()) {
                         scheduleReconnectNow()

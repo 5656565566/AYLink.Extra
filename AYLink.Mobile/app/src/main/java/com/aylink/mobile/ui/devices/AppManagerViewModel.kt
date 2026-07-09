@@ -8,6 +8,7 @@ import com.aylink.mobile.data.model.Device
 import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.DeviceAppInfo
 import com.aylink.mobile.data.repo.DeviceRepository
+import com.aylink.mobile.data.repo.FileTransferProgress
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +20,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.net.SocketTimeoutException
+import java.util.Locale
 
 @Immutable
 data class AppManagerUiState(
@@ -31,6 +34,8 @@ data class AppManagerUiState(
     val appInfo: DeviceAppInfo? = null,
     val appInfoLoading: Boolean = false,
     val installLoading: Boolean = false,
+    val installMessage: String? = null,
+    val installProgress: Float? = null,
 )
 
 @Immutable
@@ -48,6 +53,8 @@ data class AppManagerDialogUiState(
     val appInfo: DeviceAppInfo? = null,
     val appInfoLoading: Boolean = false,
     val installLoading: Boolean = false,
+    val installMessage: String? = null,
+    val installProgress: Float? = null,
 )
 
 sealed interface AppManagerIntent {
@@ -124,6 +131,8 @@ class AppManagerViewModel(
                     appInfo = it.appInfo,
                     appInfoLoading = it.appInfoLoading,
                     installLoading = it.installLoading,
+                    installMessage = it.installMessage,
+                    installProgress = it.installProgress,
                 )
             }.distinctUntilChanged()
             .stateIn(
@@ -235,17 +244,40 @@ class AppManagerViewModel(
     }
 
     private fun installApk(uri: Uri) {
-        _uiState.update { it.copy(installLoading = true, errorMessage = null) }
+        _uiState.update {
+            it.copy(
+                installLoading = true,
+                installMessage = "准备上传 APK",
+                installProgress = null,
+                errorMessage = null,
+            )
+        }
         viewModelScope.launch {
-            val result = runCatching { deviceRepository.installApp(device.id, uri) }
+            val result =
+                runCatching {
+                    deviceRepository.installApp(device.id, uri) { progress ->
+                        updateInstallProgress(progress)
+                    }
+                }
             result.onSuccess {
-                _uiState.update { it.copy(installLoading = false) }
+                _uiState.update {
+                    it.copy(
+                        installLoading = false,
+                        installMessage = null,
+                        installProgress = null,
+                    )
+                }
                 _effect.emit(AppManagerEffect.ShowToast("APK 安装成功"))
                 refresh()
             }
             result.onFailure { error ->
                 _uiState.update {
-                    it.copy(installLoading = false, errorMessage = error.message ?: "APK 安装失败")
+                    it.copy(
+                        installLoading = false,
+                        installMessage = null,
+                        installProgress = null,
+                        errorMessage = error.toInstallMessage(),
+                    )
                 }
             }
         }
@@ -262,4 +294,39 @@ class AppManagerViewModel(
             _effect.emit(AppManagerEffect.NavigateToRemote(device, app.packageName, app.name))
         }
     }
+
+    private fun updateInstallProgress(progress: FileTransferProgress) {
+        val uploadComplete = progress.fraction?.let { it >= 1f } == true
+        val message =
+            if (uploadComplete) {
+                "上传完成，正在安装..."
+            } else {
+                progress.total?.let {
+                    "正在上传 APK ${formatBytes(progress.loaded)} / ${formatBytes(it)}"
+                } ?: "正在上传 APK ${formatBytes(progress.loaded)}"
+            }
+        _uiState.update {
+            it.copy(
+                installMessage = message,
+                installProgress = progress.fraction,
+            )
+        }
+    }
+
+    private fun formatBytes(value: Long): String =
+        when {
+            value < 1024 -> "$value B"
+            value < 1024 * 1024 -> "${(value / 1024.0).formatOneDecimal()} KB"
+            value < 1024 * 1024 * 1024 -> "${(value / 1024.0 / 1024.0).formatOneDecimal()} MB"
+            else -> "${(value / 1024.0 / 1024.0 / 1024.0).formatOneDecimal()} GB"
+        }
+
+    private fun Double.formatOneDecimal(): String = String.format(Locale.ROOT, "%.1f", this)
+
+    private fun Throwable.toInstallMessage(): String =
+        if (this is SocketTimeoutException) {
+            "APK 安装失败：传输超时，请检查网络或代理/CDN 超时设置"
+        } else {
+            message ?: "APK 安装失败"
+        }
 }

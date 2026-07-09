@@ -29,6 +29,7 @@ data class LocalUiSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val useDynamicColor: Boolean = true,
     val resumeLastRemote: Boolean = true,
+    val downloadDirectoryUri: String? = null,
     val adaptivePointerSampling: Boolean = true,
     val pointerSamplingRateHz: PointerSamplingRateHz = PointerSamplingRateHz.HZ_120,
     val weakNetworkMode: Boolean = false,
@@ -50,6 +51,7 @@ class LocalSettingsStore(
                         ?: ThemeMode.SYSTEM,
                 useDynamicColor = preferences.getBoolean(KEY_DYNAMIC_COLOR, true),
                 resumeLastRemote = preferences.getBoolean(KEY_RESUME_LAST_REMOTE, true),
+                downloadDirectoryUri = preferences.getString(KEY_DOWNLOAD_DIRECTORY_URI, null),
                 adaptivePointerSampling = preferences.getBoolean(KEY_ADAPTIVE_POINTER_SAMPLING, true),
                 pointerSamplingRateHz =
                     PointerSamplingRateHz.fromValue(
@@ -77,6 +79,17 @@ class LocalSettingsStore(
         preferences.edit { putBoolean(KEY_RESUME_LAST_REMOTE, enabled) }
     }
 
+    fun updateDownloadDirectoryUri(uri: String?) {
+        _settings.value = _settings.value.copy(downloadDirectoryUri = uri)
+        preferences.edit {
+            if (uri.isNullOrBlank()) {
+                remove(KEY_DOWNLOAD_DIRECTORY_URI)
+            } else {
+                putString(KEY_DOWNLOAD_DIRECTORY_URI, uri)
+            }
+        }
+    }
+
     fun updateAdaptivePointerSampling(enabled: Boolean) {
         _settings.value = _settings.value.copy(adaptivePointerSampling = enabled)
         preferences.edit { putBoolean(KEY_ADAPTIVE_POINTER_SAMPLING, enabled) }
@@ -101,6 +114,7 @@ class LocalSettingsStore(
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DYNAMIC_COLOR = "dynamic_color"
         private const val KEY_RESUME_LAST_REMOTE = "resume_last_remote"
+        private const val KEY_DOWNLOAD_DIRECTORY_URI = "download_directory_uri"
         private const val KEY_ADAPTIVE_POINTER_SAMPLING = "adaptive_pointer_sampling"
         private const val KEY_POINTER_SAMPLING_RATE_HZ = "pointer_sampling_rate_hz"
         private const val KEY_WEAK_NETWORK_MODE = "weak_network_mode"

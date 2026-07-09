@@ -14,6 +14,8 @@ import { triggerBlobDownload, triggerUrlDownload, writeClipboardText } from '../
 import { formatBytes, readResponseBlobWithProgress, uploadFormDataWithProgress } from '../lib/http/transfer';
 import { normalizeDeviceId, normalizeRemotePath } from '../lib/input/normalize';
 
+const BLOB_DOWNLOAD_MAX_BYTES = 128 * 1024 * 1024;
+
 export default defineComponent({
   name: 'FileManagerView',
   components: {
@@ -81,6 +83,10 @@ export default defineComponent({
 
     const getResponseErrorMessage = async (response: Response, fallback: string) => {
       return readApiErrorMessage(response, fallback);
+    };
+
+    const canUseBlobDownload = (entry: FileEntry | null | undefined) => {
+      return !!entry && !entry.IsDirectory && Number.isFinite(entry.Size) && entry.Size <= BLOB_DOWNLOAD_MAX_BYTES;
     };
 
     const loadFiles = async () => {
@@ -177,6 +183,11 @@ export default defineComponent({
     };
 
     const downloadEntry = async (entry: FileEntry) => {
+      if (!canUseBlobDownload(entry)) {
+        await browserDownloadEntry(entry);
+        return;
+      }
+
       const targetDeviceId = normalizedActiveDeviceId.value;
       if (!targetDeviceId) {
         throw new Error(t('Common.InvalidDevice', '无效的设备标识'));
@@ -636,6 +647,7 @@ export default defineComponent({
       closeContextMenu,
       activeDeviceId,
       getResponseErrorMessage,
+      canUseBlobDownload,
       downloadEntry,
       browserDownloadEntry,
       triggerUploadFiles,

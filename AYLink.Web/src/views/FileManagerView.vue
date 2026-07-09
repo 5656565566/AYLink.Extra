@@ -117,7 +117,7 @@
         <div v-if="contextMenu.entry?.IsDirectory" class="context-menu-item" @click="handleContextAction('open')">
           {{ t('FilePage.ActionOpen', '打开') }}
         </div>
-        <div v-if="!contextMenu.entry?.IsDirectory" class="context-menu-item" @click="handleContextAction('download')">
+        <div v-if="canUseBlobDownload(contextMenu.entry)" class="context-menu-item" @click="handleContextAction('download')">
           {{ t('FilePage.ActionDownload', '下载') }}
         </div>
         <div v-if="!contextMenu.entry?.IsDirectory" class="context-menu-item" @click="handleContextAction('browser-download')">

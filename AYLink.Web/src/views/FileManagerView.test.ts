@@ -213,6 +213,45 @@ describe('FileManagerView', () => {
     clickSpy.mockRestore();
   });
 
+  it('shows only browser download for files larger than the in-memory download limit', async () => {
+    const wrapper = mountView();
+    const component = wrapper.vm as unknown as {
+      contextMenu: { show: boolean; x: number; y: number; entry: FileEntry | null };
+    };
+    component.contextMenu.show = true;
+    component.contextMenu.entry = {
+      Name: 'large.bin',
+      IsDirectory: false,
+      Size: 129 * 1024 * 1024,
+    };
+
+    await wrapper.vm.$nextTick();
+
+    const menuTexts = wrapper.findAll('.context-menu-item').map((item) => item.text());
+    expect(menuTexts).not.toContain('下载');
+    expect(menuTexts).toContain('浏览器下载');
+  });
+
+  it('falls back to browser download when blob download is requested for a large file', async () => {
+    const wrapper = mountView();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ url: '/api/file-downloads/large-ticket' }), { status: 200 }));
+
+    await (wrapper.vm as unknown as { downloadEntry: (entry: FileEntry) => Promise<void> }).downloadEntry({
+      Name: 'large.bin',
+      IsDirectory: false,
+      Size: 129 * 1024 * 1024,
+    });
+
+    expect(apiFetch).toHaveBeenCalledWith('/api/devices/device-a/files/download-ticket', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: '/sdcard/large.bin' })
+    }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(notificationShowProgress).not.toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
+
   it('uploads selected files to the current path', async () => {
     const wrapper = mountView();
     apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: '/sdcard/', items: [] }), { status: 200 }));

@@ -45,7 +45,7 @@ func NewService(logger logging.Logger, host string, port int, adbBinaryPath stri
 			Bin:  adbBinaryPath,
 		}),
 		serverPath: resolveServerPath(configuredServerPath),
-		version:    "4.0",
+		version:    "4.1",
 	}
 }
 

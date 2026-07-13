@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-SCRCPY_SERVER_VERSION="${SCRCPY_SERVER_VERSION:-4.0}"
+SCRCPY_SERVER_VERSION="${SCRCPY_SERVER_VERSION:-4.1}"
 SCRCPY_SERVER_DIR="${1:-./AYLink.Agent/Scrcpy}"
 SCRCPY_SERVER_URL="https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_SERVER_VERSION}/scrcpy-server-v${SCRCPY_SERVER_VERSION}"
 

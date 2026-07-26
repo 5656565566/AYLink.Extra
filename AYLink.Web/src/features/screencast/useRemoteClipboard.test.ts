@@ -1,3 +1,4 @@
+import { nextTick } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -63,6 +64,19 @@ describe('useRemoteClipboard', () => {
       right: 'auto',
       bottom: 'auto'
     });
+  });
+
+  it('clamps the initial position using the rendered window size', async () => {
+    const clipboard = createClipboard();
+
+    clipboard.openClipboardWindow();
+    clipboard.clipboardFloatElement.value = {
+      getBoundingClientRect: () => ({ width: 380, height: 280 })
+    } as HTMLDivElement;
+    await nextTick();
+
+    expect(clipboard.clipboardWindowX.value).toBe(614);
+    expect(clipboard.clipboardWindowY.value).toBe(324);
   });
 
   it('clamps drag movement inside the stage', () => {

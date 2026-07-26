@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { createLatestRequestController } from '../../lib/async/latestRequest';
 import { isAbortError } from '../../lib/async/abort';
 import { normalizeDeviceId } from '../../lib/input/normalize';
@@ -253,6 +253,14 @@ export function useRemoteClipboard(options: RemoteClipboardOptions) {
       clampClipboardWindowToStage();
     }
     isClipboardWindowVisible.value = true;
+
+    // The v-if element is not measurable until Vue renders it. Clamp again with
+    // the actual size so the initial bottom-right position matches drag limits.
+    void nextTick(() => {
+      if (isClipboardWindowVisible.value) {
+        clampClipboardWindowToStage();
+      }
+    });
   };
 
   const closeClipboardWindow = () => {

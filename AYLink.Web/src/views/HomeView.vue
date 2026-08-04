@@ -15,7 +15,7 @@
             @update:model-value="selectGroup(Number($event))" />
         </div>
         <div class="actions">
-          <button v-if="canManageDevices" class="transparent" @click="showAddDialog = true">
+          <button v-if="canManageDevices" class="transparent" @click="openAddDeviceDialog">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             {{ t('HomeView.AddDevice', '添加设备') }}
           </button>
@@ -93,13 +93,13 @@
             <span class="device-group-text">{{ formatDeviceGroups(device) }}</span>
           </div>
           <div class="col-conn">
-            <div class="wifi-badge">
-              <svg class="wifi-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 19C13.1046 19 14 18.1046 14 17C14 15.8954 13.1046 15 12 15C10.8954 15 10 15.8954 10 17C10 18.1046 10.8954 19 12 19Z" fill="currentColor"/>
-                <path d="M12 12C9.23858 12 6.73858 13.1193 4.92893 14.9289L6.34315 16.3431C7.79086 14.8954 9.79086 14 12 14C14.2091 14 16.2091 14.8954 17.6569 16.3431L19.0711 14.9289C17.2614 13.1193 14.7614 12 12 12Z" fill="currentColor"/>
-                <path d="M12 8C7.58172 8 3.58172 9.79086 0.686295 12.6863L2.10051 14.1005C4.63959 11.5614 8.13959 10 12 10C15.8604 10 19.3604 11.5614 21.8995 14.1005L23.3137 12.6863C20.4183 9.79086 16.4183 8 12 8Z" fill="currentColor"/>
-              </svg>
-              <span>{{ t('HomeView.WiFi', 'WiFi') }}</span>
+            <div class="connection-badge">
+              <PlugConnected20Regular v-if="getStoredDeviceTransport(device) === 'usb'" class="connection-icon" />
+              <Desktop20Regular v-else-if="getStoredDeviceTransport(device) === 'emulator'" class="connection-icon" />
+              <Wifi120Regular v-else class="connection-icon" />
+              <span v-if="getStoredDeviceTransport(device) === 'usb'">{{ t('HomeView.USB', 'USB') }}</span>
+              <span v-else-if="getStoredDeviceTransport(device) === 'emulator'">{{ t('HomeView.Emulator', '模拟器') }}</span>
+              <span v-else>{{ t('HomeView.WiFi', 'WiFi') }}</span>
             </div>
           </div>
           <div class="col-actions">
@@ -253,35 +253,122 @@
     </div>
 
     <!-- 添加设备弹窗 -->
-    <div v-if="showAddDialog" class="dialog-overlay" @click.self="showAddDialog = false">
-      <div class="dialog">
+    <div v-if="showAddDialog" class="dialog-overlay" @click.self="closeAddDeviceDialog">
+      <div class="dialog add-device-dialog">
         <div class="dialog-header">
           <h3 class="dialog-title">{{ t('HomeView.AddDevice', '添加设备') }}</h3>
         </div>
         <div class="dialog-content">
-          <p class="dialog-subtitle">{{ t('HomeView.AddDeviceSubtitle', '通过网络调试 (Wi-Fi) 连接设备') }}</p>
+          <div class="add-device-mode-switch" role="tablist" :aria-label="t('HomeView.ConnectionType', '连接方式')">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="addDeviceMode === 'wifi'"
+              :class="{ active: addDeviceMode === 'wifi' }"
+              @click="selectAddDeviceMode('wifi')"
+            >
+              <Wifi120Regular />
+              {{ t('HomeView.NetworkADB', '网络 ADB') }}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="addDeviceMode === 'usb'"
+              :class="{ active: addDeviceMode === 'usb' }"
+              @click="selectAddDeviceMode('usb')"
+            >
+              <PlugConnected20Regular />
+              {{ t('HomeView.LocalUSB', '本地 USB') }}
+            </button>
+          </div>
+
+          <p v-if="addDeviceMode === 'wifi'" class="dialog-subtitle">
+            {{ t('HomeView.AddDeviceSubtitle', '通过网络调试 (Wi-Fi) 连接设备') }}
+          </p>
+          <p v-else class="dialog-subtitle">
+            {{ t('HomeView.AddUSBDeviceSubtitle', '选择一台已连接到 Agent 主机的 USB 调试设备') }}
+          </p>
+
           <div class="form-group">
             <input type="text" v-model="newDeviceName" :placeholder="t('HomeView.DeviceNameOptional', '设备名称 (可选)')" />
           </div>
-          <div class="form-group">
-            <input type="text" v-model="newDeviceIp" :placeholder="t('HomeView.DeviceIpPlaceholder', 'IP 地址 (例如: 127.0.0.1)')" autofocus />
-          </div>
-          <div class="form-group">
-            <input type="text" v-model="newDevicePort" :placeholder="t('HomeView.DevicePortPlaceholder', '端口号 (可选, 默认为 5555)')" />
-          </div>
-          <div class="form-group">
-            <input type="text" v-model="newDevicePairingPort" :placeholder="t('HomeView.PairingPortPlaceholder', '配对端口 (可选 安卓 无线调试配对 流程)')" />
-          </div>
-          <div class="form-group">
-            <input type="text" v-model="newDevicePairingCode" :placeholder="t('HomeView.PairingCodePlaceholder', '配对码 (可选)')" @keyup.enter="addDevice" />
+
+          <template v-if="addDeviceMode === 'wifi'">
+            <div class="form-group">
+              <input type="text" v-model="newDeviceIp" :placeholder="t('HomeView.DeviceIpPlaceholder', 'IP 地址 (例如: 127.0.0.1)')" autofocus />
+            </div>
+            <div class="form-group">
+              <input type="text" v-model="newDevicePort" :placeholder="t('HomeView.DevicePortPlaceholder', '端口号 (可选, 默认为 5555)')" />
+            </div>
+            <div class="form-group">
+              <input type="text" v-model="newDevicePairingPort" :placeholder="t('HomeView.PairingPortPlaceholder', '配对端口 (可选 安卓 无线调试配对 流程)')" />
+            </div>
+            <div class="form-group">
+              <input type="text" v-model="newDevicePairingCode" :placeholder="t('HomeView.PairingCodePlaceholder', '配对码 (可选)')" @keyup.enter="addDevice" />
+            </div>
+          </template>
+
+          <div v-else class="usb-device-picker">
+            <div class="usb-device-picker__toolbar">
+              <span>{{ t('HomeView.USBDevices', 'USB 设备') }}</span>
+              <button
+                type="button"
+                class="icon-btn"
+                :title="t('HomeView.RefreshUSBDevices', '重新扫描 USB 设备')"
+                :disabled="loadingUsbDevices"
+                @click="fetchUsbDevices"
+              >
+                <ArrowClockwise20Regular :class="{ spinning: loadingUsbDevices }" />
+              </button>
+            </div>
+
+            <div v-if="loadingUsbDevices" class="usb-device-state">
+              <div class="spinner"></div>
+              <span>{{ t('HomeView.ScanningUSBDevices', '正在扫描 USB 设备...') }}</span>
+            </div>
+            <div v-else-if="usbDiscoveryError" class="usb-device-state usb-device-state--error">
+              {{ usbDiscoveryError }}
+            </div>
+            <div v-else-if="discoveredUsbDevices.length === 0" class="usb-device-state">
+              {{ t('HomeView.NoUSBDevices', '未发现本地 USB ADB 设备') }}
+            </div>
+            <div v-else class="usb-device-list" role="radiogroup" :aria-label="t('HomeView.USBDevices', 'USB 设备')">
+              <button
+                v-for="device in discoveredUsbDevices"
+                :key="device.serial"
+                type="button"
+                role="radio"
+                class="usb-device-option"
+                :class="{ selected: selectedUsbSerial === device.serial }"
+                :aria-checked="selectedUsbSerial === device.serial"
+                :disabled="!isUsbDeviceSelectable(device)"
+                @click="selectUsbDevice(device)"
+              >
+                <span class="usb-device-option__radio" aria-hidden="true"></span>
+                <span class="usb-device-option__info">
+                  <span class="usb-device-option__name">{{ device.model || t('Devices.UnknownDevice', '未知设备') }}</span>
+                  <span class="usb-device-option__serial">{{ device.serial }}</span>
+                </span>
+                <span
+                  class="usb-device-option__status"
+                  :class="{ available: isADBDeviceOnline(device) && !isUsbDeviceAdded(device.serial) }"
+                >
+                  {{ getUsbDeviceStatusText(device) }}
+                </span>
+              </button>
+            </div>
           </div>
           <div v-if="addError" class="error-msg">{{ addError }}</div>
         </div>
         <div class="dialog-footer-grid">
-          <button class="primary" @click="addDevice" :disabled="adding">
-            {{ adding ? t('HomeView.Connecting', '连接中...') : t('HomeView.Connect', '连接') }}
+          <button
+            class="primary"
+            @click="addDevice"
+            :disabled="adding || (addDeviceMode === 'usb' && !canAddSelectedUsbDevice)"
+          >
+            {{ addDeviceActionText }}
           </button>
-          <button class="transparent" @click="showAddDialog = false">{{ t('Common.Cancel', '取消') }}</button>
+          <button class="transparent" @click="closeAddDeviceDialog">{{ t('Common.Cancel', '取消') }}</button>
         </div>
       </div>
     </div>

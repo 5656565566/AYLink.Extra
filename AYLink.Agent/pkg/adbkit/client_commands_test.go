@@ -3,6 +3,7 @@ package adbkit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -87,5 +88,53 @@ func TestListDevicesContextParsesDevices(t *testing.T) {
 	}
 	if result.devices[0].Serial != "serial-1" || result.devices[0].State != "device" {
 		t.Fatalf("unexpected first device: %+v", result.devices[0])
+	}
+}
+
+func TestListDevicesWithPathsContextParsesDetailedFields(t *testing.T) {
+	connector := &pipeConnector{serverConn: make(chan net.Conn, 1)}
+	client := NewClientWithConnector(connector)
+
+	done := make(chan struct {
+		devices []DeviceWithPath
+		err     error
+	}, 1)
+	go func() {
+		devices, err := client.ListDevicesWithPathsContext(context.Background())
+		done <- struct {
+			devices []DeviceWithPath
+			err     error
+		}{devices: devices, err: err}
+	}()
+
+	server := <-connector.serverConn
+	defer server.Close()
+	buf := make([]byte, len("000ehost:devices-l"))
+	if _, err := server.Read(buf); err != nil {
+		t.Fatalf("expected command read success, got %v", err)
+	}
+	if string(buf) != "000ehost:devices-l" {
+		t.Fatalf("unexpected command %q", string(buf))
+	}
+
+	payload := "usb-serial\tdevice usb:1-2 product:panther model:Pixel_7 device:panther transport_id:3\n" +
+		"192.168.1.20:5555\tdevice product:panther model:Pixel_7 device:panther transport_id:4\n"
+	response := fmt.Sprintf("OKAY%04x%s", len(payload), payload)
+	if _, err := server.Write([]byte(response)); err != nil {
+		t.Fatalf("expected response write success, got %v", err)
+	}
+
+	result := <-done
+	if result.err != nil {
+		t.Fatalf("expected detailed list success, got %v", result.err)
+	}
+	if len(result.devices) != 2 {
+		t.Fatalf("expected two devices, got %d", len(result.devices))
+	}
+	if got := result.devices[0]; got.USB != "1-2" || got.Product != "panther" || got.Model != "Pixel_7" || got.TransportID != "3" {
+		t.Fatalf("unexpected USB device details: %+v", got)
+	}
+	if got := result.devices[1]; got.USB != "" || got.Serial != "192.168.1.20:5555" || got.Model != "Pixel_7" {
+		t.Fatalf("unexpected Wi-Fi device details: %+v", got)
 	}
 }

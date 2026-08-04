@@ -309,7 +309,7 @@
   display: block;
 }
 
-.wifi-badge {
+.connection-badge {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -317,7 +317,7 @@
   color: var(--fluent-text-primary);
 }
 
-.wifi-icon {
+.connection-icon {
   width: 16px;
   height: 16px;
   color: var(--fluent-text-primary);
@@ -499,6 +499,51 @@
   padding: 0 24px 24px;
 }
 
+.add-device-dialog {
+  width: 460px;
+}
+
+.add-device-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 16px;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 6px;
+  background: var(--fluent-control-fill-default);
+}
+
+.add-device-mode-switch button {
+  min-width: 0;
+  height: 36px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fluent-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.add-device-mode-switch button:hover {
+  background: var(--fluent-control-fill-secondary);
+  color: var(--fluent-text-primary);
+}
+
+.add-device-mode-switch button.active {
+  background: var(--fluent-bg-layer);
+  color: var(--fluent-text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.add-device-mode-switch svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
@@ -512,6 +557,141 @@
 
 .form-group input {
   width: 100%;
+}
+
+.usb-device-picker {
+  margin-top: 4px;
+}
+
+.usb-device-picker__toolbar {
+  min-height: 32px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--fluent-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.usb-device-picker__toolbar .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.usb-device-picker__toolbar svg {
+  width: 17px;
+  height: 17px;
+}
+
+.usb-device-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usb-device-option {
+  width: 100%;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fluent-text-primary);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.usb-device-option:hover:not(:disabled) {
+  background: var(--fluent-control-fill-secondary);
+}
+
+.usb-device-option.selected {
+  border-color: var(--fluent-accent-default);
+  background: var(--fluent-control-fill-secondary);
+}
+
+.usb-device-option:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+.usb-device-option__radio {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--fluent-stroke-strong, var(--fluent-text-secondary));
+  border-radius: 50%;
+  position: relative;
+}
+
+.usb-device-option.selected .usb-device-option__radio::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--fluent-accent-default);
+}
+
+.usb-device-option__info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usb-device-option__name,
+.usb-device-option__serial {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usb-device-option__name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.usb-device-option__serial {
+  color: var(--fluent-text-secondary);
+  font-family: var(--font-mono, Consolas, monospace);
+  font-size: 12px;
+}
+
+.usb-device-option__status {
+  color: var(--fluent-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.usb-device-option__status.available {
+  color: var(--fluent-accent-default);
+}
+
+.usb-device-state {
+  min-height: 96px;
+  padding: 16px;
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: 6px;
+  color: var(--fluent-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.usb-device-state--error {
+  color: #ff99a4;
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
 }
 
 .error-msg {
@@ -645,9 +825,18 @@
 }
 
 @media (max-width: 520px) {
+  .add-device-dialog,
   .encoders-dialog,
   .encoder-target-dialog {
     width: min(420px, 90vw);
+  }
+
+  .usb-device-option {
+    grid-template-columns: 16px minmax(0, 1fr);
+  }
+
+  .usb-device-option__status {
+    grid-column: 2;
   }
 
   .encoder-target-actions {

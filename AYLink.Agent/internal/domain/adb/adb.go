@@ -7,8 +7,10 @@ import (
 )
 
 type Device struct {
-	Serial string `json:"serial"`
-	State  string `json:"state"`
+	Serial    string `json:"serial"`
+	State     string `json:"state"`
+	Model     string `json:"model,omitempty"`
+	Transport string `json:"transport"`
 }
 
 type DirectoryEntry struct {

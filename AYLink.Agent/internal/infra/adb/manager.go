@@ -74,7 +74,7 @@ func (m *Manager) Devices(ctx context.Context) ([]domainadb.Device, error) {
 		_ = m.StartServer(listCtx)
 	}
 
-	adbkitDevices, err := m.client.ListDevicesContext(listCtx)
+	adbkitDevices, err := m.client.ListDevicesWithPathsContext(listCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list devices via adbkit: %w", err)
 	}
@@ -82,11 +82,42 @@ func (m *Manager) Devices(ctx context.Context) ([]domainadb.Device, error) {
 	var devices []domainadb.Device
 	for _, d := range adbkitDevices {
 		devices = append(devices, domainadb.Device{
-			Serial: d.Serial,
-			State:  d.State,
+			Serial:    d.Serial,
+			State:     d.State,
+			Model:     strings.ReplaceAll(d.Model, "_", " "),
+			Transport: classifyADBTransport(d),
 		})
 	}
 	return devices, nil
+}
+
+func classifyADBTransport(device adbkit.DeviceWithPath) string {
+	serial := strings.TrimSpace(device.Serial)
+	if strings.TrimSpace(device.USB) != "" {
+		return "usb"
+	}
+	if strings.HasPrefix(strings.ToLower(serial), "emulator-") {
+		return "emulator"
+	}
+	if isNetworkADBSerial(serial) {
+		return "wifi"
+	}
+	if serial != "" {
+		// Physical USB devices use a hardware serial when ADB omits the usb field.
+		return "usb"
+	}
+	return "unknown"
+}
+
+func isNetworkADBSerial(serial string) bool {
+	lowerSerial := strings.ToLower(strings.TrimSpace(serial))
+	if strings.Contains(lowerSerial, "._adb-tls-connect._tcp") ||
+		strings.Contains(lowerSerial, "._adb._tcp") {
+		return true
+	}
+
+	host, port, err := net.SplitHostPort(serial)
+	return err == nil && strings.TrimSpace(host) != "" && strings.TrimSpace(port) != ""
 }
 
 func (m *Manager) StartServer(ctx context.Context) error {

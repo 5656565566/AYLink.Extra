@@ -61,10 +61,13 @@ type DeviceInfo struct {
 
 // DeviceWithPath represents a device with additional path information
 type DeviceWithPath struct {
-	Serial string
-	State  string
-	Model  string
-	Device string
+	Serial      string
+	State       string
+	USB         string
+	Product     string
+	Model       string
+	Device      string
+	TransportID string
 }
 
 // ForwardEntry represents a forwarded port

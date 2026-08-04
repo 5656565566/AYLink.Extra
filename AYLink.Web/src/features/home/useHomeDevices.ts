@@ -12,6 +12,13 @@ import { apiFetch, readApiErrorMessage, resolveApiErrorMessage } from '../../uti
 import type { DeviceGroupSummary, DeviceSummary } from '../../types/devices';
 import { isAbortError } from '../../lib/async/abort';
 import { createLatestRequestController } from '../../lib/async/latestRequest';
+import {
+  getStoredDeviceTransport,
+  isADBDeviceOnline,
+  isStoredDevice,
+  type ADBStatusResponse,
+  type DiscoveredADBDevice,
+} from './deviceConnection';
 
 interface AddDevicePayload {
   Serial: string;
@@ -30,6 +37,7 @@ interface DevicePreviewState {
 
 type HomeDeviceViewMode = 'list' | 'preview';
 type EncoderApplyTarget = 'video' | 'audio';
+type AddDeviceMode = 'wifi' | 'usb';
 
 const DEVICE_VIEW_MODE_KEY = storageKeys.app.homeDeviceViewMode;
 const PREVIEW_WIDTH = 240;
@@ -53,6 +61,11 @@ export function useHomeDevices() {
   const showMoreActionsMenu = ref(false);
   const adding = ref(false);
   const addError = ref('');
+  const addDeviceMode = ref<AddDeviceMode>('wifi');
+  const discoveredUsbDevices = ref<DiscoveredADBDevice[]>([]);
+  const selectedUsbSerial = ref('');
+  const loadingUsbDevices = ref(false);
+  const usbDiscoveryError = ref('');
   const renaming = ref(false);
   const renameError = ref('');
   const newDeviceName = ref('');
@@ -77,6 +90,7 @@ export function useHomeDevices() {
   const devicesRequest = createLatestRequestController();
   const groupOptionsRequest = createLatestRequestController();
   const encodersRequest = createLatestRequestController();
+  const usbDevicesRequest = createLatestRequestController();
 
   const availableGroups = ref<DeviceGroupSummary[]>([]);
   const previewActiveRequests = new Map<number, AbortController>();
@@ -89,6 +103,22 @@ export function useHomeDevices() {
     }
 
     return deviceEncoders.value.filter((encoder) => encoder.toLowerCase().includes(keyword));
+  });
+
+  const canAddSelectedUsbDevice = computed(() => {
+    const selected = discoveredUsbDevices.value.find((device) => device.serial === selectedUsbSerial.value);
+    return selected !== undefined && isADBDeviceOnline(selected) && !isUsbDeviceAdded(selected.serial);
+  });
+
+  const addDeviceActionText = computed(() => {
+    if (addDeviceMode.value === 'usb') {
+      return adding.value
+        ? t('HomeView.Adding', '添加中...')
+        : t('HomeView.Add', '添加');
+    }
+    return adding.value
+      ? t('HomeView.Connecting', '连接中...')
+      : t('HomeView.Connect', '连接');
   });
 
   const groupDropdownOptions = computed(() => [
@@ -522,19 +552,123 @@ export function useHomeDevices() {
     }
   };
 
+  const isUsbDeviceAdded = (serial: string) => {
+    return devices.value.some((device) => isStoredDevice(device, serial));
+  };
+
+  const isUsbDeviceSelectable = (device: DiscoveredADBDevice) => {
+    return isADBDeviceOnline(device) && !isUsbDeviceAdded(device.serial);
+  };
+
+  const getUsbDeviceStatusText = (device: DiscoveredADBDevice) => {
+    if (isUsbDeviceAdded(device.serial)) {
+      return t('HomeView.USBDeviceAdded', '已添加');
+    }
+    if (isADBDeviceOnline(device)) {
+      return t('HomeView.USBDeviceAvailable', '可添加');
+    }
+    if (device.state.trim().toLowerCase() === 'unauthorized') {
+      return t('HomeView.USBDeviceUnauthorized', '等待授权');
+    }
+    return t('HomeView.USBDeviceUnavailable', '不可用');
+  };
+
+  const fetchUsbDevices = async () => {
+    const { requestId, signal } = usbDevicesRequest.begin();
+    loadingUsbDevices.value = true;
+    usbDiscoveryError.value = '';
+
+    try {
+      const response = await apiFetch('/api/adb/status', {
+        signal,
+        timeoutMs: 5000,
+      });
+      if (!usbDevicesRequest.isLatest(requestId)) {
+        return;
+      }
+      if (!response.ok) {
+        usbDiscoveryError.value = await readApiErrorMessage(
+          response,
+          t('HomeView.USBDiscoveryFailed', '无法读取本机 ADB 设备')
+        );
+        discoveredUsbDevices.value = [];
+        selectedUsbSerial.value = '';
+        return;
+      }
+
+      const data = await response.json().catch(() => null) as ADBStatusResponse | null;
+      discoveredUsbDevices.value = Array.isArray(data?.devices)
+        ? data.devices.filter((device) => device.transport === 'usb' && Boolean(device.serial?.trim()))
+        : [];
+
+      const selectedStillAvailable = discoveredUsbDevices.value.some((device) => (
+        device.serial === selectedUsbSerial.value && isUsbDeviceSelectable(device)
+      ));
+      if (!selectedStillAvailable) {
+        selectedUsbSerial.value = discoveredUsbDevices.value.find(isUsbDeviceSelectable)?.serial || '';
+      }
+    } catch (error) {
+      if (!isAbortError(error) && usbDevicesRequest.isLatest(requestId)) {
+        discoveredUsbDevices.value = [];
+        selectedUsbSerial.value = '';
+        usbDiscoveryError.value = t('HomeView.USBDiscoveryFailed', '无法读取本机 ADB 设备');
+      }
+    } finally {
+      if (usbDevicesRequest.isLatest(requestId)) {
+        loadingUsbDevices.value = false;
+      }
+      usbDevicesRequest.finalize(requestId);
+    }
+  };
+
+  const openAddDeviceDialog = () => {
+    addDeviceMode.value = 'wifi';
+    addError.value = '';
+    usbDiscoveryError.value = '';
+    showAddDialog.value = true;
+  };
+
+  const selectAddDeviceMode = (mode: AddDeviceMode) => {
+    addDeviceMode.value = mode;
+    addError.value = '';
+    if (mode === 'usb') {
+      void fetchUsbDevices();
+    }
+  };
+
+  const selectUsbDevice = (device: DiscoveredADBDevice) => {
+    if (isUsbDeviceSelectable(device)) {
+      selectedUsbSerial.value = device.serial;
+    }
+  };
+
   const resetAddDeviceForm = () => {
     showAddDialog.value = false;
+    addDeviceMode.value = 'wifi';
     newDeviceName.value = '';
     newDeviceIp.value = '';
     newDevicePort.value = '';
     newDevicePairingPort.value = '';
     newDevicePairingCode.value = '';
+    discoveredUsbDevices.value = [];
+    selectedUsbSerial.value = '';
+    loadingUsbDevices.value = false;
+    usbDiscoveryError.value = '';
     addError.value = '';
   };
 
+  const closeAddDeviceDialog = () => {
+    usbDevicesRequest.cancel();
+    resetAddDeviceForm();
+  };
+
   const addDevice = async () => {
-    if (!newDeviceIp.value.trim()) {
+    if (addDeviceMode.value === 'wifi' && !newDeviceIp.value.trim()) {
       addError.value = t('Devices.IPRequired', '请输入 IP 地址');
+      return;
+    }
+    if (addDeviceMode.value === 'usb' && !canAddSelectedUsbDevice.value) {
+      addError.value = t('HomeView.SelectUSBDevice', '请选择一台可添加的 USB 设备');
       return;
     }
 
@@ -542,7 +676,9 @@ export function useHomeDevices() {
     addError.value = '';
 
     const port = newDevicePort.value.trim() || '5555';
-    const serial = `${newDeviceIp.value.trim()}:${port}`;
+    const serial = addDeviceMode.value === 'usb'
+      ? selectedUsbSerial.value
+      : `${newDeviceIp.value.trim()}:${port}`;
     const payload: AddDevicePayload = { Serial: serial };
 
     if (newDeviceName.value.trim()) {
@@ -550,7 +686,7 @@ export function useHomeDevices() {
     }
 
     const pairingPort = Number.parseInt(newDevicePairingPort.value.trim(), 10);
-    if (!Number.isNaN(pairingPort) && newDevicePairingCode.value.trim()) {
+    if (addDeviceMode.value === 'wifi' && !Number.isNaN(pairingPort) && newDevicePairingCode.value.trim()) {
       payload.PairingPort = pairingPort;
       payload.PairingCode = newDevicePairingCode.value.trim();
     }
@@ -568,7 +704,7 @@ export function useHomeDevices() {
       }
 
       await response.json().catch(() => null);
-      resetAddDeviceForm();
+      closeAddDeviceDialog();
       await fetchDevices();
     } catch (error) {
       addError.value = t('Common.NetworkRequestFailed', '网络请求失败');
@@ -925,6 +1061,7 @@ export function useHomeDevices() {
     devicesRequest.dispose();
     groupOptionsRequest.dispose();
     encodersRequest.dispose();
+    usbDevicesRequest.dispose();
     document.removeEventListener('click', closeMenu);
   });
 
@@ -945,6 +1082,13 @@ export function useHomeDevices() {
     showMoreActionsMenu,
     adding,
     addError,
+    addDeviceMode,
+    discoveredUsbDevices,
+    selectedUsbSerial,
+    loadingUsbDevices,
+    usbDiscoveryError,
+    canAddSelectedUsbDevice,
+    addDeviceActionText,
     renaming,
     renameError,
     newDeviceName,
@@ -989,6 +1133,16 @@ export function useHomeDevices() {
     fetchAvailableGroups,
     handleRefreshDevices,
     deleteSelectedDevices,
+    openAddDeviceDialog,
+    closeAddDeviceDialog,
+    selectAddDeviceMode,
+    fetchUsbDevices,
+    selectUsbDevice,
+    isUsbDeviceSelectable,
+    isUsbDeviceAdded,
+    getUsbDeviceStatusText,
+    isADBDeviceOnline,
+    getStoredDeviceTransport,
     addDevice,
     deleteDevice,
     openRenameDialog,

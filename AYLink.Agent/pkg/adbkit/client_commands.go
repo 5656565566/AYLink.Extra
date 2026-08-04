@@ -168,7 +168,15 @@ func (c *Client) ListDevicesContext(ctx context.Context) ([]DeviceInfo, error) {
 
 // ListDevicesWithPaths returns the list of devices with their paths (host:devices-l)
 func (c *Client) ListDevicesWithPaths() ([]DeviceWithPath, error) {
-	payload, err := c.SendHostCommand("host:devices-l")
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHostCommandTimeout)
+	defer cancel()
+
+	return c.ListDevicesWithPathsContext(ctx)
+}
+
+// ListDevicesWithPathsContext returns detailed device information from host:devices-l.
+func (c *Client) ListDevicesWithPathsContext(ctx context.Context) ([]DeviceWithPath, error) {
+	payload, err := c.SendHostCommandContext(ctx, "host:devices-l")
 	if err != nil {
 		return nil, err
 	}
@@ -184,10 +192,25 @@ func (c *Client) ListDevicesWithPaths() ([]DeviceWithPath, error) {
 				Serial: parts[0],
 				State:  parts[1],
 			}
-			if len(parts) >= 4 {
-				// Format: serial state model device:path
-				device.Model = parts[2]
-				device.Device = parts[3]
+
+			// Detailed fields are key:value tokens and their order varies by ADB version.
+			for _, token := range parts[2:] {
+				key, value, ok := strings.Cut(token, ":")
+				if !ok {
+					continue
+				}
+				switch key {
+				case "usb":
+					device.USB = value
+				case "product":
+					device.Product = value
+				case "model":
+					device.Model = value
+				case "device":
+					device.Device = value
+				case "transport_id":
+					device.TransportID = value
+				}
 			}
 			devices = append(devices, device)
 		}

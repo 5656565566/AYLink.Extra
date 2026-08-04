@@ -207,6 +207,8 @@ export default defineComponent({
 
     const CONTROL_CHANNEL_BUFFER_LIMIT = 256 * 1024;
 
+    const CONTROL_CHANNEL_STALL_TIMEOUT_MS = 3000;
+
     const MOUSE_COMPAT_SUPPRESSION_MS = 900;
 
     const POINTER_MOVE_SAMPLE_INTERVAL_MS = 1000 / 120;
@@ -613,6 +615,7 @@ export default defineComponent({
 
     const controlChannels = useScrcpyControlChannels({
       controlBufferLimit: CONTROL_CHANNEL_BUFFER_LIMIT,
+      controlStallTimeoutMs: CONTROL_CHANNEL_STALL_TIMEOUT_MS,
       pointerMoveBufferLimit: POINTER_MOVE_BUFFER_LIMIT,
       isDroppableControlPayload: (payload) => isDroppableControlPayload(payload),
       onControlChannelChanged: (channel) => {
@@ -641,6 +644,19 @@ export default defineComponent({
       onPointerMoveBufferedAmountLow: () => {
         flushPendingPointerMoves();
         flushPendingPointerReleases();
+      },
+      onControlChannelUnhealthy: (reason) => {
+        if (connectionSchedulerState.suppressAutoReconnect || !peerConnection || peerConnection.connectionState === 'closed') {
+          return;
+        }
+
+        console.warn('[WebRTC] Control channel became unhealthy; rebuilding the screencast connection.', {
+          reason,
+          deviceId: deviceId.value,
+          tabKey: activeTabKey.value
+        });
+        stopConnection();
+        scheduleReconnect(`control_channel_${reason}`);
       },
       onPersistConnection: () => {
         persistCurrentConnection();

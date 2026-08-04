@@ -552,6 +552,9 @@ func (r *runtime) SendControl(payload []byte) error {
 	message := append([]byte(nil), payload...)
 	r.controlEnqueueMu.Lock()
 	defer r.controlEnqueueMu.Unlock()
+	if r.shouldDropTouchMoveWithoutActivePointerLocked(message) {
+		return nil
+	}
 	if release := r.buildTouchReleaseBeforeDownLocked(message); len(release) > 0 {
 		if err := r.enqueueControlMessageLocked(release); err != nil {
 			return err
@@ -563,6 +566,18 @@ func (r *runtime) SendControl(payload []byte) error {
 	}
 	r.rememberQueuedTouchPayloadLocked(message)
 	return nil
+}
+
+func (r *runtime) shouldDropTouchMoveWithoutActivePointerLocked(payload []byte) bool {
+	if !isTouchControlPayloadAction(payload, 2) || len(payload) < 32 {
+		return false
+	}
+	if r.activeTouchPointers == nil {
+		return true
+	}
+	pointerID := binary.BigEndian.Uint64(payload[2:10])
+	_, active := r.activeTouchPointers[pointerID]
+	return !active
 }
 
 func (r *runtime) enqueueControlMessageLocked(message []byte) error {

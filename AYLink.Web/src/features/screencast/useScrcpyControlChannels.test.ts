@@ -9,14 +9,19 @@ class TestDataChannel {
   onopen: (() => void) | null = null;
   onbufferedamountlow: (() => void) | null = null;
   onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
+  sendError: Error | null = null;
 
   send(payload: ArrayBufferView<ArrayBuffer>) {
+    if (this.sendError) {
+      throw this.sendError;
+    }
     this.sent.push(payload as Uint8Array);
   }
 }
 
-function createHarness() {
+function createHarness(overrides: { now?: () => number; controlStallTimeoutMs?: number } = {}) {
   const onControlChannelChanged = vi.fn();
   const onMetaControlChannelChanged = vi.fn();
   const onPointerMoveChannelChanged = vi.fn();
@@ -24,6 +29,7 @@ function createHarness() {
   const onControlBufferedAmountLow = vi.fn();
   const onPointerMoveChannelOpen = vi.fn();
   const onPointerMoveBufferedAmountLow = vi.fn();
+  const onControlChannelUnhealthy = vi.fn();
   const onPersistConnection = vi.fn();
   const isDroppableControlPayload = vi.fn((payload: Uint8Array) => payload[0] === 9);
   const logger = {
@@ -33,6 +39,7 @@ function createHarness() {
 
   const controlChannels = useScrcpyControlChannels({
     controlBufferLimit: 10,
+    controlStallTimeoutMs: overrides.controlStallTimeoutMs ?? 3000,
     pointerMoveBufferLimit: 20,
     isDroppableControlPayload,
     onControlChannelChanged,
@@ -42,7 +49,9 @@ function createHarness() {
     onControlBufferedAmountLow,
     onPointerMoveChannelOpen,
     onPointerMoveBufferedAmountLow,
+    onControlChannelUnhealthy,
     onPersistConnection,
+    now: overrides.now,
     logger
   });
 
@@ -55,6 +64,7 @@ function createHarness() {
     onControlBufferedAmountLow,
     onPointerMoveChannelOpen,
     onPointerMoveBufferedAmountLow,
+    onControlChannelUnhealthy,
     onPersistConnection,
     isDroppableControlPayload,
     logger
@@ -101,6 +111,36 @@ describe('useScrcpyControlChannels', () => {
 
     expect(channel.sent).toEqual([new Uint8Array([1])]);
     expect(harness.onControlBufferedAmountLow).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a control channel that remains backpressured past the timeout', () => {
+    let currentTime = 100;
+    const harness = createHarness({
+      controlStallTimeoutMs: 1000,
+      now: () => currentTime
+    });
+    const channel = new TestDataChannel();
+    channel.bufferedAmount = 11;
+    harness.controlChannels.setupControlChannel(channel as unknown as RTCDataChannel);
+
+    expect(harness.controlChannels.enqueuePointerControlPayloads({ payload: new Uint8Array([1]) })).toBe(true);
+    currentTime = 1100;
+    harness.controlChannels.flushPendingPointerControlPayloads();
+
+    expect(harness.onControlChannelUnhealthy).toHaveBeenCalledWith('stalled');
+    expect(harness.controlChannels.enqueuePointerControlPayloads({ payload: new Uint8Array([2]) })).toBe(false);
+  });
+
+  it('reports a control channel send failure once', () => {
+    const harness = createHarness();
+    const channel = new TestDataChannel();
+    channel.sendError = new Error('send failed');
+    harness.controlChannels.setupControlChannel(channel as unknown as RTCDataChannel);
+
+    expect(harness.controlChannels.enqueuePointerControlPayloads({ payload: new Uint8Array([1]) })).toBe(false);
+    expect(harness.controlChannels.enqueuePointerControlPayloads({ payload: new Uint8Array([2]) })).toBe(false);
+    expect(harness.onControlChannelUnhealthy).toHaveBeenCalledOnce();
+    expect(harness.onControlChannelUnhealthy).toHaveBeenCalledWith('send-failed');
   });
 
   it('drops droppable direct sends when the control channel is over the buffer limit', () => {
@@ -204,5 +244,6 @@ describe('useScrcpyControlChannels', () => {
     expect(harness.onControlChannelChanged).toHaveBeenLastCalledWith(null);
     expect(harness.onMetaControlChannelChanged).toHaveBeenLastCalledWith(null);
     expect(harness.onPointerMoveChannelChanged).toHaveBeenLastCalledWith(null);
+    expect(harness.onControlChannelUnhealthy).toHaveBeenCalledWith('closed');
   });
 });

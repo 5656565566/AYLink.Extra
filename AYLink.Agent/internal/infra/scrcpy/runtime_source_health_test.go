@@ -441,6 +441,50 @@ func TestRuntimeReleasesStaleTouchPointerBeforeNewDown(t *testing.T) {
 	}
 }
 
+func TestRuntimeDropsTouchMoveOutsideActivePointerLifecycle(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	rt := &runtime{
+		done:          make(chan struct{}),
+		controlConn:   clientConn,
+		controlWrites: make(chan []byte, 8),
+	}
+
+	pointerID := uint64(9)
+	moveBeforeDown := buildTestTouchPayload(2, pointerID, 100, 200, 1)
+	if err := rt.SendControl(moveBeforeDown); err != nil {
+		t.Fatalf("send move before down: %v", err)
+	}
+	if len(rt.controlWrites) != 0 {
+		t.Fatalf("expected move before down to be dropped, got %d queued messages", len(rt.controlWrites))
+	}
+
+	down := buildTestTouchPayload(0, pointerID, 100, 200, 1)
+	move := buildTestTouchPayload(2, pointerID, 200, 300, 1)
+	up := buildTestTouchPayload(1, pointerID, 200, 300, 0)
+	lateMove := buildTestTouchPayload(2, pointerID, 300, 400, 1)
+	for _, payload := range [][]byte{down, move, up, lateMove} {
+		if err := rt.SendControl(payload); err != nil {
+			t.Fatalf("send touch lifecycle payload: %v", err)
+		}
+	}
+
+	if len(rt.controlWrites) != 3 {
+		t.Fatalf("expected down, move, and up while dropping late move, got %d queued messages", len(rt.controlWrites))
+	}
+	if got := <-rt.controlWrites; string(got) != string(down) {
+		t.Fatalf("expected down first, got %v", got)
+	}
+	if got := <-rt.controlWrites; string(got) != string(move) {
+		t.Fatalf("expected active move second, got %v", got)
+	}
+	if got := <-rt.controlWrites; string(got) != string(up) {
+		t.Fatalf("expected up third, got %v", got)
+	}
+}
+
 func buildTestTouchPayload(action byte, pointerID uint64, x int, y int, buttons uint32) []byte {
 	payload := make([]byte, 32)
 	payload[0] = 2

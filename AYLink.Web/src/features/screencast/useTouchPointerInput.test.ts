@@ -237,6 +237,24 @@ describe('useTouchPointerInput', () => {
     expect(onFinalized).toHaveBeenCalledOnce();
   });
 
+  it('keeps input mapping pointers active when a real touch begins', () => {
+    const { input, queuedPayloads } = createInput();
+
+    expect(input.sendPointerRatiosCommand({
+      phase: 'down',
+      pointerId: 100,
+      ratios: { xRatio: 0.2, yRatio: 0.3, frameWidth: 1000, frameHeight: 800 }
+    })).toBe(true);
+    input.handlePointerDown(createPointerEvent(7));
+
+    expect(input.activePointers.size).toBe(2);
+    expect(queuedPayloads.map((payload) => readTouchPayload(payload).action)).toEqual([
+      SCRCPY_ACTION_DOWN,
+      SCRCPY_ACTION_DOWN
+    ]);
+    expect(queuedPayloads.map((payload) => readTouchPayload(payload).pointerId)).toEqual([0n, 1n]);
+  });
+
   it('does not finalize a stale release after the same virtual pointer is pressed again', () => {
     let firstReleaseSent: (() => void) | undefined;
     const { input } = createInput({
@@ -270,7 +288,7 @@ describe('useTouchPointerInput', () => {
     firstReleaseSent?.();
 
     expect(onFinalized).not.toHaveBeenCalled();
-    expect(input.activePointers.has(200)).toBe(true);
-    expect(input.getScrcpyPointerId(200)).toBe(0n);
+    expect(input.activePointers.size).toBe(1);
+    expect([...input.getScrcpyPointerIds().values()]).toEqual([0n]);
   });
 });

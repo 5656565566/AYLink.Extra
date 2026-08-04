@@ -3,8 +3,11 @@ export interface PendingPointerControlPayload {
   onSent?: () => void;
 }
 
+export type ControlChannelUnhealthyReason = 'closed' | 'error' | 'send-failed' | 'stalled';
+
 interface ScrcpyControlChannelsOptions {
   controlBufferLimit: number;
+  controlStallTimeoutMs: number;
   pointerMoveBufferLimit: number;
   isDroppableControlPayload: (payload: Uint8Array) => boolean;
   onControlChannelChanged: (channel: RTCDataChannel | null) => void;
@@ -14,7 +17,9 @@ interface ScrcpyControlChannelsOptions {
   onControlBufferedAmountLow: () => void;
   onPointerMoveChannelOpen: () => void;
   onPointerMoveBufferedAmountLow: () => void;
+  onControlChannelUnhealthy: (reason: ControlChannelUnhealthyReason) => void;
   onPersistConnection: () => void;
+  now?: () => number;
   logger?: Pick<Console, 'log' | 'warn'>;
 }
 
@@ -24,17 +29,35 @@ export interface MetaControlSendOptions {
 
 export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) {
   const logger = options.logger ?? console;
+  const now = options.now ?? (() => performance.now());
   const pendingPointerControlPayloads: PendingPointerControlPayload[] = [];
   let controlChannel: RTCDataChannel | null = null;
   let metaControlChannel: RTCDataChannel | null = null;
   let pointerMoveChannel: RTCDataChannel | null = null;
   let pointerControlFlushHandle: number | null = null;
+  let controlBlockedSince: number | null = null;
+  let isControlChannelUnhealthy = false;
 
   const stopPointerControlFlushLoop = () => {
     if (pointerControlFlushHandle !== null) {
       window.cancelAnimationFrame(pointerControlFlushHandle);
       pointerControlFlushHandle = null;
     }
+  };
+
+  const resetControlChannelHealth = () => {
+    controlBlockedSince = null;
+    isControlChannelUnhealthy = false;
+  };
+
+  const markControlChannelUnhealthy = (reason: ControlChannelUnhealthyReason) => {
+    if (isControlChannelUnhealthy) {
+      return;
+    }
+
+    isControlChannelUnhealthy = true;
+    stopPointerControlFlushLoop();
+    options.onControlChannelUnhealthy(reason);
   };
 
   const schedulePointerControlFlush = () => {
@@ -49,15 +72,27 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
   };
 
   const flushPendingPointerControlPayloads = () => {
+    if (isControlChannelUnhealthy) {
+      return;
+    }
+
     if (!controlChannel || controlChannel.readyState !== 'open') {
       return;
     }
 
     while (pendingPointerControlPayloads.length > 0) {
       if (controlChannel.bufferedAmount > options.controlBufferLimit) {
+        const currentTime = now();
+        controlBlockedSince ??= currentTime;
+        if (currentTime - controlBlockedSince >= options.controlStallTimeoutMs) {
+          markControlChannelUnhealthy('stalled');
+          return;
+        }
         schedulePointerControlFlush();
         return;
       }
+
+      controlBlockedSince = null;
 
       const pendingPayload = pendingPointerControlPayloads[0];
       try {
@@ -66,7 +101,7 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
         pendingPayload.onSent?.();
       } catch (error) {
         logger.warn('Pointer control send failed:', error);
-        schedulePointerControlFlush();
+        markControlChannelUnhealthy('send-failed');
         return;
       }
     }
@@ -79,8 +114,15 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
       return true;
     }
 
+    if (isControlChannelUnhealthy) {
+      return false;
+    }
+
     pendingPointerControlPayloads.push(...payloads);
     flushPendingPointerControlPayloads();
+    if (isControlChannelUnhealthy) {
+      return false;
+    }
     if (pendingPointerControlPayloads.length > 0) {
       schedulePointerControlFlush();
     }
@@ -153,15 +195,18 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
 
   const setupControlChannel = (channel: RTCDataChannel) => {
     controlChannel = channel;
+    resetControlChannelHealth();
     options.onControlChannelChanged(channel);
     channel.bufferedAmountLowThreshold = Math.floor(options.controlBufferLimit / 2);
     options.onPersistConnection();
     channel.onopen = () => {
+      resetControlChannelHealth();
       flushPendingPointerControlPayloads();
       options.onControlChannelOpen();
       options.onPersistConnection();
     };
     channel.onbufferedamountlow = () => {
+      controlBlockedSince = null;
       flushPendingPointerControlPayloads();
       options.onControlBufferedAmountLow();
     };
@@ -170,6 +215,12 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
         controlChannel = null;
         options.onControlChannelChanged(null);
         options.onPersistConnection();
+        markControlChannelUnhealthy('closed');
+      }
+    };
+    channel.onerror = () => {
+      if (controlChannel === channel) {
+        markControlChannelUnhealthy('error');
       }
     };
     channel.onmessage = (event) => logger.log('Data channel message:', event.data);
@@ -214,6 +265,7 @@ export function useScrcpyControlChannels(options: ScrcpyControlChannelsOptions) 
 
   const clearPendingPointerControlPayloads = () => {
     pendingPointerControlPayloads.length = 0;
+    controlBlockedSince = null;
     stopPointerControlFlushLoop();
   };
 

@@ -186,6 +186,25 @@ describe('useFloatingMenu', () => {
     });
   });
 
+  it('reanchors and collapses an expanded menu after the stage becomes smaller', () => {
+    const stageBounds = { ...defaultStageBounds };
+    const menu = createMenu(stageBounds);
+
+    menu.initializeMenuPosition();
+    expect(menu.isMenuExpanded.value).toBe(true);
+    expect(menu.menuX.value).toBe(932);
+
+    stageBounds.width = 420;
+    stageBounds.height = 260;
+    menu.initializeMenuPosition();
+
+    expect(menu.isMenuExpanded.value).toBe(false);
+    expect(menu.menuStyle.value).toEqual({
+      left: '352px',
+      top: '20px'
+    });
+  });
+
   it('pulls an expanded floating menu back inside the visible stage', () => {
     const menu = createMenu();
     menu.setFloatingMenuState();

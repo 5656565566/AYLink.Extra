@@ -461,7 +461,6 @@ export default defineComponent({
       setMenuPosition,
       restoreMenuPositionFromRelative,
       loadPersistedMenuPlacement,
-      applyDockPosition,
       initializeMenuPosition,
       ensureMenuInsideStage,
       handleMenuPointerEnter,
@@ -3788,34 +3787,33 @@ export default defineComponent({
       }).commands);
     };
 
+    const syncFloatingElementsToStage = () => {
+      if (hasInitializedFloatingMenuPlacement) {
+        initializeMenuPosition();
+      }
+
+      if (isClipboardWindowVisible.value || clipboardWindowX.value !== 0 || clipboardWindowY.value !== 0) {
+        clampClipboardWindowToStage();
+      }
+    };
+
     const handleVideoMetadataLoaded = () => {
       syncVideoFrameSize();
       refreshInputMappingStickerLayout();
+      void nextTick(syncFloatingElementsToStage);
       scheduleDisplayResize();
     };
 
     const handleVideoResize = () => {
       syncVideoFrameSize();
       refreshInputMappingStickerLayout();
+      void nextTick(syncFloatingElementsToStage);
       scheduleDisplayResize();
     };
 
     const handleWindowResize = () => {
       refreshInputMappingStickerLayout();
-
-      if (menuX.value === 0 && menuY.value === 0) {
-        initializeMenuPosition();
-      } else if (isDocked.value) {
-        applyDockPosition(dockedEdge.value);
-      } else {
-        restoreMenuPositionFromRelative();
-      }
-      ensureMenuInsideStage();
-
-      if (isClipboardWindowVisible.value || clipboardWindowX.value !== 0 || clipboardWindowY.value !== 0) {
-        clampClipboardWindowToStage();
-      }
-
+      syncFloatingElementsToStage();
       scheduleDisplayResize();
     };
 
@@ -3905,8 +3903,7 @@ export default defineComponent({
 
       videoContainerResizeObserver?.disconnect();
       videoContainerResizeObserver = new ResizeObserver(() => {
-        refreshInputMappingStickerLayout();
-        scheduleDisplayResize();
+        handleWindowResize();
       });
       videoContainerResizeObserver.observe(videoContainer.value);
     };

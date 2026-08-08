@@ -108,6 +108,8 @@ function createHarness(overrides: Partial<UseScreencastSessionOptions> = {}) {
     redirectToLogin: vi.fn(),
     hasLiveConnection: () => !!runtime.peerConnection && runtime.peerConnection.connectionState !== 'closed',
     getSessionReleaseTarget: () => ({ deviceId: 'device-1', sessionId: '' }),
+    getRestorableSessionId: () => '',
+    setRestorableSessionId: vi.fn(),
     postScrcpySessionAction: vi.fn(),
     stopScrcpySessionHeartbeat: vi.fn(),
     startScrcpySessionHeartbeat: vi.fn(),
@@ -204,6 +206,44 @@ describe('useScreencastSession', () => {
     expect(harness.options.wirePeerConnectionEventHandlers).toHaveBeenCalledWith(harness.runtime.activeConnectionId, harness.runtime.peerConnection);
     expect(harness.socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'offer', sdp: 'offer-sdp' }));
     expect(harness.runtime.currentScrcpySessionId).toBe('session-1');
+    harness.restoreWebSocket();
+  });
+
+  it('restores a persisted backend session after a page reload', async () => {
+    const requestSignalTicket = vi.fn(async () => ({
+      ticketResponse: createResponse({ sessionId: 'restored-session', ticket: 'ticket 1' })
+    }));
+    const setRestorableSessionId = vi.fn();
+    const harness = createHarness({
+      getRestorableSessionId: () => 'restored-session',
+      setRestorableSessionId,
+      requestSignalTicket
+    });
+
+    await harness.session.lifecycle.start();
+
+    expect(requestSignalTicket).toHaveBeenCalledWith('restored-session');
+    expect(setRestorableSessionId).toHaveBeenCalledWith('tab-1', 'restored-session');
+    harness.restoreWebSocket();
+  });
+
+  it('falls back to a fresh backend session when the restored lease expired', async () => {
+    const requestSignalTicket = vi.fn()
+      .mockResolvedValueOnce({ ticketResponse: createResponse({}, false, 400) })
+      .mockResolvedValueOnce({ ticketResponse: createResponse({ sessionId: 'fresh-session', ticket: 'ticket 2' }) });
+    const setRestorableSessionId = vi.fn();
+    const harness = createHarness({
+      getRestorableSessionId: () => 'expired-session',
+      setRestorableSessionId,
+      requestSignalTicket
+    });
+
+    await harness.session.lifecycle.start();
+
+    expect(requestSignalTicket).toHaveBeenNthCalledWith(1, 'expired-session');
+    expect(requestSignalTicket).toHaveBeenNthCalledWith(2);
+    expect(setRestorableSessionId).toHaveBeenNthCalledWith(1, 'tab-1', '');
+    expect(setRestorableSessionId).toHaveBeenNthCalledWith(2, 'tab-1', 'fresh-session');
     harness.restoreWebSocket();
   });
 

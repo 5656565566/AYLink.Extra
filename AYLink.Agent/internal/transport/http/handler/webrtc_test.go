@@ -98,7 +98,7 @@ func (f *fakeHandlerScrcpyRuntime) SubscribeErrors() (<-chan error, func()) {
 }
 
 func (f *fakeHandlerScrcpyRuntime) GetSourceHealth() domainscrcpy.SourceHealthSnapshot {
-	return domainscrcpy.SourceHealthSnapshot{}
+	return domainscrcpy.SourceHealthSnapshot{RuntimeClosed: f.closed}
 }
 
 func (f *fakeHandlerScrcpyRuntime) GetClipboardCached() (string, bool) { return "", false }
@@ -351,6 +351,7 @@ func TestWebRTCHandlerAcquireRuntimeDoesNotReuseIdleRuntimeForNewSession(t *test
 		deviceID:    "1",
 		signature:   buildRuntimeSignature("1", options),
 		sessionRefs: map[string]int{},
+		sessionIDs:  map[string]struct{}{},
 		runtime:     oldRuntime,
 		refCount:    0,
 		lastUsedAt:  time.Now(),
@@ -374,6 +375,34 @@ func TestWebRTCHandlerAcquireRuntimeDoesNotReuseIdleRuntimeForNewSession(t *test
 	}
 }
 
+func TestWebRTCHandlerAcquireRuntimeDoesNotReuseIdleRuntimeOwnedByAnotherActiveSession(t *testing.T) {
+	options := scrcpyservice.WebRTCRuntimeOptions{NewDisplay: true}
+	oldRuntime := &fakeHandlerScrcpyRuntime{}
+	newRuntime := &fakeHandlerScrcpyRuntime{}
+	scrcpyService := &countingScrcpyRuntimeService{runtime: newRuntime}
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil)
+	handler.runtimes["1"] = &managedRuntime{
+		deviceID:    "1",
+		signature:   buildRuntimeSignature("1", options),
+		sessionRefs: map[string]int{},
+		sessionIDs:  map[string]struct{}{"old-session": {}},
+		runtime:     oldRuntime,
+		refCount:    0,
+		lastUsedAt:  time.Now(),
+	}
+
+	runtime, created, err := handler.acquireRuntime(context.Background(), "1", "new-session", 1, options)
+	if err != nil {
+		t.Fatalf("acquire runtime: %v", err)
+	}
+	if !created || runtime != newRuntime {
+		t.Fatalf("expected a new session to replace a cached runtime owned by another lease")
+	}
+	if !oldRuntime.closed {
+		t.Fatalf("expected the previous session runtime to be closed")
+	}
+}
+
 func TestWebRTCHandlerAcquireRuntimeReusesIdleRuntimeForSameLeasedSession(t *testing.T) {
 	options := scrcpyservice.WebRTCRuntimeOptions{}
 	oldRuntime := &fakeHandlerScrcpyRuntime{}
@@ -383,6 +412,7 @@ func TestWebRTCHandlerAcquireRuntimeReusesIdleRuntimeForSameLeasedSession(t *tes
 		deviceID:    "1",
 		signature:   buildRuntimeSignature("1", options),
 		sessionRefs: map[string]int{},
+		sessionIDs:  map[string]struct{}{"same-session": {}},
 		runtime:     oldRuntime,
 		refCount:    0,
 		lastUsedAt:  time.Now(),
@@ -403,6 +433,67 @@ func TestWebRTCHandlerAcquireRuntimeReusesIdleRuntimeForSameLeasedSession(t *tes
 	}
 	if scrcpyService.startCount != 0 {
 		t.Fatalf("expected no new runtime start, got %d", scrcpyService.startCount)
+	}
+}
+
+func TestWebRTCHandlerAcquireRuntimeAllowsSameVirtualDisplaySessionToOverlap(t *testing.T) {
+	options := scrcpyservice.WebRTCRuntimeOptions{NewDisplay: true}
+	oldRuntime := &fakeHandlerScrcpyRuntime{}
+	scrcpyService := &countingScrcpyRuntimeService{runtime: &fakeHandlerScrcpyRuntime{}}
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil)
+	handler.runtimes["1"] = &managedRuntime{
+		deviceID:    "1",
+		signature:   buildRuntimeSignature("1", options),
+		sessionRefs: map[string]int{"same-session": 1},
+		sessionIDs:  map[string]struct{}{"same-session": {}},
+		runtime:     oldRuntime,
+		refCount:    1,
+		lastUsedAt:  time.Now(),
+	}
+
+	runtime, created, err := handler.acquireRuntime(context.Background(), "1", "same-session", 1, options)
+	if err != nil {
+		t.Fatalf("acquire runtime: %v", err)
+	}
+	if created || runtime != oldRuntime {
+		t.Fatalf("expected overlapping connection from the same session to reuse the virtual display runtime")
+	}
+	if handler.runtimes["1"].refCount != 2 || handler.runtimes["1"].sessionRefs["same-session"] != 2 {
+		t.Fatalf("expected both signaling connections to hold runtime references")
+	}
+}
+
+func TestWebRTCHandlerAcquireRuntimeReplacesClosedCachedRuntime(t *testing.T) {
+	options := scrcpyservice.WebRTCRuntimeOptions{}
+	closedRuntime := &fakeHandlerScrcpyRuntime{closed: true}
+	newRuntime := &fakeHandlerScrcpyRuntime{}
+	scrcpyService := &countingScrcpyRuntimeService{runtime: newRuntime}
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil)
+	handler.runtimes["1"] = &managedRuntime{
+		deviceID:    "1",
+		signature:   buildRuntimeSignature("1", options),
+		sessionRefs: map[string]int{"same-session": 1},
+		sessionIDs:  map[string]struct{}{"same-session": {}},
+		runtime:     closedRuntime,
+		refCount:    1,
+		lastUsedAt:  time.Now(),
+	}
+
+	runtime, created, err := handler.acquireRuntime(context.Background(), "1", "same-session", 1, options)
+	if err != nil {
+		t.Fatalf("acquire runtime: %v", err)
+	}
+	if !created || runtime != newRuntime {
+		t.Fatalf("expected closed cached runtime to be replaced")
+	}
+	if scrcpyService.startCount != 1 {
+		t.Fatalf("expected one replacement runtime start, got %d", scrcpyService.startCount)
+	}
+
+	// A delayed release from the old signaling connection must not decrement the replacement runtime.
+	handler.releaseRuntime("1", "same-session", closedRuntime)
+	if handler.runtimes["1"].refCount != 1 {
+		t.Fatalf("expected stale release to leave replacement refcount unchanged")
 	}
 }
 

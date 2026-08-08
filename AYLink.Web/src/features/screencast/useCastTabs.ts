@@ -85,7 +85,12 @@ export function useCastTabs(getTabTitle: (tab: CastTab) => string) {
   const upsertTab = (tab: CastTab) => {
     const existingIndex = castTabs.value.findIndex((item) => item.key === tab.key);
     if (existingIndex >= 0) {
-      castTabs.value[existingIndex] = { ...castTabs.value[existingIndex], ...tab };
+      const existingTab = castTabs.value[existingIndex];
+      castTabs.value[existingIndex] = {
+        ...existingTab,
+        ...tab,
+        sessionId: tab.sessionId || existingTab.sessionId
+      };
     } else {
       castTabs.value.push(tab);
     }
@@ -111,7 +116,8 @@ export function useCastTabs(getTabTitle: (tab: CastTab) => string) {
       appPackageName: nextAppPackageName,
       appDisplayName: nextAppDisplayName,
       deviceName: nextDeviceName,
-      newDisplay: nextNewDisplay
+      newDisplay: nextNewDisplay,
+      sessionId: ''
     };
 
     return nextTab;
@@ -126,7 +132,8 @@ export function useCastTabs(getTabTitle: (tab: CastTab) => string) {
       appPackageName: nextAppPackageName,
       appDisplayName: request.appDisplayName ?? '',
       deviceName: request.deviceName ?? defaultDeviceName,
-      newDisplay: nextNewDisplay
+      newDisplay: nextNewDisplay,
+      sessionId: ''
     };
 
     return nextTab;
@@ -181,7 +188,8 @@ export function useCastTabs(getTabTitle: (tab: CastTab) => string) {
             appPackageName: item.appPackageName ?? '',
             appDisplayName: item.appDisplayName ?? '',
             deviceName: item.deviceName ?? defaultDeviceName,
-            newDisplay: item.newDisplay === true
+            newDisplay: item.newDisplay === true,
+            sessionId: typeof item.sessionId === 'string' ? item.sessionId : ''
           }));
       }
       activeTabKey.value = castTabs.value.some((item) => item.key === rawActiveTab)

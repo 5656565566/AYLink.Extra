@@ -95,6 +95,8 @@ export interface UseScreencastSessionOptions {
   redirectToLogin: () => void;
   hasLiveConnection: () => boolean;
   getSessionReleaseTarget: (tabKey?: string) => { deviceId: string; sessionId: string };
+  getRestorableSessionId: (tabKey: string) => string;
+  setRestorableSessionId: (tabKey: string, sessionId: string) => void;
   postScrcpySessionAction: (action: 'heartbeat' | 'release', deviceId: string, sessionId: string) => void;
   stopScrcpySessionHeartbeat: () => void;
   startScrcpySessionHeartbeat: (deviceId: string, sessionId: string) => void;
@@ -426,7 +428,13 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
 
     try {
       let wsUrl = options.buildSignalWebSocketBaseUrl();
-      const { ticketResponse } = await options.requestSignalTicket();
+      const restorableSessionId = options.getRestorableSessionId(targetTabKey);
+      let { ticketResponse } = await options.requestSignalTicket(restorableSessionId);
+
+      if (!ticketResponse.ok && ticketResponse.status === 400 && restorableSessionId) {
+        options.setRestorableSessionId(targetTabKey, '');
+        ({ ticketResponse } = await options.requestSignalTicket());
+      }
 
       if (!ticketResponse.ok) {
         state.status.value = options.getCurrentStatusText('createCredentialFailed');
@@ -437,6 +445,7 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
       }
       const ticketPayload = await ticketResponse.json();
       runtime.currentScrcpySessionId = String(ticketPayload.sessionId ?? '');
+      options.setRestorableSessionId(targetTabKey, runtime.currentScrcpySessionId);
       wsUrl = buildSignalWebSocketUrl(wsUrl, ticketPayload.ticket);
 
       runtime.ws = new WebSocket(wsUrl);

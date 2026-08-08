@@ -35,12 +35,14 @@ type managedRuntime struct {
 	deviceID    string
 	signature   string
 	sessionRefs map[string]int
-	runtime     domainscrcpy.Runtime
-	refCount    int
-	starting    bool
-	ready       chan struct{}
-	startErr    error
-	lastUsedAt  time.Time
+	// sessionIDs records which leases own this runtime after active references drop to zero.
+	sessionIDs map[string]struct{}
+	runtime    domainscrcpy.Runtime
+	refCount   int
+	starting   bool
+	ready      chan struct{}
+	startErr   error
+	lastUsedAt time.Time
 }
 
 type SignalErrorPayload struct {
@@ -450,7 +452,7 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() {
-		h.releaseRuntime(ticket.DeviceID, ticket.SessionID)
+		h.releaseRuntime(ticket.DeviceID, ticket.SessionID, runtime)
 		h.cleanupIdleRuntimes()
 	}()
 
@@ -494,6 +496,23 @@ func (h *WebRTCHandler) acquireRuntime(
 				continue
 			}
 
+			if entry.runtime != nil && entry.runtime.GetSourceHealth().RuntimeClosed {
+				delete(h.runtimes, deviceKey)
+				runtime := entry.runtime
+				h.runtimeMu.Unlock()
+				_ = runtime.Close()
+				continue
+			}
+
+			if entry.runtime != nil && sessionID != "" && entry.signature == signature && entry.sessionRefs[sessionID] > 0 {
+				entry.refCount++
+				entry.sessionRefs[sessionID]++
+				entry.sessionIDs[sessionID] = struct{}{}
+				entry.lastUsedAt = time.Now().UTC()
+				h.runtimeMu.Unlock()
+				return entry.runtime, false, nil
+			}
+
 			if shareable && entry.runtime != nil && entry.refCount > 0 && entry.signature == signature {
 				entry.refCount++
 				if sessionID != "" {
@@ -501,18 +520,21 @@ func (h *WebRTCHandler) acquireRuntime(
 						entry.sessionRefs = make(map[string]int)
 					}
 					entry.sessionRefs[sessionID]++
+					entry.sessionIDs[sessionID] = struct{}{}
 				}
 				entry.lastUsedAt = time.Now().UTC()
 				h.runtimeMu.Unlock()
 				return entry.runtime, false, nil
 			}
 
-			if entry.runtime != nil && sessionID != "" && entry.refCount == 0 && h.service.HasSessionLease(deviceKey, sessionID) {
+			_, belongsToCachedRuntime := entry.sessionIDs[sessionID]
+			if entry.runtime != nil && sessionID != "" && entry.refCount == 0 && entry.signature == signature && belongsToCachedRuntime && h.service.HasSessionLease(deviceKey, sessionID) {
 				entry.refCount++
 				if entry.sessionRefs == nil {
 					entry.sessionRefs = make(map[string]int)
 				}
 				entry.sessionRefs[sessionID]++
+				entry.sessionIDs[sessionID] = struct{}{}
 				entry.lastUsedAt = time.Now().UTC()
 				h.runtimeMu.Unlock()
 				return entry.runtime, false, nil
@@ -536,6 +558,7 @@ func (h *WebRTCHandler) acquireRuntime(
 			deviceID:    deviceKey,
 			signature:   signature,
 			sessionRefs: map[string]int{},
+			sessionIDs:  map[string]struct{}{},
 			refCount:    1,
 			starting:    true,
 			ready:       make(chan struct{}),
@@ -543,6 +566,7 @@ func (h *WebRTCHandler) acquireRuntime(
 		}
 		if sessionID != "" {
 			entry.sessionRefs[sessionID] = 1
+			entry.sessionIDs[sessionID] = struct{}{}
 		}
 		h.runtimes[deviceKey] = entry
 		h.runtimeMu.Unlock()
@@ -568,7 +592,7 @@ func (h *WebRTCHandler) acquireRuntime(
 	}
 }
 
-func (h *WebRTCHandler) releaseRuntime(deviceID string, sessionID string) {
+func (h *WebRTCHandler) releaseRuntime(deviceID string, sessionID string, runtime domainscrcpy.Runtime) {
 	if deviceID == "" {
 		return
 	}
@@ -577,7 +601,7 @@ func (h *WebRTCHandler) releaseRuntime(deviceID string, sessionID string) {
 	defer h.runtimeMu.Unlock()
 
 	entry := h.runtimes[deviceID]
-	if entry == nil {
+	if entry == nil || entry.runtime != runtime {
 		return
 	}
 	if sessionID != "" {

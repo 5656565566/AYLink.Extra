@@ -281,10 +281,15 @@ class WebRtcManager(
                     ) = Unit
 
                     override fun onTrack(transceiver: RtpTransceiver) {
+                        val track = transceiver.receiver.track()
                         if (!isCurrentGeneration(generation)) {
+                            // 连接关闭后 onTrack 仍可能迟到；Android WebRTC 会自动播放音轨，必须在忽略前显式静音。
+                            if (track is AudioTrack) {
+                                disableRemoteAudioTrack(track)
+                            }
                             return
                         }
-                        when (val track = transceiver.receiver.track()) {
+                        when (track) {
                             is VideoTrack -> {
                                 remoteVideoTrack?.removeSink(frameSizeSink)
                                 renderer?.let { remoteVideoTrack?.removeSink(it) }

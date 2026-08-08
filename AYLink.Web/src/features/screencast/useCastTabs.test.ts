@@ -86,13 +86,14 @@ describe('useCastTabs', () => {
       appPackageName: 'pkg.demo',
       appDisplayName: 'Demo App',
       deviceName: '设备投屏',
-      newDisplay: true
+      newDisplay: true,
+      sessionId: ''
     });
   });
 
   it('loads persisted tabs and resolves the active tab key', () => {
     window.sessionStorage.setItem('aylink_cast_tabs', JSON.stringify([
-      { key: '1::screen', deviceId: '1', appPackageName: '', appDisplayName: '', deviceName: 'Phone', newDisplay: false }
+      { key: '1::screen', deviceId: '1', appPackageName: '', appDisplayName: '', deviceName: 'Phone', newDisplay: false, sessionId: 'session-1' }
     ]));
     window.sessionStorage.setItem('aylink_cast_active_tab', '1::screen');
 
@@ -104,7 +105,34 @@ describe('useCastTabs', () => {
 
     expect(mounted.result.activeTabKey.value).toBe('1::screen');
     expect(mounted.result.castTabs.value).toHaveLength(1);
+    expect(mounted.result.castTabs.value[0]?.sessionId).toBe('session-1');
     expect(syncRefsFromActiveTab).toHaveBeenCalled();
+  });
+
+  it('keeps the restored session when the same tab is reopened from navigation', () => {
+    const mounted = mountComposable(() => useCastTabs((tab) => tab.deviceName));
+    unmount = mounted.unmount;
+
+    mounted.result.upsertTab({
+      key: '1::new-display::pkg.demo',
+      deviceId: '1',
+      appPackageName: 'pkg.demo',
+      appDisplayName: 'Demo',
+      deviceName: 'Phone',
+      newDisplay: true,
+      sessionId: 'session-1'
+    });
+    mounted.result.upsertTab({
+      key: '1::new-display::pkg.demo',
+      deviceId: '1',
+      appPackageName: 'pkg.demo',
+      appDisplayName: 'Demo',
+      deviceName: 'Phone',
+      newDisplay: true,
+      sessionId: ''
+    });
+
+    expect(mounted.result.castTabs.value[0]?.sessionId).toBe('session-1');
   });
 
   it('consumes workspace open requests into active cast tabs', async () => {

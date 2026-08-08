@@ -838,6 +838,19 @@ export default defineComponent({
       };
     };
 
+    const getRestorableSessionId = (tabKey: string) => {
+      return castTabs.value.find((tab) => tab.key === tabKey)?.sessionId ?? '';
+    };
+
+    const setRestorableSessionId = (tabKey: string, sessionId: string) => {
+      const tab = castTabs.value.find((item) => item.key === tabKey);
+      if (!tab || tab.sessionId === sessionId) {
+        return;
+      }
+      tab.sessionId = sessionId;
+      persistTabs();
+    };
+
     const canUseFlexDisplay = computed(() => isNewDisplayMode.value && isFlexDisplayEnabled.value);
 
     const resolvedNewDisplayDpi = computed(() => {
@@ -2402,6 +2415,8 @@ export default defineComponent({
       },
       hasLiveConnection,
       getSessionReleaseTarget,
+      getRestorableSessionId,
+      setRestorableSessionId,
       postScrcpySessionAction: (action, targetDeviceId, sessionId) => {
         void postScrcpySessionAction(action, targetDeviceId, sessionId);
       },

@@ -5,6 +5,7 @@ export interface CastTab {
   appDisplayName: string;
   deviceName: string;
   newDisplay: boolean;
+  sessionId?: string;
 }
 
 type TrackKind = 'audio' | 'video';

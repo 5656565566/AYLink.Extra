@@ -2,6 +2,7 @@ package com.aylink.mobile.ui.devices
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -459,7 +460,7 @@ class FileManagerViewModel(
 
     private fun currentDownloadDirectoryUri(): Uri? =
         localSettingsStore.settings.value.downloadDirectoryUri
-            ?.let { uriText -> runCatching { Uri.parse(uriText) }.getOrNull() }
+            ?.let { uriText -> runCatching { uriText.toUri() }.getOrNull() }
 
     private fun openFile(path: String) {
         _uiState.update { it.copy(actionLoading = true) }

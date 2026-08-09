@@ -44,14 +44,15 @@ type controlLease struct {
 const controlLeaseTTL = 1500 * time.Millisecond
 
 type CreateTicketInput struct {
-	DeviceID         string `json:"deviceId"`
-	SessionID        string `json:"sessionId"`
-	AppPackage       string `json:"appPackage"`
-	AppName          string `json:"appName"`
-	NewDisplay       bool   `json:"newDisplay"`
-	NewDisplayWidth  *int   `json:"newDisplayWidth"`
-	NewDisplayHeight *int   `json:"newDisplayHeight"`
-	NewDisplayDPI    *int   `json:"newDisplayDpi"`
+	DeviceID          string `json:"deviceId"`
+	SessionID         string `json:"sessionId"`
+	AppPackage        string `json:"appPackage"`
+	AppName           string `json:"appName"`
+	NewDisplay        bool   `json:"newDisplay"`
+	NewPeerConnection bool   `json:"newPeerConnection"`
+	NewDisplayWidth   *int   `json:"newDisplayWidth"`
+	NewDisplayHeight  *int   `json:"newDisplayHeight"`
+	NewDisplayDPI     *int   `json:"newDisplayDpi"`
 }
 
 type CreateTicketResult struct {
@@ -99,16 +100,17 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 	}
 
 	ticket := domainwebrtc.Ticket{
-		Value:            value,
-		SessionID:        sessionID,
-		DeviceID:         input.DeviceID,
-		AppPackage:       input.AppPackage,
-		AppName:          input.AppName,
-		NewDisplay:       input.NewDisplay,
-		NewDisplayWidth:  normalizeNewDisplayDimension(input.NewDisplayWidth),
-		NewDisplayHeight: normalizeNewDisplayDimension(input.NewDisplayHeight),
-		NewDisplayDPI:    normalizeNewDisplayDPI(input.NewDisplayDPI),
-		ExpiresAt:        s.now().Add(s.ticketTTL),
+		Value:             value,
+		SessionID:         sessionID,
+		DeviceID:          input.DeviceID,
+		AppPackage:        input.AppPackage,
+		AppName:           input.AppName,
+		NewDisplay:        input.NewDisplay,
+		NewPeerConnection: input.NewPeerConnection,
+		NewDisplayWidth:   normalizeNewDisplayDimension(input.NewDisplayWidth),
+		NewDisplayHeight:  normalizeNewDisplayDimension(input.NewDisplayHeight),
+		NewDisplayDPI:     normalizeNewDisplayDPI(input.NewDisplayDPI),
+		ExpiresAt:         s.now().Add(s.ticketTTL),
 	}
 	s.tickets[value] = ticket
 
@@ -117,6 +119,20 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 		SessionID:        sessionID,
 		ExpiresInSeconds: int(s.ticketTTL.Seconds()),
 	}, nil
+}
+
+// ReplaceSignalingSession drops the server-side PeerConnection before a browser
+// page creates a fresh offer for an existing scrcpy lease.
+func (s *Service) ReplaceSignalingSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+
+	s.mu.Lock()
+	session := s.signaling[sessionID]
+	delete(s.signaling, sessionID)
+	s.mu.Unlock()
+	closeSignalingSession(session)
 }
 
 func (s *Service) ConsumeTicket(_ context.Context, value string) (domainwebrtc.Ticket, error) {

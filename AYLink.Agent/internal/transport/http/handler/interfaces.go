@@ -146,6 +146,7 @@ type WebRTCService interface {
 	GetVideoStreamHealthSnapshot(sessionID string) (domainwebrtc.VideoStreamHealthSnapshot, error)
 	ConsumeTicket(ctx context.Context, value string) (domainwebrtc.Ticket, error)
 	MarkSessionStarted(deviceID string, sessionID string)
+	ReplaceSignalingSession(sessionID string)
 	HandleSignalWebSocket(ctx context.Context, deviceID string, sessionID string, conn *websocket.Conn, settings webrtcservice.SettingsProvider, runtime domainscrcpy.Runtime) error
 }
 

@@ -429,6 +429,9 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	h.service.MarkSessionStarted(ticket.DeviceID, ticket.SessionID)
+	if ticket.NewPeerConnection {
+		h.service.ReplaceSignalingSession(ticket.SessionID)
+	}
 	deviceID, err := strconv.Atoi(ticket.DeviceID)
 	if err != nil {
 		writeSignalError(conn, "INVALID_DEVICE_ID", "WebRTC.InvalidDeviceId", "设备 ID 无效", err, false)

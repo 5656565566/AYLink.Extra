@@ -8,7 +8,9 @@ declare global {
 }
 
 export function useCastSessionPersistence() {
-  let scrcpySessionHeartbeatTimer: number | null = null;
+  const scrcpySessionHeartbeatTimers = new Map<string, number>();
+
+  const heartbeatKey = (targetDeviceId: string, sessionId: string) => `${targetDeviceId}::${sessionId}`;
 
   const postScrcpySessionAction = async (action: 'heartbeat' | 'release', targetDeviceId: string, sessionId: string) => {
     if (!targetDeviceId || !sessionId) {
@@ -27,25 +29,37 @@ export function useCastSessionPersistence() {
     }
   };
 
-  const stopScrcpySessionHeartbeat = () => {
-    if (scrcpySessionHeartbeatTimer !== null) {
-      window.clearInterval(scrcpySessionHeartbeatTimer);
-      scrcpySessionHeartbeatTimer = null;
+  const stopScrcpySessionHeartbeat = (targetDeviceId?: string, sessionId?: string) => {
+    if (targetDeviceId && sessionId) {
+      const key = heartbeatKey(targetDeviceId, sessionId);
+      const timer = scrcpySessionHeartbeatTimers.get(key);
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        scrcpySessionHeartbeatTimers.delete(key);
+      }
+      return;
     }
+
+    for (const timer of scrcpySessionHeartbeatTimers.values()) {
+      window.clearInterval(timer);
+    }
+    scrcpySessionHeartbeatTimers.clear();
   };
 
   const startScrcpySessionHeartbeat = (targetDeviceId: string, sessionId: string) => {
-    stopScrcpySessionHeartbeat();
     if (!targetDeviceId || !sessionId) {
       return;
     }
+
+    stopScrcpySessionHeartbeat(targetDeviceId, sessionId);
+    const key = heartbeatKey(targetDeviceId, sessionId);
 
     const tick = () => {
       void postScrcpySessionAction('heartbeat', targetDeviceId, sessionId);
     };
 
     tick();
-    scrcpySessionHeartbeatTimer = window.setInterval(tick, 15000);
+    scrcpySessionHeartbeatTimers.set(key, window.setInterval(tick, 15000));
   };
 
   const clearPersistedConnection = (tabKey: string) => {

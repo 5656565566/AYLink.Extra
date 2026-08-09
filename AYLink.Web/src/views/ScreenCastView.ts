@@ -323,6 +323,11 @@ export default defineComponent({
     const syncScreencastStageRefs = (refs: ScreencastStageRefs) => {
       videoContainer.value = refs.stageElement;
       videoElement.value = refs.videoElement;
+      // A muted video element is allowed to autoplay; audio remains controlled
+      // by the separate audio elements and browser user-gesture policy.
+      if (videoElement.value) {
+        videoElement.value.muted = true;
+      }
       audioElement.value = refs.audioElement;
       lastFrameOverlayElement.value = refs.lastFrameOverlayElement;
     };
@@ -768,6 +773,7 @@ export default defineComponent({
     let isIceRestartInFlight = false;
 
     let currentScrcpySessionId = '';
+    let isPageUnloading = false;
 
     const getTabTitle = (tab: CastTab) => {
       const baseTitle = tab.deviceName || t('Screencast.DefaultTabTitle', '设备投屏');
@@ -1168,7 +1174,7 @@ export default defineComponent({
       });
     };
 
-    const requestSignalTicket = async (existingSessionId = '') => {
+    const requestSignalTicket = async (existingSessionId = '', requestOptions: { newPeerConnection?: boolean } = {}) => {
       const initialNewDisplaySize = isNewDisplayMode.value ? buildAdaptiveDisplaySize() : null;
       const normalizedDeviceId = normalizeDeviceId(deviceId.value);
       const normalizedAppPackage = normalizePackageName(appPackageName.value);
@@ -1182,6 +1188,7 @@ export default defineComponent({
         body: JSON.stringify(buildSignalTicketRequestBody({
           deviceId: normalizedDeviceId,
           sessionId: existingSessionId,
+          newPeerConnection: requestOptions.newPeerConnection,
           appPackage: normalizedAppPackage,
           appName: appDisplayName.value,
           newDisplay: isNewDisplayMode.value,
@@ -2087,26 +2094,39 @@ export default defineComponent({
       );
       if (playTargets.length === 0) return;
 
-      try {
-        syncBackgroundMuteState();
+      syncBackgroundMuteState();
+      let audioPlaybackBlocked = false;
 
-        for (const element of playTargets) {
-          if (!element.srcObject || !element.paused) {
+      for (const element of playTargets) {
+        if (!element.srcObject || !element.paused) {
+          continue;
+        }
+
+        if (element === videoElement.value) {
+          element.muted = true;
+        }
+
+        try {
+          await element.play();
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            console.log('Play request aborted due to new load, ignoring.');
             continue;
           }
 
-          await element.play();
-        }
+          if (error instanceof DOMException && error.name === 'NotAllowedError' && element !== videoElement.value) {
+            audioPlaybackBlocked = true;
+            console.warn('Audio autoplay blocked until the next user interaction.');
+            continue;
+          }
 
-        status.value = t('Screencast.StatusConnected', '已连接')
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          console.log('Play request aborted due to new load, ignoring.');
-        } else {
           console.warn('Media play failed:', error);
-          status.value = t('Screencast.StatusConnectedResumeAudio', '已连接，点击播放按钮恢复音频');
         }
       }
+
+      status.value = audioPlaybackBlocked
+        ? t('Screencast.StatusConnectedResumeAudio', '已连接，点击播放按钮恢复音频')
+        : t('Screencast.StatusConnected', '已连接');
     };
 
     const scheduleResumeMediaPlayback = (delayMs = 40) => {
@@ -3687,10 +3707,12 @@ export default defineComponent({
     };
 
     const handlePageHide = () => {
+      isPageUnloading = true;
       syncBackgroundMuteState();
     };
 
     const handlePageShow = () => {
+      isPageUnloading = false;
       syncBackgroundMuteState();
     };
 
@@ -3848,6 +3870,11 @@ export default defineComponent({
       scheduleDisplayResize();
     };
 
+    const handleWindowPointerDown = () => {
+      // A user gesture is required by browser autoplay policy to resume audio.
+      void resumeMediaPlayback();
+    };
+
     const initializeFloatingMenuPlacement = () => {
       loadPersistedMenuPlacement();
       initializeMenuPosition();
@@ -3879,6 +3906,7 @@ export default defineComponent({
       }
 
       window.addEventListener('pointermove', handleWindowPointerMove);
+      window.addEventListener('pointerdown', handleWindowPointerDown);
       window.addEventListener('pointerup', handleWindowPointerUp);
       window.addEventListener('pointercancel', handleWindowPointerCancel);
       window.addEventListener('mousemove', handleWindowMouseMove);
@@ -3906,6 +3934,7 @@ export default defineComponent({
       }
 
       window.removeEventListener('pointermove', handleWindowPointerMove);
+      window.removeEventListener('pointerdown', handleWindowPointerDown);
       window.removeEventListener('pointerup', handleWindowPointerUp);
       window.removeEventListener('pointercancel', handleWindowPointerCancel);
       window.removeEventListener('mousemove', handleWindowMouseMove);
@@ -4013,6 +4042,7 @@ export default defineComponent({
     });
 
     const cleanupCastViewResources = (preserveForBackground: boolean) => {
+      const preserveBackendSession = preserveForBackground || isPageUnloading;
       rtcConfigRequest.dispose();
       remoteClipboard.dispose();
       cancelDeviceContextRequests();
@@ -4029,15 +4059,15 @@ export default defineComponent({
       releaseInputMapping('disconnect');
       releaseAllPointers('cancel');
 
-      if (!preserveForBackground) {
+      if (!preserveBackendSession) {
         const releaseTarget = getSessionReleaseTarget();
-        stopScrcpySessionHeartbeat();
+        stopScrcpySessionHeartbeat(releaseTarget.deviceId, releaseTarget.sessionId);
         void postScrcpySessionAction('release', releaseTarget.deviceId, releaseTarget.sessionId);
         disposeAllPersistedConnections();
       }
 
-      screencastSession.lifecycle.stop(preserveForBackground);
-      if (preserveForBackground) {
+      screencastSession.lifecycle.stop(preserveBackendSession);
+      if (preserveBackendSession) {
         showLastFrameOverlayForTab();
       }
     };
@@ -4089,7 +4119,6 @@ export default defineComponent({
       syncBackgroundMuteState();
       await loadActiveInputMappingProfile();
       initializeFloatingMenuPlacement();
-      stopScrcpySessionHeartbeat();
       setupVideoContainerResizeObserver();
 
       const consumed = await consumeIncomingTab(selectedDeviceName.value, t('Screencast.DefaultTabTitle', '设备投屏'), syncRefsFromActiveTab, handleTabOpened);

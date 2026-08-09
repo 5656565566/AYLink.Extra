@@ -214,15 +214,19 @@ describe('useScreencastSession', () => {
       ticketResponse: createResponse({ sessionId: 'restored-session', ticket: 'ticket 1' })
     }));
     const setRestorableSessionId = vi.fn();
+    const postScrcpySessionAction = vi.fn();
     const harness = createHarness({
       getRestorableSessionId: () => 'restored-session',
+      getSessionReleaseTarget: () => ({ deviceId: 'device-1', sessionId: 'restored-session' }),
       setRestorableSessionId,
+      postScrcpySessionAction,
       requestSignalTicket
     });
 
     await harness.session.lifecycle.start();
 
-    expect(requestSignalTicket).toHaveBeenCalledWith('restored-session');
+    expect(requestSignalTicket).toHaveBeenCalledWith('restored-session', { newPeerConnection: true });
+    expect(postScrcpySessionAction).not.toHaveBeenCalledWith('release', 'device-1', 'restored-session');
     expect(setRestorableSessionId).toHaveBeenCalledWith('tab-1', 'restored-session');
     harness.restoreWebSocket();
   });
@@ -240,8 +244,8 @@ describe('useScreencastSession', () => {
 
     await harness.session.lifecycle.start();
 
-    expect(requestSignalTicket).toHaveBeenNthCalledWith(1, 'expired-session');
-    expect(requestSignalTicket).toHaveBeenNthCalledWith(2);
+    expect(requestSignalTicket).toHaveBeenNthCalledWith(1, 'expired-session', { newPeerConnection: true });
+    expect(requestSignalTicket).toHaveBeenNthCalledWith(2, '', { newPeerConnection: true });
     expect(setRestorableSessionId).toHaveBeenNthCalledWith(1, 'tab-1', '');
     expect(setRestorableSessionId).toHaveBeenNthCalledWith(2, 'tab-1', 'fresh-session');
     harness.restoreWebSocket();

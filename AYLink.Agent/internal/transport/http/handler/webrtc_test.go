@@ -61,6 +61,8 @@ func (f *fakeWebRTCService) ConsumeTicket(context.Context, string) (domainwebrtc
 
 func (f *fakeWebRTCService) MarkSessionStarted(string, string) {}
 
+func (f *fakeWebRTCService) ReplaceSignalingSession(string) {}
+
 func (f *fakeWebRTCService) HandleSignalWebSocket(context.Context, string, string, *websocket.Conn, webrtcservice.SettingsProvider, domainscrcpy.Runtime) error {
 	panic("unexpected call")
 }
@@ -178,7 +180,7 @@ func TestWebRTCHandlerCreateTicketTrimsPayloadAndReturnsResult(t *testing.T) {
 	}
 	handler := NewWebRTCHandler(service, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":" 123 ","appPackage":" com.demo.app ","appName":" Demo "}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":" 123 ","appPackage":" com.demo.app ","appName":" Demo ","newPeerConnection":true}`))
 	recorder := httptest.NewRecorder()
 
 	handler.CreateTicket(recorder, req)
@@ -188,6 +190,9 @@ func TestWebRTCHandlerCreateTicketTrimsPayloadAndReturnsResult(t *testing.T) {
 	}
 	if service.createTicketInput.DeviceID != "123" || service.createTicketInput.AppPackage != "com.demo.app" || service.createTicketInput.AppName != "Demo" {
 		t.Fatalf("expected trimmed payload, got %+v", service.createTicketInput)
+	}
+	if !service.createTicketInput.NewPeerConnection {
+		t.Fatal("newPeerConnection = false, want true")
 	}
 }
 

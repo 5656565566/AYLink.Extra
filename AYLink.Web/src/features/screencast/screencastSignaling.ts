@@ -1,6 +1,7 @@
 export interface SignalTicketRequestInput {
   deviceId: string;
   sessionId?: string;
+  newPeerConnection?: boolean;
   appPackage?: string;
   appName?: string;
   newDisplay: boolean;
@@ -32,6 +33,7 @@ export function buildSignalTicketRequestBody(input: SignalTicketRequestInput): R
   return {
     deviceId: input.deviceId,
     sessionId: input.sessionId || undefined,
+    newPeerConnection: input.newPeerConnection || undefined,
     appPackage: input.appPackage || undefined,
     appName: input.appName || undefined,
     newDisplay: input.newDisplay,

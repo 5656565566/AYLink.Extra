@@ -127,6 +127,22 @@ describe('useCastSessionPersistence', () => {
     expect(apiFetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps heartbeats for multiple virtual tabs independent', async () => {
+    vi.useFakeTimers();
+    apiFetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    const service = useCastSessionPersistence();
+    service.startScrcpySessionHeartbeat('device-1', 'session-1');
+    service.startScrcpySessionHeartbeat('device-1', 'session-2');
+
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(apiFetchMock).toHaveBeenCalledTimes(4);
+
+    service.stopScrcpySessionHeartbeat('device-1', 'session-1');
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(apiFetchMock).toHaveBeenCalledTimes(5);
+  });
+
   it('disposes all persisted connections', () => {
     const service = useCastSessionPersistence();
     const first = createPersistedConnection({ tabKey: 'tab-1' });

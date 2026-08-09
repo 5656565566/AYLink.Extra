@@ -98,7 +98,7 @@ export interface UseScreencastSessionOptions {
   getRestorableSessionId: (tabKey: string) => string;
   setRestorableSessionId: (tabKey: string, sessionId: string) => void;
   postScrcpySessionAction: (action: 'heartbeat' | 'release', deviceId: string, sessionId: string) => void;
-  stopScrcpySessionHeartbeat: () => void;
+  stopScrcpySessionHeartbeat: (deviceId?: string, sessionId?: string) => void;
   startScrcpySessionHeartbeat: (deviceId: string, sessionId: string) => void;
   disposeAllPersistedConnections: () => void;
   getPersistedConnection: (tabKey: string) => PersistedCastConnection | null;
@@ -108,7 +108,7 @@ export interface UseScreencastSessionOptions {
   wireBackgroundPersistedConnectionHandlers: (snapshot: PersistedCastConnection) => void;
   staleDisconnectedGraceMs: number;
   buildSignalWebSocketBaseUrl: () => string;
-  requestSignalTicket: (existingSessionId?: string) => Promise<ScreencastSessionStartTicketResponse>;
+  requestSignalTicket: (existingSessionId?: string, options?: { newPeerConnection?: boolean }) => Promise<ScreencastSessionStartTicketResponse>;
   loadRtcConfiguration: () => Promise<RTCConfiguration>;
   createPeerOfferSession: (configuration: RTCConfiguration, options?: CreateScreencastPeerOfferOptions) => Promise<ScreencastSessionOfferSession>;
   wirePeerConnectionEventHandlers: (connectionId: number, peerConnection: RTCPeerConnection) => void;
@@ -321,7 +321,8 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
   ) => {
     const shouldPreserveLiveConnection = preserveForBackground && options.hasLiveConnection();
     if (!shouldPreserveLiveConnection) {
-      options.stopScrcpySessionHeartbeat();
+      const sessionTarget = options.getSessionReleaseTarget(preserveTabKey);
+      options.stopScrcpySessionHeartbeat(sessionTarget.deviceId, sessionTarget.sessionId);
     }
     options.stopFlexDisplayHeartbeat();
     options.stopVideoStreamWatchdog();
@@ -409,9 +410,10 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
       return;
     }
 
+    const restorableSessionId = options.getRestorableSessionId(targetTabKey);
     const previousSession = options.getSessionReleaseTarget(targetTabKey);
-    options.stopScrcpySessionHeartbeat();
-    if (previousSession.sessionId) {
+    options.stopScrcpySessionHeartbeat(previousSession.deviceId, previousSession.sessionId);
+    if (previousSession.sessionId && previousSession.sessionId !== restorableSessionId) {
       options.postScrcpySessionAction('release', previousSession.deviceId, previousSession.sessionId);
     }
     options.disposeAllPersistedConnections();
@@ -428,12 +430,11 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
 
     try {
       let wsUrl = options.buildSignalWebSocketBaseUrl();
-      const restorableSessionId = options.getRestorableSessionId(targetTabKey);
-      let { ticketResponse } = await options.requestSignalTicket(restorableSessionId);
+      let { ticketResponse } = await options.requestSignalTicket(restorableSessionId, { newPeerConnection: true });
 
       if (!ticketResponse.ok && ticketResponse.status === 400 && restorableSessionId) {
         options.setRestorableSessionId(targetTabKey, '');
-        ({ ticketResponse } = await options.requestSignalTicket());
+        ({ ticketResponse } = await options.requestSignalTicket('', { newPeerConnection: true }));
       }
 
       if (!ticketResponse.ok) {

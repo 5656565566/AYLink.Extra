@@ -54,6 +54,56 @@ describe('useFloatingMenu', () => {
     expect(menu.dockedEdge.value).toBe('right');
   });
 
+  it('keeps the stable docked placement persisted while a drag is in progress', () => {
+    const menu = createMenu();
+    menu.initializeMenuPosition();
+    const persistedBeforeDrag = localStorage.getItem('aylink.test.floating-menu');
+
+    menu.startMenuDrag(createPointerEvent(950, 40));
+    menu.handleWindowPointerMove(createPointerEvent(700, 160));
+
+    expect(menu.isDocked.value).toBe(false);
+    expect(localStorage.getItem('aylink.test.floating-menu')).toBe(persistedBeforeDrag);
+
+    const restored = createMenu();
+    restored.loadPersistedMenuPlacement();
+    restored.initializeMenuPosition();
+    expect(restored.isDocked.value).toBe(true);
+    expect(restored.dockedEdge.value).toBe('right');
+  });
+
+  it('persists the resolved placement after a real drag finishes', () => {
+    const menu = createMenu();
+    menu.initializeMenuPosition();
+
+    menu.startMenuDrag(createPointerEvent(950, 40));
+    menu.handleWindowPointerMove(createPointerEvent(500, 160));
+    menu.finishMenuDrag();
+
+    const restored = createMenu();
+    restored.loadPersistedMenuPlacement();
+    restored.initializeMenuPosition();
+    expect(restored.isDocked.value).toBe(false);
+    expect(restored.menuX.value).toBe(482);
+    expect(restored.menuY.value).toBe(140);
+  });
+
+  it('rolls back an interrupted drag without changing persisted placement', () => {
+    const menu = createMenu();
+    menu.initializeMenuPosition();
+    const persistedBeforeDrag = localStorage.getItem('aylink.test.floating-menu');
+
+    menu.startMenuDrag(createPointerEvent(950, 40));
+    menu.handleWindowPointerMove(createPointerEvent(500, 160));
+    menu.cancelMenuDrag();
+
+    expect(menu.isDocked.value).toBe(true);
+    expect(menu.isMenuExpanded.value).toBe(true);
+    expect(menu.menuX.value).toBe(932);
+    expect(menu.menuY.value).toBe(20);
+    expect(localStorage.getItem('aylink.test.floating-menu')).toBe(persistedBeforeDrag);
+  });
+
   it('lets a click toggle the menu after a pointer down/up without drag', () => {
     const menu = createMenu();
     menu.initializeMenuPosition();

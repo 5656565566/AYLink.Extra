@@ -459,21 +459,15 @@ export default defineComponent({
       dockedEdge,
       menuX,
       menuY,
-      menuRelativeX,
-      menuRelativeY,
       isHorizontalLayout,
       menuStyle,
-      clampCollapsedMenuPosition,
-      updateMenuRelativePosition,
-      setMenuPosition,
-      restoreMenuPositionFromRelative,
       loadPersistedMenuPlacement,
       initializeMenuPosition,
       ensureMenuInsideStage,
       handleMenuPointerEnter,
       handleMenuPointerLeave,
-      syncDockedMenuPosition,
       finishMenuDrag,
+      cancelMenuDrag,
       startMenuDrag,
       handleWindowPointerMove: handleMenuWindowPointerMove,
       toggleMenu
@@ -1220,6 +1214,7 @@ export default defineComponent({
       const shellRect = shellElement.value?.getBoundingClientRect();
       const videoRect = videoElement.value?.getBoundingClientRect();
       const hasUsableVideoRect = !!videoRect && videoRect.width > 0 && videoRect.height > 0 && (videoElement.value?.videoWidth ?? 0) > 0;
+      const hasUsableContainerRect = !!rect && rect.width > 0 && rect.height > 0;
 
       if (hasUsableVideoRect) {
         return {
@@ -1231,10 +1226,10 @@ export default defineComponent({
       }
 
       return {
-        width: rect?.width ?? window.innerWidth,
-        height: rect?.height ?? (window.innerHeight - 46),
-        offsetLeft: (rect?.left ?? 0) - (shellRect?.left ?? 0),
-        offsetTop: (rect?.top ?? 46) - (shellRect?.top ?? 0)
+        width: hasUsableContainerRect ? rect.width : window.innerWidth,
+        height: hasUsableContainerRect ? rect.height : Math.max(0, window.innerHeight - 46),
+        offsetLeft: (hasUsableContainerRect ? rect.left : 0) - (shellRect?.left ?? 0),
+        offsetTop: (hasUsableContainerRect ? rect.top : 46) - (shellRect?.top ?? 0)
       };
     };
 
@@ -3557,7 +3552,7 @@ export default defineComponent({
       cancelClipboardDrag();
 
       if (floatingMenu.getIsDraggingMenu()) {
-        finishMenuDrag();
+        cancelMenuDrag();
       }
 
       releasePointer(event.pointerId, 'cancel', event);
@@ -3690,7 +3685,7 @@ export default defineComponent({
 
     const handleWindowBlur = () => {
       cancelClipboardDrag();
-      finishMenuDrag();
+      cancelMenuDrag();
       releaseInputMapping('blur');
       releaseAllPointers('cancel');
       resetHidInputs();
@@ -4058,6 +4053,7 @@ export default defineComponent({
       void releaseMouseLock();
       releaseInputMapping('disconnect');
       releaseAllPointers('cancel');
+      cancelMenuDrag();
 
       if (!preserveBackendSession) {
         const releaseTarget = getSessionReleaseTarget();
@@ -4272,8 +4268,6 @@ export default defineComponent({
       dockedEdge,
       menuX,
       menuY,
-      menuRelativeX,
-      menuRelativeY,
       remoteVideoStream,
       remoteAudioStream,
       remoteTracks,
@@ -4376,11 +4370,6 @@ export default defineComponent({
       restorePersistedConnection,
       getStageBounds,
       isHorizontalLayout,
-      clampCollapsedMenuPosition,
-      updateMenuRelativePosition,
-      setMenuPosition,
-      restoreMenuPositionFromRelative,
-      initializeMenuPosition,
       buildTabKey,
       getTabTitle,
       persistTabs,
@@ -4564,8 +4553,6 @@ export default defineComponent({
       teardownVideoContainerResizeObserver,
       handleMenuPointerEnter,
       handleMenuPointerLeave,
-      syncDockedMenuPosition,
-      finishMenuDrag,
       startMenuDrag,
       toggleMenu
     };

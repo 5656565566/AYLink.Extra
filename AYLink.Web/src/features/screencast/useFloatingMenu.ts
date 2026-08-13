@@ -30,11 +30,18 @@ interface FloatingMenuOptions {
 
 interface MenuDragStartState {
   isDocked: boolean;
+  isExpanded: boolean;
   dockedEdge: DockedEdge;
   x: number;
   y: number;
   relativeX: number;
   relativeY: number;
+}
+
+interface SetMenuPositionOptions {
+  syncRelative?: boolean;
+  persist?: boolean;
+  collapseOverflow?: boolean;
 }
 
 export function useFloatingMenu(options: FloatingMenuOptions) {
@@ -98,7 +105,12 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     dockedEdge.value = direction === 'left' ? 'right' : 'left';
   };
 
-  const setMenuPosition = (x: number, y: number, syncRelative = true) => {
+  const setMenuPosition = (x: number, y: number, positionOptions: SetMenuPositionOptions = {}) => {
+    const {
+      syncRelative = true,
+      persist = true,
+      collapseOverflow = true
+    } = positionOptions;
     const clamped = clampCollapsedPosition(x, y);
     menuX.value = clamped.x;
     menuY.value = clamped.y;
@@ -108,17 +120,21 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     if (syncRelative) {
       updateMenuRelativePosition();
     }
-    persistMenuPlacement();
-    collapseMenuIfExpandedFrameOverflows();
+    if (collapseOverflow) {
+      collapseMenuIfExpandedFrameOverflows();
+    }
+    if (persist) {
+      persistMenuPlacement();
+    }
   };
 
-  const restoreMenuPositionFromRelative = () => {
+  const restoreMenuPositionFromRelative = (persist = true) => {
     const range = getCollapsedMenuRange();
 
     setMenuPosition(
       range.maxX - (range.maxX - range.minX) * menuRelativeX.value,
       range.minY + (range.maxY - range.minY) * menuRelativeY.value,
-      false
+      { syncRelative: false, persist }
     );
   };
 
@@ -167,7 +183,6 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     const frame = getMenuFrame(menuX.value, menuY.value, true, bounds, options.layout);
     if (!isMenuFrameInsideStage(frame, bounds, options.layout)) {
       isMenuExpanded.value = false;
-      persistMenuPlacement();
     }
   };
 
@@ -244,20 +259,20 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
   const getDockedPosition = (edge: DockedEdge) =>
     getDockedMenuPosition(edge, menuY.value, options.getStageBounds(), options.layout);
 
-  const applyDockPosition = (edge: DockedEdge, collapseExpanded = false) => {
+  const applyDockPosition = (edge: DockedEdge, collapseExpanded = false, persist = true) => {
     setDockedMenuState(edge);
     if (collapseExpanded) {
       isMenuExpanded.value = false;
     }
     const position = getDockedPosition(edge);
-    setMenuPosition(position.x, position.y);
+    setMenuPosition(position.x, position.y, { persist });
   };
 
   const initializeMenuPosition = () => {
     if (isDocked.value) {
-      applyDockPosition(dockedEdge.value);
+      applyDockPosition(dockedEdge.value, false, false);
     } else {
-      restoreMenuPositionFromRelative();
+      restoreMenuPositionFromRelative(false);
     }
     ensureMenuInsideStage();
   };
@@ -271,34 +286,39 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
 
     const nearest = distances[0];
     if (nearest.value <= options.dockSnapDistancePx) {
-      applyDockPosition(nearest.edge, true);
+      applyDockPosition(nearest.edge, true, false);
     } else {
       setFloatingMenuState();
       syncFloatingMenuSideFromAnchor();
-      setMenuPosition(menuX.value, menuY.value);
+      setMenuPosition(menuX.value, menuY.value, { persist: false });
     }
     persistMenuPlacement();
   };
 
   const handleMenuPointerEnter = () => {
     if (isDocked.value && !isMenuExpanded.value) {
-      applyDockPosition(dockedEdge.value);
+      applyDockPosition(dockedEdge.value, false, false);
     }
   };
 
   const handleMenuPointerLeave = () => {
     if (!isDraggingMenu && isDocked.value && !isMenuExpanded.value) {
-      applyDockPosition(dockedEdge.value);
+      applyDockPosition(dockedEdge.value, false, false);
     }
   };
 
-  const syncDockedMenuPosition = async () => {
-    await nextTick();
-    if (!isDocked.value || (menuX.value === 0 && menuY.value === 0)) {
+  const restoreMenuDragStartState = () => {
+    if (!menuDragStartState) {
       return;
     }
 
-    applyDockPosition(dockedEdge.value);
+    isDocked.value = menuDragStartState.isDocked;
+    isMenuExpanded.value = menuDragStartState.isExpanded;
+    dockedEdge.value = menuDragStartState.dockedEdge;
+    menuX.value = menuDragStartState.x;
+    menuY.value = menuDragStartState.y;
+    menuRelativeX.value = menuDragStartState.relativeX;
+    menuRelativeY.value = menuDragStartState.relativeY;
   };
 
   const finishMenuDrag = () => {
@@ -306,19 +326,24 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     isDraggingMenu = false;
     isMenuDragActive.value = false;
     if (!didDragMenu && menuDragStartState) {
-      isDocked.value = menuDragStartState.isDocked;
-      dockedEdge.value = menuDragStartState.dockedEdge;
-      menuX.value = menuDragStartState.x;
-      menuY.value = menuDragStartState.y;
-      menuRelativeX.value = menuDragStartState.relativeX;
-      menuRelativeY.value = menuDragStartState.relativeY;
+      restoreMenuDragStartState();
       menuDragStartState = null;
-      persistMenuPlacement();
       return;
     }
     menuDragStartState = null;
-    setMenuPosition(menuX.value, menuY.value);
     resolveDockEdge();
+  };
+
+  const cancelMenuDrag = () => {
+    if (!isDraggingMenu) {
+      return;
+    }
+
+    restoreMenuDragStartState();
+    isDraggingMenu = false;
+    isMenuDragActive.value = false;
+    didDragMenu = false;
+    menuDragStartState = null;
   };
 
   const startMenuDrag = (event: PointerEvent) => {
@@ -330,6 +355,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     didDragMenu = false;
     menuDragStartState = {
       isDocked: isDocked.value,
+      isExpanded: isMenuExpanded.value,
       dockedEdge: dockedEdge.value,
       x: menuX.value,
       y: menuY.value,
@@ -343,8 +369,10 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
       menuY.value = position.y;
     }
 
+    // Pointer down only starts a tentative drag. Persist after pointer up so an
+    // interrupted gesture cannot replace a stable docked placement.
     setFloatingMenuState();
-    setMenuPosition(menuX.value, menuY.value);
+    setMenuPosition(menuX.value, menuY.value, { persist: false });
 
     dragStartOffset = {
       x: event.clientX - menuX.value,
@@ -368,7 +396,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
         isMenuExpanded.value = false;
       }
     }
-    setMenuPosition(position.x, position.y);
+    setMenuPosition(position.x, position.y, { persist: false });
 
     const distanceX = Math.abs(event.clientX - dragStartPoint.x);
     const distanceY = Math.abs(event.clientY - dragStartPoint.y);
@@ -390,7 +418,6 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
       syncFloatingMenuSideFromAnchor();
     }
     setMenuPosition(menuX.value, menuY.value);
-    void syncDockedMenuPosition();
     void nextTick(() => ensureMenuInsideStage());
   };
 
@@ -405,30 +432,18 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
     menuRelativeY,
     isHorizontalLayout,
     menuStyle,
-    getCollapsedMenuPositionRange: getCollapsedMenuRange,
-    clampCollapsedMenuPosition: clampCollapsedPosition,
-    updateMenuRelativePosition,
-    persistMenuPlacement,
     setMenuPosition,
-    restoreMenuPositionFromRelative,
     loadPersistedMenuPlacement,
     setFloatingMenuState,
-    setDockedMenuState,
-    getDockedMenuPosition: getDockedPosition,
-    applyDockPosition,
     initializeMenuPosition,
     ensureMenuInsideStage,
-    resolveDockEdge,
     handleMenuPointerEnter,
     handleMenuPointerLeave,
-    syncDockedMenuPosition,
     finishMenuDrag,
+    cancelMenuDrag,
     startMenuDrag,
     handleWindowPointerMove,
     toggleMenu,
-    getIsDraggingMenu: () => isDraggingMenu,
-    getDidDragMenu: () => didDragMenu,
-    getDragStartOffset: () => dragStartOffset,
-    getDragStartPoint: () => dragStartPoint
+    getIsDraggingMenu: () => isDraggingMenu
   };
 }

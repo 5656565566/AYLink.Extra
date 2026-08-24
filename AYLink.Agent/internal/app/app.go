@@ -20,9 +20,14 @@ type App struct {
 	config           config.Config
 	logger           logging.Logger
 	httpServer       *http.Server
+	adb              adbServerStarter
 	auth             *authservice.Service
 	tokenMaintenance *authservice.TokenMaintenance
 	devices          *deviceservice.Service
+}
+
+type adbServerStarter interface {
+	StartServer(ctx context.Context) error
 }
 
 func New() (*App, error) {
@@ -69,6 +74,7 @@ func New() (*App, error) {
 		config:           cfg,
 		logger:           logger,
 		httpServer:       server,
+		adb:              adbManager,
 		auth:             authSvc,
 		tokenMaintenance: authservice.NewTokenMaintenance(authRepo, logger, 30*time.Minute),
 		devices:          deviceSvc,
@@ -76,6 +82,8 @@ func New() (*App, error) {
 }
 
 func (a *App) Run(ctx context.Context) error {
+	a.startADBServer(ctx)
+
 	// 在提供 web 页面服务前 确保具有系统管理员角色
 	if err := a.auth.EnsureBootstrapAdmin(ctx); err != nil {
 		a.logger.Warn("Failed to ensure bootstrap admin", "err", err)
@@ -112,6 +120,20 @@ func (a *App) Run(ctx context.Context) error {
 	}
 }
 
+func (a *App) startADBServer(ctx context.Context) {
+	if a.adb == nil {
+		return
+	}
+
+	startCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := a.adb.StartServer(startCtx); err != nil {
+		a.logger.Warn("adb server failed to start", "err", err)
+		return
+	}
+	a.logger.Info("adb server started")
+}
+
 func (a *App) runTokenMaintenance(ctx context.Context) {
 	if a.tokenMaintenance == nil {
 		return
@@ -129,13 +151,14 @@ func (a *App) runDeviceReconnectLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
+		if _, err := a.devices.List(ctx); err != nil {
+			a.logger.Warn("background device reconnect pass failed", "err", err)
+		}
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := a.devices.List(ctx); err != nil {
-				a.logger.Warn("background device reconnect pass failed", "err", err)
-			}
 		}
 	}
 }

@@ -25,6 +25,7 @@ export const storageKeys = {
     accentColor: 'aylink.theme.accentColor',
   },
   webrtc: {
+    fileTransferPreferred: 'aylink.webrtc.fileTransfer.preferred',
     overrideEnabled: 'aylink.webrtc.override.enabled',
     overrideConfig: 'aylink.webrtc.override.config',
   },

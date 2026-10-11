@@ -103,7 +103,7 @@ func classifyADBTransport(device adbkit.DeviceWithPath) string {
 		return "wifi"
 	}
 	if serial != "" {
-		// Physical USB devices use a hardware serial when ADB omits the usb field.
+		// ADB 未返回 usb 字段时 也通过硬件序列号识别 USB 实体设备
 		return "usb"
 	}
 	return "unknown"

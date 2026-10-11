@@ -70,6 +70,11 @@ vi.mock('../utils/api', () => ({
   readApiErrorMessage,
 }));
 
+vi.mock('../features/deviceTransport/requests', () => ({
+  requestDevice: apiFetch,
+  uploadDeviceFile: vi.fn(),
+}));
+
 vi.mock('../features/apps/useAppManagerTabs', () => ({
   useAppManagerTabs: () => ({
     route: ref({ name: 'apps', query: {} }),

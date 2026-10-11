@@ -1,4 +1,5 @@
 import { sendApiRequestWithTransport } from '../../core/http/client';
+import type { FileDownloadTarget } from '../browser/operations';
 
 export interface TransferProgress {
   loaded: number;
@@ -53,7 +54,7 @@ function parseResponseHeaders(rawHeaders: string) {
   return headers;
 }
 
-function uploadWithProgressTransport(onProgress?: (progress: TransferProgress) => void) {
+export function uploadWithProgressTransport(onProgress?: (progress: TransferProgress) => void) {
   return (url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const cleanupCallbacks: Array<() => void> = [];
@@ -107,9 +108,8 @@ function uploadWithProgressTransport(onProgress?: (progress: TransferProgress) =
   });
 }
 
-export async function readResponseBlobWithProgress(response: Response, options: DownloadBlobOptions = {}) {
+async function consumeResponseChunks(response: Response, options: DownloadBlobOptions, consume: (chunk: Uint8Array) => void | Promise<void>) {
   const total = parseContentLength(response);
-  const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
   if (options.signal?.aborted) {
     throw createAbortError();
   }
@@ -119,16 +119,16 @@ export async function readResponseBlobWithProgress(response: Response, options: 
     if (options.signal?.aborted) {
       throw createAbortError();
     }
+    await consume(new Uint8Array(await blob.arrayBuffer()));
     options.onProgress?.({
       loaded: blob.size,
       total: total ?? blob.size,
       progress: 100,
     });
-    return blob;
+    return;
   }
 
   const reader = response.body.getReader();
-  const chunks: BlobPart[] = [];
   let loaded = 0;
   let aborted = false;
   const abortRead = () => {
@@ -149,7 +149,7 @@ export async function readResponseBlobWithProgress(response: Response, options: 
       }
 
       if (value) {
-        chunks.push(value as BlobPart);
+        await consume(value);
         loaded += value.byteLength;
         options.onProgress?.({
           loaded,
@@ -164,11 +164,26 @@ export async function readResponseBlobWithProgress(response: Response, options: 
       total,
       progress: 100,
     });
-    return new Blob(chunks, { type: contentType });
+  } catch (error) {
+    // 消费端失败时（例如磁盘已满）同步停止上游数据传输
+    await reader.cancel(error).catch(() => {});
+    throw error;
   } finally {
     options.signal?.removeEventListener('abort', abortRead);
     reader.releaseLock();
   }
+}
+
+export async function readResponseBlobWithProgress(response: Response, options: DownloadBlobOptions = {}) {
+  const chunks: BlobPart[] = [];
+  await consumeResponseChunks(response, options, (chunk) => { chunks.push(chunk as BlobPart); });
+  return new Blob(chunks, { type: response.headers.get('Content-Type') || 'application/octet-stream' });
+}
+
+export async function writeResponseFileWithProgress(response: Response, target: FileDownloadTarget, options: DownloadBlobOptions = {}) {
+  await consumeResponseChunks(response, options, (chunk) => target.write(chunk));
+  if (options.signal?.aborted) throw createAbortError();
+  await target.close();
 }
 
 export async function uploadFormDataWithProgress(url: string, formData: FormData, options: UploadFormDataOptions = {}) {

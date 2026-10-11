@@ -241,6 +241,22 @@
 
       <SettingSection v-if="currentUser" :title="t('Settings.LocalWebRtcNetwork', '本地 WebRTC 网络偏好')">
         <SettingItem
+          :title="t('Settings.PreferWebRtcFileTransfer', '文件上传下载优先使用 WebRTC')"
+          :description="t('Settings.PreferWebRtcFileTransferDescription', '仅对当前浏览器和当前账号生效，包含 APK 传输。关闭后直接使用 HTTP；开启后仅在 WebRTC 建连失败时回退')"
+        >
+          <label class="toggle-switch" :class="{ active: preferWebRtcFileTransfer }">
+            <input
+              class="toggle-switch__input"
+              type="checkbox"
+              :aria-label="t('Settings.PreferWebRtcFileTransfer', '文件上传下载优先使用 WebRTC')"
+              :checked="preferWebRtcFileTransfer"
+              @change="onPreferWebRtcFileTransferChange"
+            />
+            <span class="toggle-switch__slider"></span>
+          </label>
+        </SettingItem>
+
+        <SettingItem
           :title="t('Settings.UseLocalWebRtcOverride', '使用本地 WebRTC 覆盖')"
           :description="t('Settings.UseLocalWebRtcOverrideDescription', '仅对当前浏览器和当前账号生效，投屏时优先于全局默认配置')"
         >

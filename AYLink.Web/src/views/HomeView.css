@@ -62,7 +62,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* List Styles */
+/* 列表样式 */
 .list-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 220px 150px 180px;
@@ -363,7 +363,7 @@
   transform: scale(0.96);
 }
 
-/* Dropdown Menu */
+/* 下拉菜单 */
 .dropdown-container {
   position: relative;
   display: inline-flex;
@@ -441,7 +441,7 @@
   height: 16px;
 }
 
-/* Dialog */
+/* 对话框 */
 .dialog-overlay {
   position: fixed;
   top: 0;

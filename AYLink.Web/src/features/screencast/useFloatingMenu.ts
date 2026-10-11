@@ -96,7 +96,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
       };
       localStorage.setItem(options.storageKey, JSON.stringify(placement));
     } catch {
-      // ignore local persistence failures
+      // 保存本地状态失败时 保留当前界面状态
     }
   };
 
@@ -170,7 +170,7 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
         isMenuExpanded.value = parsed.isExpanded;
       }
     } catch {
-      // ignore local persistence failures
+      // 保存本地状态失败时 保留当前界面状态
     }
   };
 
@@ -369,8 +369,8 @@ export function useFloatingMenu(options: FloatingMenuOptions) {
       menuY.value = position.y;
     }
 
-    // Pointer down only starts a tentative drag. Persist after pointer up so an
-    // interrupted gesture cannot replace a stable docked placement.
+    // 按下指针时先临时进入拖动状态 松开后再保存位置
+    // 避免中断的拖动覆盖原有停靠位置
     setFloatingMenuState();
     setMenuPosition(menuX.value, menuY.value, { persist: false });
 

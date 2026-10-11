@@ -8,9 +8,41 @@ vi.mock('../../core/http/client', () => ({
   sendApiRequestWithTransport: sendApiRequestWithTransportMock
 }));
 
-import { readResponseBlobWithProgress, uploadFormDataWithProgress } from './transfer';
+import { readResponseBlobWithProgress, writeResponseFileWithProgress, uploadFormDataWithProgress } from './transfer';
 
 describe('transfer', () => {
+  it('writes download chunks to disk with backpressure and closes only after completion', async () => {
+    const payload = new TextEncoder().encode('streamed file');
+    const target = { write: vi.fn(async (_chunk: Uint8Array) => {}), close: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
+    const progress = vi.fn();
+    await writeResponseFileWithProgress(new Response(payload, { headers: { 'Content-Length': String(payload.length) } }), target, { onProgress: progress });
+    expect(target.write).toHaveBeenCalledOnce();
+    expect(new Uint8Array(target.write.mock.calls[0]![0])).toEqual(payload);
+    expect(target.close).toHaveBeenCalledOnce();
+    expect(progress).toHaveBeenLastCalledWith({ loaded: payload.length, total: payload.length, progress: 100 });
+  });
+
+  it('does not commit the output file when a chunk write fails', async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('file')); },
+      cancel,
+    }));
+    const target = { write: vi.fn(async () => { throw new Error('disk full'); }), close: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
+    await expect(writeResponseFileWithProgress(response, target)).rejects.toThrow('disk full');
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(target.close).not.toHaveBeenCalled();
+  });
+
+  it('does not commit a file canceled after its last chunk', async () => {
+    const controller = new AbortController();
+    const target = { write: vi.fn(async () => {}), close: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
+    await expect(writeResponseFileWithProgress(new Response('file'), target, {
+      signal: controller.signal,
+      onProgress: (progress) => { if (progress.progress === 100) controller.abort(); },
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(target.close).not.toHaveBeenCalled();
+  });
   it('cancels response body reads after headers are received', async () => {
     const controller = new AbortController();
     const progressEvents: Array<{ loaded: number }> = [];

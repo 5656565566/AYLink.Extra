@@ -23,8 +23,27 @@ export interface WebRtcNetworkSettingsPayload {
   SinglePortMuxPublishPort?: number | null;
 }
 
+export function toRtcConfiguration(settings?: WebRtcNetworkSettingsPayload | null): RTCConfiguration {
+  const servers = (settings?.IceServers ?? []).map((server) => {
+    const urls = (server.Urls ?? []).map((url) => url.trim()).filter(Boolean);
+    return urls.length ? { urls: urls.length === 1 ? urls[0] : urls, username: server.Username ?? undefined, credential: server.Credential ?? undefined } : null;
+  }).filter((server): server is NonNullable<typeof server> => server !== null);
+  return {
+    iceServers: servers.length ? servers : [{ urls: 'stun:stun.l.google.com:19302' }],
+    iceTransportPolicy: settings?.IceTransportPolicy === 'relay' ? 'relay' : 'all',
+  };
+}
+
 export function loadLocalWebRtcOverrideEnabled(scope?: string) {
   return readLocalBoolean(buildScopedStorageKey(LOCAL_WEBRTC_OVERRIDE_ENABLED_KEY, scope));
+}
+
+export function loadLocalWebRtcFileTransferPreferred(scope?: string) {
+  return readLocalBoolean(buildScopedStorageKey(storageKeys.webrtc.fileTransferPreferred, scope), true);
+}
+
+export function setLocalWebRtcFileTransferPreferred(preferred: boolean, scope?: string) {
+  writeLocalBoolean(buildScopedStorageKey(storageKeys.webrtc.fileTransferPreferred, scope), preferred);
 }
 
 export function setLocalWebRtcOverrideEnabled(enabled: boolean, scope?: string) {

@@ -13,6 +13,7 @@ const (
 	deviceRouteUnknown deviceRouteKind = iota
 	deviceRouteConnect
 	deviceRouteTerminalWS
+	deviceRouteTransport
 	deviceRouteRename
 	deviceRouteSettings
 	deviceRouteGroups
@@ -68,6 +69,8 @@ func handleDeviceResourceRoute(w http.ResponseWriter, r *http.Request, handlers 
 	}
 
 	switch classifyDeviceRoute(r.URL.Path) {
+	case deviceRouteTransport:
+		handlers.dataTransport.ServeHTTP(w, r)
 	case deviceRouteTerminalWS:
 		guards.requireTerminalAccess(http.HandlerFunc(handlers.terminal.ServeWS)).ServeHTTP(w, r)
 	case deviceRouteConnect:
@@ -168,6 +171,8 @@ func classifyDeviceRoute(path string) deviceRouteKind {
 		return deviceRouteConnect
 	case strings.HasSuffix(path, "/terminal/ws"):
 		return deviceRouteTerminalWS
+	case strings.HasSuffix(path, "/transport"):
+		return deviceRouteTransport
 	case strings.HasSuffix(path, "/rename"):
 		return deviceRouteRename
 	case strings.HasSuffix(path, "/settings"):

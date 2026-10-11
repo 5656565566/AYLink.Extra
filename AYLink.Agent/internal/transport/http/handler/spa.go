@@ -39,9 +39,8 @@ func NewSPAHandler(root string, embedded fs.FS, logger logging.Logger) http.Hand
 			return
 		}
 
-		// Static asset requests should not fall back to the SPA entrypoint.
-		// Otherwise browsers can get stuck following redirects for directory-like
-		// asset URLs such as /assets/.
+		// 静态资源请求不应回退到单页应用入口
+		// 避免浏览器请求 /assets/ 等目录路径时陷入重定向循环
 		if isStaticAssetRequest(requestPath) {
 			http.NotFound(w, r)
 			return

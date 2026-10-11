@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -347,7 +348,7 @@ func (h *DeviceHandler) Connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Format is /api/devices/connect/{id}
+	// 路径格式为 /api/devices/connect/{id}
 	value := strings.TrimPrefix(r.URL.Path, "/api/devices/connect/")
 	id, err := strconv.Atoi(value)
 	if err != nil {
@@ -708,7 +709,10 @@ func (h *DeviceHandler) DownloadApp(w http.ResponseWriter, r *http.Request) {
 	defer result.Reader.Close()
 
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeDownloadFilename(result.Name)+`"`)
+	// 使用标准参数编码 避免中文文件名直接进入响应头导致浏览器拒绝
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
+		"filename": sanitizeDownloadFilename(result.Name),
+	}))
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, result.Reader)
 }
@@ -1069,7 +1073,9 @@ func (h *DeviceHandler) downloadFile(w http.ResponseWriter, r *http.Request, id 
 	defer result.Reader.Close()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeDownloadFilename(result.Name)+`"`)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
+		"filename": sanitizeDownloadFilename(result.Name),
+	}))
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, result.Reader)
 }

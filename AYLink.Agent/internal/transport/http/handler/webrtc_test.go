@@ -495,7 +495,7 @@ func TestWebRTCHandlerAcquireRuntimeReplacesClosedCachedRuntime(t *testing.T) {
 		t.Fatalf("expected one replacement runtime start, got %d", scrcpyService.startCount)
 	}
 
-	// A delayed release from the old signaling connection must not decrement the replacement runtime.
+	// 旧信令连接延迟释放时 不应减少替换后运行时的引用计数
 	handler.releaseRuntime("1", "same-session", closedRuntime)
 	if handler.runtimes["1"].refCount != 1 {
 		t.Fatalf("expected stale release to leave replacement refcount unchanged")

@@ -85,7 +85,7 @@
       @change="handleApkSelected"
     />
 
-    <!-- Context Menu -->
+    <!-- 上下文菜单 -->
     <Teleport to="body">
       <div 
         v-if="contextMenu.show" 

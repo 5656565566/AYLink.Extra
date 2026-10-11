@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +12,8 @@ import (
 
 	domainadb "aylink-agent/internal/domain/adb"
 	terminalservice "aylink-agent/internal/service/terminal"
+	"aylink-agent/internal/transport/rtc"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -55,24 +59,72 @@ func (h *TerminalHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	writer := &wsWriter{conn: conn}
+	h.serveTerminal(ctx, deviceID, conn.ReadJSON, writer)
+}
 
+type terminalOutputWriter interface {
+	writeJSON(any) error
+	queueOutput([]byte) error
+	close(int, string) error
+	stop()
+}
+
+// ServeStream 与 WebSocket 共用终端协议和 shell 会话生命周期
+// 通过 NDJSON 在可靠的 RTC 字节流中划分消息边界
+func (h *TerminalHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+	deviceID, err := deviceIDFromPath(r.URL.Path)
+	if err != nil {
+		WriteError(w, 400, "INVALID_DEVICE_ID", "Errors.InvalidDeviceId", "无效的设备 ID")
+		return
+	}
+	if _, ok := ensureDeviceAccess(w, r, h.accessService, deviceID); !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	h.serveTerminal(ctx, deviceID, terminalStreamReader(r.Body), &streamTerminalWriter{writer: w})
+}
+
+func terminalStreamReader(reader io.Reader) func(any) error {
+	scanner := bufio.NewScanner(reader)
+	// 与浏览器输入队列使用相同的大小限制 拒绝未结束的超大 NDJSON 消息
+	// 避免消息跨多个 RTC 窗口持续累积
+	scanner.Buffer(make([]byte, 4096), rtc.WindowBytes)
+	return func(value any) error {
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return err
+			}
+			return io.EOF
+		}
+		return json.Unmarshal(scanner.Bytes(), value)
+	}
+}
+
+func (h *TerminalHandler) serveTerminal(ctx context.Context, deviceID int, readJSON func(any) error, writer terminalOutputWriter) {
+	defer writer.stop()
 	session, err := h.service.Start(ctx, deviceID)
 	if err != nil {
-		h.writeTerminalError(conn, err)
+		_ = writer.writeJSON(terminalErrorMessage(err))
+		_ = writer.close(websocket.CloseNormalClosure, "")
 		return
 	}
 	defer session.Close()
 	defer session.CloseInput()
 
-	writer := &wsWriter{conn: conn}
-	defer writer.stop()
 	if err := writer.writeJSON(terminalMessage{Type: "ready"}); err != nil {
 		return
 	}
 
 	errCh := make(chan error, 2)
 	go h.pumpShellPackets(session, writer, errCh)
-	go h.readClientMessages(ctx, conn, session, errCh)
+	go h.readClientMessages(ctx, readJSON, session, errCh)
 
 	for {
 		select {
@@ -92,7 +144,7 @@ func (h *TerminalHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *TerminalHandler) readClientMessages(ctx context.Context, conn *websocket.Conn, session TerminalSession, errCh chan<- error) {
+func (h *TerminalHandler) readClientMessages(ctx context.Context, readJSON func(any) error, session TerminalSession, errCh chan<- error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -101,7 +153,7 @@ func (h *TerminalHandler) readClientMessages(ctx context.Context, conn *websocke
 		}
 
 		var message terminalMessage
-		if err := conn.ReadJSON(&message); err != nil {
+		if err := readJSON(&message); err != nil {
 			errCh <- err
 			return
 		}
@@ -123,7 +175,7 @@ func (h *TerminalHandler) readClientMessages(ctx context.Context, conn *websocke
 	}
 }
 
-func (h *TerminalHandler) pumpShellPackets(session TerminalSession, writer *wsWriter, errCh chan<- error) {
+func (h *TerminalHandler) pumpShellPackets(session TerminalSession, writer terminalOutputWriter, errCh chan<- error) {
 	for {
 		packet, err := session.ReadPacket()
 		if err != nil {
@@ -154,7 +206,7 @@ func (h *TerminalHandler) pumpShellPackets(session TerminalSession, writer *wsWr
 	}
 }
 
-func (h *TerminalHandler) writeTerminalError(conn *websocket.Conn, err error) {
+func terminalErrorMessage(err error) terminalMessage {
 	message := terminalMessage{
 		Type:    "error",
 		Message: "无法启动终端会话",
@@ -171,9 +223,24 @@ func (h *TerminalHandler) writeTerminalError(conn *websocket.Conn, err error) {
 		message.Message = "设备序列号不能为空"
 	}
 
-	_ = conn.WriteJSON(message)
-	_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	return message
 }
+
+type streamTerminalWriter struct {
+	writer io.Writer
+	mu     sync.Mutex
+}
+
+func (w *streamTerminalWriter) writeJSON(payload any) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return json.NewEncoder(w.writer).Encode(payload)
+}
+func (w *streamTerminalWriter) queueOutput(data []byte) error {
+	return w.writeJSON(terminalMessage{Type: "output", Data: string(data)})
+}
+func (w *streamTerminalWriter) close(_ int, _ string) error { return nil }
+func (w *streamTerminalWriter) stop()                       {}
 
 type wsWriter struct {
 	conn *websocket.Conn

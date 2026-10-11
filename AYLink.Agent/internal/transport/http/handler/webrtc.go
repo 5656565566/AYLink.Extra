@@ -35,7 +35,7 @@ type managedRuntime struct {
 	deviceID    string
 	signature   string
 	sessionRefs map[string]int
-	// sessionIDs records which leases own this runtime after active references drop to zero.
+	// 即使活动引用归零 sessionIDs 仍记录持有该运行时的会话租约
 	sessionIDs map[string]struct{}
 	runtime    domainscrcpy.Runtime
 	refCount   int

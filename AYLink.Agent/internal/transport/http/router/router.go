@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"aylink-agent/internal/config"
 	domainadb "aylink-agent/internal/domain/adb"
@@ -38,16 +39,17 @@ type Dependencies struct {
 }
 
 type routeHandlers struct {
-	status      *handler.StatusHandler
-	version     *handler.VersionHandler
-	adb         *handler.ADBHandler
-	auth        *handler.AuthHandler
-	device      *handler.DeviceHandler
-	deviceGroup *handler.DeviceGroupHandler
-	terminal    *handler.TerminalHandler
-	settings    *handler.SettingsHandler
-	webrtc      *handler.WebRTCHandler
-	i18n        *handler.I18NHandler
+	status        *handler.StatusHandler
+	version       *handler.VersionHandler
+	adb           *handler.ADBHandler
+	auth          *handler.AuthHandler
+	device        *handler.DeviceHandler
+	deviceGroup   *handler.DeviceGroupHandler
+	terminal      *handler.TerminalHandler
+	settings      *handler.SettingsHandler
+	webrtc        *handler.WebRTCHandler
+	dataTransport *handler.DataTransportHandler
+	i18n          *handler.I18NHandler
 }
 
 type routeGuards struct {
@@ -106,7 +108,8 @@ func New(deps Dependencies) http.Handler {
 
 	terminalHandler := handler.NewTerminalHandler(terminalservice.NewService(deviceRepo, deps.ADB), deviceAccessService)
 	settingsService := settingsservice.NewService(deps.DB)
-	webRtcHandler := handler.NewWebRTCHandler(webrtcservice.NewService(deps.Logger), settingsService, scrcpyService, deviceAccessService)
+	webRtcService := webrtcservice.NewService(deps.Logger)
+	webRtcHandler := handler.NewWebRTCHandler(webRtcService, settingsService, scrcpyService, deviceAccessService)
 	i18nService := i18nservice.NewService()
 	i18nHandler := handler.NewI18NHandler(i18nService, settingsService)
 	settingsHandler := handler.NewSettingsHandler(settingsService, i18nService)
@@ -125,6 +128,14 @@ func New(deps Dependencies) http.Handler {
 		webrtc:      webRtcHandler,
 		i18n:        i18nHandler,
 	}
+	handlers.dataTransport = handler.NewDataTransportHandler(webRtcService, settingsService, deviceAccessService, authService,
+		middleware.Recover(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/terminal/stream") {
+				guards.requireTerminalAccess(http.HandlerFunc(terminalHandler.ServeStream)).ServeHTTP(w, r)
+				return
+			}
+			handleDeviceResourceRoute(w, r, handlers, guards)
+		})))
 
 	registerStatusRoutes(mux, handlers, guards)
 	registerAuthRoutes(mux, handlers, guards)

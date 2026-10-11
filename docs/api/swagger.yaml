@@ -2,9 +2,13 @@ basePath: /
 definitions:
   adb.Device:
     properties:
+      model:
+        type: string
       serial:
         type: string
       state:
+        type: string
+      transport:
         type: string
     type: object
   adb.DirectoryEntry:
@@ -267,6 +271,8 @@ definitions:
         type: integer
       newDisplayWidth:
         type: integer
+      newPeerConnection:
+        type: boolean
       sessionId:
         type: string
     type: object
@@ -434,6 +440,15 @@ definitions:
     properties:
       error:
         $ref: '#/definitions/handler.ErrorPayload'
+    type: object
+  handler.FileDownloadTicketResponse:
+    properties:
+      expiresAt:
+        type: string
+      ticket:
+        type: string
+      url:
+        type: string
     type: object
   handler.FileListResponse:
     properties:
@@ -2453,6 +2468,51 @@ paths:
       summary: 下载文件
       tags:
       - 文件管理
+  /api/devices/{id}/files/download-ticket:
+    post:
+      consumes:
+      - application/json
+      description: 为浏览器原生下载创建短期一次性票据。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 文件路径
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.FilePathRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.FileDownloadTicketResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建文件下载票据
+      tags:
+      - 文件管理
   /api/devices/{id}/files/list:
     post:
       consumes:
@@ -2557,6 +2617,67 @@ paths:
       security:
       - BearerAuth: []
       summary: 重命名文件
+      tags:
+      - 文件管理
+  /api/devices/{id}/files/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 将本地文件上传到指定设备目录，支持通过 relativePath 保留文件夹结构。
+      parameters:
+      - description: 设备 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 目标目录
+        in: query
+        name: path
+        required: true
+        type: string
+      - description: 相对路径
+        in: query
+        name: relativePath
+        type: string
+      - description: 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.OKResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 上传文件
       tags:
       - 文件管理
   /api/devices/{id}/groups:
@@ -2912,6 +3033,41 @@ paths:
       summary: 连接设备
       tags:
       - 设备
+  /api/file-downloads/{ticket}:
+    get:
+      description: 供浏览器原生下载使用，票据短期有效且只能使用一次。
+      parameters:
+      - description: 下载票据
+        in: path
+        name: ticket
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: 使用票据下载文件
+      tags:
+      - 文件管理
   /api/i18n/{locale}:
     get:
       description: 返回指定语言区域的语言包，不存在时回退到服务端语言设置。

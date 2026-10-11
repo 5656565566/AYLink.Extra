@@ -17,8 +17,9 @@ import { useNotification } from '../services/notification';
 import { useTaskService } from '../services/tasks';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
-import { triggerBlobDownload, triggerUrlDownload, writeClipboardText } from '../lib/browser/operations';
-import { formatBytes, readResponseBlobWithProgress, uploadFormDataWithProgress } from '../lib/http/transfer';
+import { selectDownloadFile, triggerBlobDownload, triggerUrlDownload, writeClipboardText, type FileDownloadTarget } from '../lib/browser/operations';
+import { formatBytes, readResponseBlobWithProgress, writeResponseFileWithProgress, type TransferProgress } from '../lib/http/transfer';
+import { requestDevice, uploadDeviceFile } from '../features/deviceTransport/requests';
 import { normalizeDeviceId, normalizeRemotePath } from '../lib/input/normalize';
 
 const BLOB_DOWNLOAD_MAX_BYTES = 128 * 1024 * 1024;
@@ -62,7 +63,6 @@ export default defineComponent({
     const loadedPath = ref('');
     const menuElement = ref<HTMLElement | null>(null);
     let menuTrigger: HTMLElement | null = null;
-    const transferTaskIds = ref<number[]>([]);
     const contextMenu = ref({
       show: false,
       x: 0,
@@ -127,8 +127,6 @@ export default defineComponent({
         ...parts.map((name, index) => ({ name, path: `/${parts.slice(0, index + 1).join('/')}/` })),
       ];
     });
-    const transferTasks = computed(() => taskService.tasks.value.filter((task) =>
-      transferTaskIds.value.includes(task.id) && task.status === 'running'));
     const fileIcons = {
       folder: Folder20Regular, image: Image20Regular, archive: FolderZip20Regular,
       document: DocumentText20Regular, file: Document20Regular,
@@ -268,7 +266,7 @@ export default defineComponent({
       const menuBounds = menuElement.value.getBoundingClientRect();
       contextMenu.value.x = Math.max(8, Math.min(contextMenu.value.x, window.innerWidth - menuBounds.width - 8));
       contextMenu.value.y = Math.max(8, Math.min(contextMenu.value.y, window.innerHeight - menuBounds.height - 8));
-      // Move focus after the positioned menu has finished rendering.
+      // 等待菜单定位和渲染完成后再移动焦点。
       await nextTick();
       if (contextMenu.value.show) menuElement.value?.querySelector<HTMLButtonElement>('button')?.focus();
     };
@@ -319,8 +317,8 @@ export default defineComponent({
       return actions;
     });
 
-    const downloadEntry = async (entry: FileEntry) => {
-      if (!canUseBlobDownload(entry)) {
+    const downloadEntry = async (entry: FileEntry, target?: FileDownloadTarget) => {
+      if (!target && !canUseBlobDownload(entry)) {
         await browserDownloadEntry(entry);
         return;
       }
@@ -342,7 +340,6 @@ export default defineComponent({
         isCancelable: true,
         cancelAction: () => controller.abort()
       });
-      transferTaskIds.value = [...transferTasks.value.map((item) => item.id), task.id];
       const toastId = notifications.showProgress({
         type: 'info',
         title,
@@ -353,7 +350,7 @@ export default defineComponent({
       });
 
       try {
-        const response = await apiFetch(`/api/devices/${targetDeviceId}/files/download`, {
+        const response = await requestDevice(`/api/devices/${targetDeviceId}/files/download`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: getEntryPath(entry) }),
@@ -363,9 +360,9 @@ export default defineComponent({
           throw new Error(await getResponseErrorMessage(response, t('FilePage.DownloadFailed', '下载失败')));
         }
 
-        const blob = await readResponseBlobWithProgress(response, {
+        const options = {
           signal: controller.signal,
-          onProgress: (progress) => {
+          onProgress: (progress: TransferProgress) => {
             const message = progress.total
               ? t('FilePage.DownloadingBytes', '正在下载 {0} / {1}', formatBytes(progress.loaded), formatBytes(progress.total))
               : t('FilePage.DownloadingBytesUnknown', '正在下载 {0}', formatBytes(progress.loaded));
@@ -380,12 +377,17 @@ export default defineComponent({
               isIndeterminate: progress.progress === null
             });
           }
-        });
-        triggerBlobDownload(blob, fileName, 'download.bin');
+        };
+        if (target) await writeResponseFileWithProgress(response, target, options);
+        else {
+          const blob = await readResponseBlobWithProgress(response, options);
+          triggerBlobDownload(blob, fileName, 'download.bin');
+        }
         const completedMessage = t('FilePage.DownloadComplete', '{0} 下载完成', fileName);
         taskService.complete(task, completedMessage);
         notifications.dismiss(toastId);
       } catch (error) {
+        await target?.abort(error).catch((cleanupError: unknown) => console.warn('Failed to discard incomplete download', cleanupError));
         notifications.dismiss(toastId);
         if (isAbortError(error)) {
           const cancelledMessage = t('FilePage.DownloadCancelled', '下载已取消');
@@ -410,6 +412,10 @@ export default defineComponent({
       }
 
       const fileName = entry.Name || 'download.bin';
+      let target: FileDownloadTarget | null;
+      try { target = await selectDownloadFile(fileName, 'download.bin'); }
+      catch (error) { if (isAbortError(error)) return; throw error; }
+      if (target) { await downloadEntry(entry, target); return; }
       const response = await apiFetch(`/api/devices/${targetDeviceId}/files/download-ticket`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -483,7 +489,6 @@ export default defineComponent({
         isCancelable: true,
         cancelAction: () => controller.abort()
       });
-      transferTaskIds.value = [...transferTasks.value.map((item) => item.id), task.id];
       const toastId = notifications.showProgress({
         type: 'info',
         title,
@@ -501,7 +506,7 @@ export default defineComponent({
           const formData = new FormData();
           formData.append('file', file, file.name);
 
-          const response = await uploadFormDataWithProgress(buildUploadUrl(targetDeviceId, uploadDirectory, relativePath), formData, {
+          const response = await uploadDeviceFile(buildUploadUrl(targetDeviceId, uploadDirectory, relativePath), formData, {
             signal: controller.signal,
             onProgress: (progress) => {
               const currentFileLoaded = progress.progress !== null
@@ -838,8 +843,6 @@ export default defineComponent({
       menuActions,
       showMenu,
       onMenuKeydown,
-      transferTasks,
-      requestCancelTransfer: taskService.requestCancel,
       tabItems,
       buildTabKey,
       normalizePath,

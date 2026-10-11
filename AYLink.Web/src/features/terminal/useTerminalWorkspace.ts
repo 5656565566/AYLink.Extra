@@ -9,11 +9,12 @@ import { useTheme } from '../../services/theme';
 import { consumeWorkspaceOpen, type WorkspaceOpenRequest } from '../../services/workspaceNavigation';
 import type { PersistedTerminalTab, TerminalTab } from '../../types/terminal';
 import { normalizeDeviceId } from '../../lib/input/normalize';
+import { createTerminalConnection, type TerminalConnection } from '../deviceTransport/terminal';
 
 interface TerminalRuntime {
   term: Terminal;
   fitAddon: FitAddon;
-  socket: WebSocket | null;
+  socket: TerminalConnection | null;
   pingTimer: number | null;
   inputSubscription: { dispose: () => void };
   resizeSubscription: { dispose: () => void };
@@ -239,7 +240,7 @@ export function useTerminalWorkspace() {
     runtimes.set(key, runtime);
     setTerminalStatus(key, 'connecting');
 
-    const socket = new WebSocket(buildWebSocketUrl(tab.deviceId));
+    const socket = createTerminalConnection(tab.deviceId, () => buildWebSocketUrl(tab.deviceId));
     runtime.socket = socket;
 
     socket.onopen = () => {

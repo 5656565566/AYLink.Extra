@@ -104,7 +104,7 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
     try {
       options.getVideoElement()?.releasePointerCapture?.(pointerId);
     } catch {
-      // Ignore release failures when the browser has already dropped capture.
+      // 浏览器可能已释放指针捕获 此时忽略重复释放失败
     }
   };
 
@@ -414,7 +414,7 @@ export function useTouchPointerInput(options: TouchPointerInputOptions) {
     try {
       options.getVideoElement()?.releasePointerCapture?.(event.pointerId);
     } catch {
-      // Ignore release failures if capture was never established.
+      // 指针可能尚未被捕获 此时忽略释放失败
     }
   };
 

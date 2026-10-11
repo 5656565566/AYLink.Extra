@@ -216,7 +216,7 @@ export async function logout() {
       });
     }
   } catch {
-    // Ignore logout request failures because local session cleanup must still complete.
+    // 即使退出登录请求失败 也要继续清理本地会话
   } finally {
     clearSession();
   }

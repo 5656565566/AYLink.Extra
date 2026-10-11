@@ -366,8 +366,7 @@ button:focus-visible,
 }
 
 .file-name__text,
-.selection-summary,
-.transfer-detail {
+.selection-summary {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -434,8 +433,7 @@ button:focus-visible,
   color: var(--fluent-text-primary);
 }
 
-.footer-bar,
-.transfer-bar {
+.footer-bar {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -454,22 +452,6 @@ button:focus-visible,
 .selection-summary {
   margin-left: auto;
   color: var(--fluent-text-tertiary);
-}
-
-.transfer-detail {
-  flex: 1;
-}
-
-.transfer-bar progress {
-  width: 100px;
-  height: 4px;
-  accent-color: var(--fluent-accent-default);
-}
-
-.transfer-bar button {
-  font-size: 12px;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .context-menu {
@@ -535,21 +517,10 @@ button:focus-visible,
     padding-left: 12px;
   }
 
-  .footer-bar,
-  .transfer-bar {
+  .footer-bar {
     padding-left: 12px;
     padding-right: 12px;
     gap: 8px;
-  }
-
-  .transfer-bar progress {
-    width: 52px;
-  }
-
-  .transfer-all {
-    max-width: 104px;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 }
 

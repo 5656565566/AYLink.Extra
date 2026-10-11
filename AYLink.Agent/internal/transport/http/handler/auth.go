@@ -424,7 +424,7 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Route: /api/accounts/users/{id}/reset-password
+	// 路径格式为 /api/accounts/users/{id}/reset-password
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
 		WriteError(w, http.StatusBadRequest, "INVALID_USER_ID", "Errors.InvalidUserId", "无效的用户 ID")

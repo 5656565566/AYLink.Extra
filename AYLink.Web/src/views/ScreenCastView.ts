@@ -34,7 +34,7 @@ import { useAppSettings } from '../services/appSettings';
 import { getAccessToken, useAuth } from '../services/auth';
 import { useDialog } from '../services/dialog';
 import { useNotification } from '../services/notification';
-import { loadLocalWebRtcOverrideConfig, loadLocalWebRtcOverrideEnabled } from '../services/webrtcSettings';
+import { loadLocalWebRtcOverrideConfig, loadLocalWebRtcOverrideEnabled, toRtcConfiguration } from '../services/webrtcSettings';
 import { apiFetch } from '../utils/api';
 import WorkspaceTabs from '../components/WorkspaceTabs.vue';
 import {
@@ -192,15 +192,6 @@ export default defineComponent({
     Flash24Regular
   },
   setup() {
-    interface WebRtcNetworkSettingsPayload {
-      IceTransportPolicy?: string;
-      IceServers?: Array<{
-        Urls?: string[];
-        Username?: string | null;
-        Credential?: string | null;
-      }>;
-    }
-
     const CAST_MENU_PLACEMENT_STORAGE_KEY = 'aylink_cast_menu_placement';
 
     const POINTER_MOVE_BUFFER_LIMIT = 64 * 1024;
@@ -323,8 +314,8 @@ export default defineComponent({
     const syncScreencastStageRefs = (refs: ScreencastStageRefs) => {
       videoContainer.value = refs.stageElement;
       videoElement.value = refs.videoElement;
-      // A muted video element is allowed to autoplay; audio remains controlled
-      // by the separate audio elements and browser user-gesture policy.
+      // 静音视频允许自动播放 音频仍由独立的音频元素控制
+      // 并遵循浏览器的用户手势限制
       if (videoElement.value) {
         videoElement.value.muted = true;
       }
@@ -890,27 +881,7 @@ export default defineComponent({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
-    const getRtcConfigurationFromSettings = (settings?: WebRtcNetworkSettingsPayload | null): RTCConfiguration => {
-      const normalizedIceServers: RTCIceServer[] = (settings?.IceServers ?? [])
-        ?.map((server) => {
-          const urls = (server.Urls ?? []).map((url) => url.trim()).filter(Boolean);
-          if (urls.length === 0) {
-            return null;
-          }
-
-          return {
-            urls: urls.length === 1 ? urls[0] : urls,
-            username: server.Username ?? undefined,
-            credential: server.Credential ?? undefined
-          };
-        })
-        .filter((server): server is NonNullable<typeof server> => server != null);
-
-      return {
-        iceServers: normalizedIceServers.length > 0 ? normalizedIceServers : getDefaultRtcConfiguration().iceServers,
-        iceTransportPolicy: settings?.IceTransportPolicy === 'relay' ? 'relay' : 'all'
-      };
-    };
+    const getRtcConfigurationFromSettings = toRtcConfiguration;
 
     const loadRtcConfiguration = async (): Promise<RTCConfiguration> => {
       const { requestId, signal } = rtcConfigRequest.begin();
@@ -3481,7 +3452,7 @@ export default defineComponent({
         try {
           (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
         } catch {
-          // Ignore capture release failures while leaving edit mode or changing tabs.
+          // 退出编辑模式或切换标签页时 忽略释放指针捕获失败的错误
         }
         inputMappingAimAreaResize.value = null;
         void flushInputMappingAimAreaSave();
@@ -3493,7 +3464,7 @@ export default defineComponent({
         try {
           (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
         } catch {
-          // Ignore capture release failures while leaving edit mode or changing tabs.
+          // 退出编辑模式或切换标签页时 忽略释放指针捕获失败的错误
         }
         if (inputMappingSwipeDrawingRestoreMenu.value) {
           inputMappingSwipeDrawingRestoreMenu.value = false;
@@ -3512,7 +3483,7 @@ export default defineComponent({
       try {
         (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
       } catch {
-        // Ignore capture release failures while leaving edit mode or changing tabs.
+        // 退出编辑模式或切换标签页时 忽略释放指针捕获失败的错误
       }
       inputMappingStickerDrag.value = null;
     };
@@ -3866,7 +3837,7 @@ export default defineComponent({
     };
 
     const handleWindowPointerDown = () => {
-      // A user gesture is required by browser autoplay policy to resume audio.
+      // 浏览器自动播放策略要求通过用户手势恢复音频播放。
       void resumeMediaPlayback();
     };
 

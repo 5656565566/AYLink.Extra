@@ -1,5 +1,22 @@
 import { sanitizeDownloadFileName } from '../input/normalize';
 
+export interface FileDownloadTarget {
+  write(data: Uint8Array): Promise<void>;
+  close(): Promise<void>;
+  abort(reason?: unknown): Promise<void>;
+}
+
+export async function selectDownloadFile(fileName: string, fallbackFileName: string): Promise<FileDownloadTarget | null> {
+  const picker = (window as Window & {
+    showSaveFilePicker?: (options: { suggestedName: string }) => Promise<{ createWritable(): Promise<FileDownloadTarget> }>;
+  }).showSaveFilePicker;
+  if (!picker) return null;
+  // 在下载操作中、等待网络请求之前直接调用
+  // 保留浏览器保存对话框所需的用户激活状态
+  const handle = await picker.call(window, { suggestedName: sanitizeDownloadFileName(fileName, fallbackFileName) });
+  return handle.createWritable();
+}
+
 export async function writeClipboardText(text: string) {
   if (!navigator.clipboard?.writeText) {
     throw new Error('Clipboard API is not available in the current browser context.');

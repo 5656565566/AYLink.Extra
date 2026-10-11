@@ -19,6 +19,7 @@ const {
   activateTabSpy,
   closeTabSpy,
   loadFilesSpy,
+  writeResponseFileWithProgress,
 } = vi.hoisted(() => ({
   notificationShow: vi.fn(),
   notificationShowProgress: vi.fn(() => 1),
@@ -35,6 +36,7 @@ const {
   activateTabSpy: vi.fn(async () => {}),
   closeTabSpy: vi.fn(async () => {}),
   loadFilesSpy: vi.fn(async () => {}),
+  writeResponseFileWithProgress: vi.fn(async () => {}),
 }));
 
 const tabsRef = ref<FileManagerTab[]>([]);
@@ -76,9 +78,15 @@ vi.mock('../utils/api', () => ({
   readApiErrorMessage,
 }));
 
+vi.mock('../features/deviceTransport/requests', () => ({
+  requestDevice: apiFetch,
+  uploadDeviceFile: uploadFormDataWithProgress,
+}));
+
 vi.mock('../lib/http/transfer', () => ({
   formatBytes: (value: number) => `${value} B`,
   readResponseBlobWithProgress: vi.fn(),
+  writeResponseFileWithProgress,
   uploadFormDataWithProgress,
 }));
 
@@ -124,6 +132,7 @@ vi.mock('../features/files/useFileManagerTabs', () => ({
 }));
 
 describe('FileManagerView', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
   beforeEach(() => {
     vi.clearAllMocks();
     tabsRef.value = [
@@ -215,6 +224,38 @@ describe('FileManagerView', () => {
       type: 'success'
     }));
     clickSpy.mockRestore();
+  });
+
+  it('streams large downloads through the device transport when a writable file is available', async () => {
+    const target = { write: vi.fn(), close: vi.fn(), abort: vi.fn(async () => {}) };
+    const picker = vi.fn(async () => ({ createWritable: async () => target }));
+    vi.stubGlobal('showSaveFilePicker', picker);
+    const wrapper = mountView();
+    const response = new Response('streamed data');
+    apiFetch.mockResolvedValueOnce(response);
+
+    const download = (wrapper.vm as unknown as { browserDownloadEntry: (entry: FileEntry) => Promise<void> }).browserDownloadEntry({
+      Name: 'large.bin', IsDirectory: false, Size: 129 * 1024 * 1024,
+    });
+    expect(picker).toHaveBeenCalledWith({ suggestedName: 'large.bin' });
+    expect(apiFetch).not.toHaveBeenCalled();
+    await download;
+
+    expect(apiFetch).toHaveBeenCalledExactlyOnceWith('/api/devices/device-a/files/download', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ path: '/sdcard/large.bin' }),
+    }));
+    expect(writeResponseFileWithProgress).toHaveBeenCalledWith(response, target, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(target.abort).not.toHaveBeenCalled();
+  });
+
+  it('does not begin a transfer when the save picker is canceled', async () => {
+    vi.stubGlobal('showSaveFilePicker', vi.fn(async () => { throw new DOMException('Canceled', 'AbortError'); }));
+    const wrapper = mountView();
+    await (wrapper.vm as unknown as { browserDownloadEntry: (entry: FileEntry) => Promise<void> }).browserDownloadEntry({
+      Name: 'large.bin', IsDirectory: false, Size: 129 * 1024 * 1024,
+    });
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(notificationShowProgress).not.toHaveBeenCalled();
   });
 
   it('shows only browser download for files larger than the in-memory download limit', async () => {
@@ -511,7 +552,7 @@ describe('FileManagerView', () => {
     expect(wrapper.findAll('.file-name__text').map((item) => item.text())).toEqual(['new.txt']);
   });
 
-  it('shows upload progress from the task service and cancels the original request', async () => {
+  it('keeps notification progress and cancellation without a duplicate page transfer bar', async () => {
     const wrapper = mountView();
     let signal: AbortSignal | undefined;
     uploadFormDataWithProgress.mockImplementationOnce((_url, _formData, options) => {
@@ -524,8 +565,10 @@ describe('FileManagerView', () => {
     const upload = (wrapper.vm as unknown as { uploadSelectedFiles: (files: File[], preserve: boolean) => Promise<void> })
       .uploadSelectedFiles([new File(['0123456789'], 'sample.txt')], false);
     await wrapper.vm.$nextTick();
-    expect(wrapper.find('.transfer-bar progress').attributes('value')).toBe('50');
-    await wrapper.find('.transfer-bar button').trigger('click');
+    expect(wrapper.find('.transfer-bar').exists()).toBe(false);
+    expect(notificationUpdate).toHaveBeenCalledWith(1, expect.objectContaining({ progress: 50, isCancelable: true }));
+    const [notification] = notificationShowProgress.mock.calls[0] as unknown as [{ onCancel: () => void }];
+    notification.onCancel();
     await upload;
     await flushPromises();
     expect(signal?.aborted).toBe(true);

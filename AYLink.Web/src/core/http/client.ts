@@ -138,8 +138,15 @@ async function sendApiRequestUsingTransport(
         throw createAbortError();
       }
 
-      if (token && token !== authSessionHandlers?.getAccessToken()) {
+      const retryWithFreshToken = async () => {
+        // 使用新令牌重试前释放被拒绝的 RTC 请求通道
+        // 若令牌刷新失败 则保留原始错误响应体供调用方读取
+        await response.body?.cancel();
         return sendApiRequestUsingTransport(url, options, transport, true);
+      };
+
+      if (token && token !== authSessionHandlers?.getAccessToken()) {
+        return retryWithFreshToken();
       }
 
       const refreshed = await authSessionHandlers?.refreshAccessToken();
@@ -147,12 +154,12 @@ async function sendApiRequestUsingTransport(
         throw createAbortError();
       }
       if (refreshed) {
-        return sendApiRequestUsingTransport(url, options, transport, true);
+        return retryWithFreshToken();
       }
 
       authSessionHandlers?.syncSessionFromStorage();
       if (token && token !== authSessionHandlers?.getAccessToken()) {
-        return sendApiRequestUsingTransport(url, options, transport, true);
+        return retryWithFreshToken();
       }
 
       if (handleUnauthorized) {

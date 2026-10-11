@@ -121,8 +121,8 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 	}, nil
 }
 
-// ReplaceSignalingSession drops the server-side PeerConnection before a browser
-// page creates a fresh offer for an existing scrcpy lease.
+// ReplaceSignalingSession 关闭原有信令会话及服务端 PeerConnection
+// 供浏览器为已有的 scrcpy 会话租约重新发起连接
 func (s *Service) ReplaceSignalingSession(sessionID string) {
 	if sessionID == "" {
 		return

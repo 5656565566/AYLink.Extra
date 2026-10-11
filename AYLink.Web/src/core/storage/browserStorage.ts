@@ -20,7 +20,7 @@ function writeString(kind: BrowserStorageKind, key: string, value: string) {
   try {
     getStorage(kind)?.setItem(key, value);
   } catch {
-    // Ignore storage write failures so transient browser limits do not break the UI flow.
+    // 浏览器存储受限时允许写入失败 避免中断当前操作
   }
 }
 
@@ -28,7 +28,7 @@ function remove(kind: BrowserStorageKind, key: string) {
   try {
     getStorage(kind)?.removeItem(key);
   } catch {
-    // Ignore storage removal failures because callers already keep in-memory state.
+    // 调用方已维护内存中的状态 删除存储失败时继续完成清理
   }
 }
 

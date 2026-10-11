@@ -254,8 +254,8 @@ export function useRemoteClipboard(options: RemoteClipboardOptions) {
     }
     isClipboardWindowVisible.value = true;
 
-    // The v-if element is not measurable until Vue renders it. Clamp again with
-    // the actual size so the initial bottom-right position matches drag limits.
+    // v-if 元素需等待 Vue 渲染后才能测量尺寸 再按实际尺寸约束位置
+    // 使窗口初始显示在右下角时也不超出拖动边界
     void nextTick(() => {
       if (isClipboardWindowVisible.value) {
         clampClipboardWindowToStage();

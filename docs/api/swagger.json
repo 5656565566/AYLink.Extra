@@ -2614,6 +2614,76 @@
                 }
             }
         },
+        "/api/devices/{id}/files/download-ticket": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "为浏览器原生下载创建短期一次性票据。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "文件管理"
+                ],
+                "summary": "创建文件下载票据",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "设备 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "文件路径",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.FilePathRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.FileDownloadTicketResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/devices/{id}/files/list": {
             "post": {
                 "security": [
@@ -2730,6 +2800,99 @@
                         "schema": {
                             "$ref": "#/definitions/handler.RenameFileRequest"
                         }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.OKResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/devices/{id}/files/upload": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "将本地文件上传到指定设备目录，支持通过 relativePath 保留文件夹结构。",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "文件管理"
+                ],
+                "summary": "上传文件",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "设备 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "目标目录",
+                        "name": "path",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "相对路径",
+                        "name": "relativePath",
+                        "in": "query"
+                    },
+                    {
+                        "type": "file",
+                        "description": "文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -3249,6 +3412,59 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/file-downloads/{ticket}": {
+            "get": {
+                "description": "供浏览器原生下载使用，票据短期有效且只能使用一次。",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "文件管理"
+                ],
+                "summary": "使用票据下载文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "下载票据",
+                        "name": "ticket",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handler.ErrorResponse"
                         }
@@ -3948,10 +4164,16 @@
         "adb.Device": {
             "type": "object",
             "properties": {
+                "model": {
+                    "type": "string"
+                },
                 "serial": {
                     "type": "string"
                 },
                 "state": {
+                    "type": "string"
+                },
+                "transport": {
                     "type": "string"
                 }
             }
@@ -4356,6 +4578,9 @@
                 "newDisplayWidth": {
                     "type": "integer"
                 },
+                "newPeerConnection": {
+                    "type": "boolean"
+                },
                 "sessionId": {
                     "type": "string"
                 }
@@ -4611,6 +4836,20 @@
             "properties": {
                 "error": {
                     "$ref": "#/definitions/handler.ErrorPayload"
+                }
+            }
+        },
+        "handler.FileDownloadTicketResponse": {
+            "type": "object",
+            "properties": {
+                "expiresAt": {
+                    "type": "string"
+                },
+                "ticket": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
                 }
             }
         },

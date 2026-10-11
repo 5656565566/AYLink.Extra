@@ -89,6 +89,37 @@ describe('http client', () => {
     expect(response.status).toBe(200);
   });
 
+  it('releases the rejected streaming body before an authenticated retry', async () => {
+    const cancel = vi.fn();
+    const rejected = new Response(new ReadableStream({ cancel }), { status: 401 });
+    const transport = vi.fn().mockResolvedValueOnce(rejected).mockImplementationOnce(async () => {
+      expect(cancel).toHaveBeenCalledOnce();
+      return new Response(null, { status: 200 });
+    });
+    const client = await import('./client');
+    client.registerAuthSessionHandlers({
+      ensureFreshAccessToken: async () => true,
+      getAccessToken: () => 'token',
+      refreshAccessToken: async () => true,
+      syncSessionFromStorage: vi.fn(),
+    });
+    expect((await client.sendApiRequestWithTransport('/api/devices/1/files/upload', {}, transport)).status).toBe(200);
+  });
+
+  it('preserves the error body when authentication cannot be refreshed', async () => {
+    const transport = vi.fn(async () => new Response('expired token', { status: 401 }));
+    const client = await import('./client');
+    client.registerAuthSessionHandlers({
+      ensureFreshAccessToken: async () => true,
+      getAccessToken: () => 'token',
+      refreshAccessToken: async () => false,
+      syncSessionFromStorage: vi.fn(),
+    });
+    const response = await client.sendApiRequestWithTransport('/api/devices/1/files/upload', {}, transport);
+    expect(await response.text()).toBe('expired token');
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
   it('calls unauthorized handler when refresh fails', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);

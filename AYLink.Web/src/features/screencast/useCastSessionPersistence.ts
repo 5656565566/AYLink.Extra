@@ -90,19 +90,19 @@ export function useCastSessionPersistence() {
     try {
       persisted.dataChannel?.close();
     } catch {
-      // Ignore channel close failures during persisted connection cleanup.
+      // 关闭缓存连接的数据通道失败时 继续清理其余资源
     }
 
     try {
       persisted.metaControlChannel?.close();
     } catch {
-      // Ignore channel close failures during persisted connection cleanup.
+      // 关闭缓存连接的数据通道失败时 继续清理其余资源
     }
 
     try {
       persisted.pointerMoveChannel?.close();
     } catch {
-      // Ignore channel close failures during persisted connection cleanup.
+      // 关闭缓存连接的数据通道失败时 继续清理其余资源
     }
 
     try {
@@ -112,7 +112,7 @@ export function useCastSessionPersistence() {
       persisted.peerConnection.ondatachannel = null;
       persisted.peerConnection.close();
     } catch {
-      // Ignore peer connection cleanup failures during persisted connection cleanup.
+      // 清理缓存的 WebRTC 连接失败时 继续清理其余资源
     }
 
     try {
@@ -124,7 +124,7 @@ export function useCastSessionPersistence() {
         persisted.ws.close();
       }
     } catch {
-      // Ignore websocket cleanup failures during persisted connection cleanup.
+      // 关闭缓存的 WebSocket 连接失败时 仍需移除本地连接记录
     }
 
     clearPersistedConnection(tabKey);

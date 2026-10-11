@@ -52,7 +52,7 @@ func Load() (Config, error) {
 			BundledDir: envOrDefault("AYLINK_ADB_BUNDLEDDIR", filepath.Join(".", "ADB")),
 		},
 		DB: DBConfig{
-			Path: envOrDefault("AYLINK_DB_PATH", filepath.Join(".", "aylink.db")), // 修改默认相对路径到当前目录，更符合常规习惯
+			Path: envOrDefault("AYLINK_DB_PATH", filepath.Join(".", "aylink.db")), // 默认数据库文件位于当前目录。
 		},
 		Scrcpy: ScrcpyConfig{
 			ServerPath: envOrDefault("AYLINK_SCRCPY_SERVER_PATH", ""),
@@ -64,7 +64,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	// 环境变量优先级最高 如果 JSON 配置文件覆盖了环境变量 这里再强制覆盖一次
+	// 环境变量优先级最高 加载 JSON 配置后再次应用环境变量 避免被文件配置覆盖
 	if envAddr := os.Getenv("AYLINK_HTTP_LISTENADDR"); envAddr != "" {
 		cfg.HTTP.ListenAddr = envAddr
 	} else if envAddr := os.Getenv("AYLINK_AGENT_ADDR"); envAddr != "" {

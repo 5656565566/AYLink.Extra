@@ -13,7 +13,8 @@ import type { AppDetails, AppInfo } from '../types/apps';
 import { isAbortError } from '../lib/async/abort';
 import { createLatestRequestController } from '../lib/async/latestRequest';
 import { triggerBlobDownload, writeClipboardText } from '../lib/browser/operations';
-import { formatBytes, readResponseBlobWithProgress, uploadFormDataWithProgress } from '../lib/http/transfer';
+import { formatBytes, readResponseBlobWithProgress } from '../lib/http/transfer';
+import { requestDevice, uploadDeviceFile } from '../features/deviceTransport/requests';
 import { normalizeDeviceId, normalizePackageName } from '../lib/input/normalize';
 
 export default defineComponent({
@@ -214,7 +215,7 @@ export default defineComponent({
       });
 
       try {
-        const response = await uploadFormDataWithProgress(`/api/devices/${targetDeviceId}/apps/install`, formData, {
+        const response = await uploadDeviceFile(`/api/devices/${targetDeviceId}/apps/install`, formData, {
           signal: controller.signal,
           onProgress: (progress) => {
             const uploadComplete = progress.progress !== null && progress.progress >= 100;
@@ -314,7 +315,7 @@ export default defineComponent({
       });
 
       try {
-        const response = await apiFetch(`/api/devices/${targetDeviceId}/apps/download`, {
+        const response = await requestDevice(`/api/devices/${targetDeviceId}/apps/download`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ packageName }),

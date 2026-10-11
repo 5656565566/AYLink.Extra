@@ -14,8 +14,10 @@ import {
   clearLocalWebRtcOverrideConfig,
   loadLocalWebRtcOverrideConfig,
   loadLocalWebRtcOverrideEnabled,
+  loadLocalWebRtcFileTransferPreferred,
   saveLocalWebRtcOverrideConfig,
   setLocalWebRtcOverrideEnabled,
+  setLocalWebRtcFileTransferPreferred,
   type WebRtcIceServerPayload,
   type WebRtcNetworkSettingsPayload
 } from '../services/webrtcSettings';
@@ -191,6 +193,8 @@ export default defineComponent({
     const webrtcStatusMessage = ref('');
 
     const useLocalWebRtcOverride = ref(loadLocalWebRtcOverrideEnabled());
+
+    const preferWebRtcFileTransfer = ref(loadLocalWebRtcFileTransferPreferred(getLocalWebRtcScope()));
 
     const localWebrtcTransportPolicy = ref<'all' | 'relay'>('all');
 
@@ -370,6 +374,11 @@ export default defineComponent({
 
     function onUseLocalWebRtcOverrideChange(event: Event) {
       useLocalWebRtcOverride.value = (event.target as HTMLInputElement).checked;
+    }
+
+    function onPreferWebRtcFileTransferChange(event: Event) {
+      preferWebRtcFileTransfer.value = (event.target as HTMLInputElement).checked;
+      setLocalWebRtcFileTransferPreferred(preferWebRtcFileTransfer.value, getLocalWebRtcScope());
     }
 
     function onNewDisplayDpiModeChange(event: Event) {
@@ -723,6 +732,8 @@ export default defineComponent({
     }
 
     function resetLocalWebRtcSettings() {
+      preferWebRtcFileTransfer.value = true;
+      setLocalWebRtcFileTransferPreferred(true, getLocalWebRtcScope());
       applyLocalWebRtcSettings({
         IceTransportPolicy: 'all',
         IceServers: [{ Urls: ['stun:stun.l.google.com:19302'] }],
@@ -748,6 +759,7 @@ export default defineComponent({
     }
 
     function loadLocalWebRtcSettings() {
+      preferWebRtcFileTransfer.value = loadLocalWebRtcFileTransferPreferred(getLocalWebRtcScope());
       useLocalWebRtcOverride.value = loadLocalWebRtcOverrideEnabled(getLocalWebRtcScope());
       applyLocalWebRtcSettings(loadLocalWebRtcOverrideConfig(getLocalWebRtcScope()));
     }
@@ -1429,6 +1441,7 @@ export default defineComponent({
       webrtcSaving,
       webrtcStatusMessage,
       useLocalWebRtcOverride,
+      preferWebRtcFileTransfer,
       localWebrtcTransportPolicy,
       localWebrtcServers,
       isLocalWebRtcServersListExpanded,
@@ -1472,6 +1485,7 @@ export default defineComponent({
       onBackgroundMuteChange,
       onBackgroundEnabledChange,
       onUseLocalWebRtcOverrideChange,
+      onPreferWebRtcFileTransferChange,
       onNewDisplayDpiModeChange,
       onNewDisplayDpiValueChange,
       onPointerSamplingRateChange,

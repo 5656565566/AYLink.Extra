@@ -241,23 +241,6 @@
       </table>
     </div>
 
-    <div v-if="transferTasks[0]" class="transfer-bar">
-      <span class="transfer-detail" :title="transferTasks[0].detail">{{ transferTasks[0].detail }}</span>
-      <progress
-        :value="transferTasks[0].isIndeterminate ? undefined : transferTasks[0].progress"
-        max="100"
-        :aria-label="transferTasks[0].title" />
-      <button
-        v-if="transferTasks[0].isCancelable"
-        class="transparent"
-        type="button"
-        @click="requestCancelTransfer(transferTasks[0])">
-        {{ t('Common.Cancel', '取消') }}
-      </button>
-      <button class="transparent transfer-all" type="button" @click="router.push({ name: 'tasks' })">
-        {{ t('FilePage.TransferCount', '传输任务 ({0})', transferTasks.length) }}
-      </button>
-    </div>
     <div class="footer-bar">
       <span v-if="activeTab">
         {{ searchQuery.trim()

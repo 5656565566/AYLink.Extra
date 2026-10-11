@@ -592,6 +592,8 @@
     "PortRangeMaxPlaceholder": "留空则随机",
     "PortRangeMin": "起始端口",
     "PortRangeMinPlaceholder": "留空则随机",
+    "PreferWebRtcFileTransfer": "文件上传下载优先使用 WebRTC",
+    "PreferWebRtcFileTransferDescription": "仅对当前浏览器和当前账号生效，包含 APK 传输。关闭后直接使用 HTTP；开启后仅在 WebRTC 建连失败时回退",
     "Remove": "删除",
     "Restore": "恢复",
     "RestoreDefaults": "恢复默认设置",

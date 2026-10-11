@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,15 @@ func (fakeDeviceSettingsService) ResetByDeviceID(context.Context, int) (domainde
 }
 
 type fakeAppService struct{}
+
+type namedDownloadAppService struct {
+	fakeAppService
+	name string
+}
+
+func (s namedDownloadAppService) Download(context.Context, int, string) (*appservice.DownloadResult, error) {
+	return &appservice.DownloadResult{Name: s.name, Reader: io.NopCloser(strings.NewReader("file-content"))}, nil
+}
 
 func (fakeAppService) Launch(context.Context, int, string) error { return nil }
 func (fakeAppService) Download(context.Context, int, string) (*appservice.DownloadResult, error) {
@@ -481,6 +491,47 @@ func TestDeviceHandlerUploadFileStreamsMultipartPartToService(t *testing.T) {
 	}
 	if req.MultipartForm != nil && (len(req.MultipartForm.Value) > 0 || len(req.MultipartForm.File) > 0) {
 		t.Fatalf("expected streaming multipart reader to avoid cached form data, got %+v", req.MultipartForm)
+	}
+}
+
+func TestDeviceHandlerDownloadFilenameHeaders(t *testing.T) {
+	for _, test := range []struct{ name, expected string }{
+		{"report.txt", "report.txt"},
+		{"季度 报告.txt", "季度 报告.txt"},
+		{"应用🚀.apk", "应用🚀.apk"},
+		{"résumé.txt", "résumé.txt"},
+		{"报告\"\r\n.txt", "报告___.txt"},
+	} {
+		for _, resource := range []string{"files", "apps"} {
+			t.Run(resource+"/"+test.name, func(t *testing.T) {
+				files := &recordingFileService{downloadName: test.name, downloadContent: "file-content"}
+				handler := NewDeviceHandler(nil, nil, nil, nil, namedDownloadAppService{name: test.name}, files, nil, nil)
+				body := `{"path":"/sdcard/report.txt"}`
+				if resource == "apps" {
+					body = `{"packageName":"com.example.app"}`
+				}
+				req := httptest.NewRequest(http.MethodPost, "/api/devices/1/"+resource+"/download", strings.NewReader(body))
+				response := httptest.NewRecorder()
+				if resource == "apps" {
+					handler.DownloadApp(response, req)
+				} else {
+					handler.DownloadFile(response, req)
+				}
+				if response.Code != http.StatusOK || response.Body.String() != "file-content" {
+					t.Fatalf("unexpected download: %d %q", response.Code, response.Body.String())
+				}
+				header := response.Header().Get("Content-Disposition")
+				for _, char := range header {
+					if char > 127 {
+						t.Fatalf("download header contains unencoded Unicode: %q", header)
+					}
+				}
+				disposition, params, err := mime.ParseMediaType(header)
+				if err != nil || disposition != "attachment" || params["filename"] != test.expected {
+					t.Fatalf("filename changed: %q, parsed %v, error %v", header, params, err)
+				}
+			})
+		}
 	}
 }
 

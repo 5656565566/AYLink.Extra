@@ -1,11 +1,11 @@
 :root,
 :root[data-theme="dark"] {
-  /* Fluent Design Tokens - Dark Mode (Perfect matching Avalonia) */
+  /* Fluent 深色主题的设计变量 */
   --fluent-bg-base: #202020;
   --fluent-bg-layer: #272727;
   --fluent-bg-solid: #2d2d2d;
 
-  /* Control Backgrounds */
+  /* 控件背景 */
   --fluent-control-fill-default: rgba(255, 255, 255, 0.06);
   --fluent-control-fill-secondary: rgba(255, 255, 255, 0.08);
   --fluent-control-fill-tertiary: rgba(255, 255, 255, 0.04);
@@ -15,24 +15,24 @@
   --fluent-control-fill-accent-hover: #7C27CB;
   --fluent-control-fill-accent-active: #7124B9;
 
-  /* Text Colors */
+  /* 文字颜色 */
   --fluent-text-primary: #ffffff;
   --fluent-text-secondary: rgba(255, 255, 255, 0.78);
   --fluent-text-tertiary: rgba(255, 255, 255, 0.54);
   --fluent-text-disabled: rgba(255, 255, 255, 0.36);
   --fluent-text-on-accent: #000000;
 
-  /* Borders */
+  /* 边框 */
   --fluent-stroke-default: rgba(255, 255, 255, 0.08);
   --fluent-stroke-secondary: rgba(255, 255, 255, 0.1);
   --fluent-stroke-focus: #ffffff;
   --fluent-scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --fluent-scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
   
-  /* Accent */
+  /* 强调色 */
   --fluent-accent-default: #8A2BE2;
 
-  /* Typography */
+  /* 字体设置 */
   --fluent-font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -90,7 +90,7 @@ body {
   display: flex;
 }
 
-/* Custom Scrollbar */
+/* 自定义滚动条 */
 ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
@@ -120,7 +120,7 @@ body {
   background-color: var(--fluent-scrollbar-thumb-hover, rgba(255, 255, 255, 0.3));
 }
 
-/* Global Transitions */
+/* 全局过渡效果 */
 .fade-slide-enter-active,
 .fade-slide-leave-active {
   transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -136,7 +136,7 @@ body {
   transform: translateY(-10px);
 }
 
-/* Base Interactive Elements */
+/* 基础交互元素 */
 button {
   font-family: inherit;
   border: 1px solid var(--fluent-stroke-default);

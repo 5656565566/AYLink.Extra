@@ -592,6 +592,8 @@
     "PortRangeMaxPlaceholder": "Leave blank for random",
     "PortRangeMin": "Start port",
     "PortRangeMinPlaceholder": "Leave blank for random",
+    "PreferWebRtcFileTransfer": "Prefer WebRTC for file uploads and downloads",
+    "PreferWebRtcFileTransferDescription": "Applies only to this browser and signed-in account, including APK transfers. When off, use HTTP directly; when on, fall back only if WebRTC connection setup fails",
     "Remove": "Remove",
     "Restore": "Restore",
     "RestoreDefaults": "Restore defaults",

@@ -239,7 +239,7 @@ export default defineComponent({
       confirmPassword: ''
     });
 
-    const canManageGroupSection = computed(() => canManageAccounts.value || canManageDevices.value);
+    const canManageGroupSection = computed(() => canManageAccounts.value);
 
     const filteredDeviceGroups = computed(() => {
       const keyword = groupSearchKeyword.value.trim().toLowerCase();
@@ -849,7 +849,7 @@ export default defineComponent({
     }
 
     async function loadGroupManagementData() {
-      return loadGroupManagementDataWithOptions({ includeDevices: true, includeAccounts: true });
+      return loadGroupManagementDataWithOptions();
     }
 
     async function loadGroupManagementDataWithOptions(options?: { includeDevices?: boolean; includeAccounts?: boolean }) {
@@ -861,18 +861,13 @@ export default defineComponent({
       groupManagementError.value = '';
 
       try {
-        const includeDevices = options?.includeDevices ?? canManageDevices.value;
-        const includeAccounts = options?.includeAccounts ?? canManageAccounts.value;
-        const requests: Promise<Response>[] = [apiFetch('/api/device-groups')];
-        if (includeDevices) {
-          requests.push(apiFetch('/api/devices'));
-        }
-        if (includeAccounts) {
-          requests.push(apiFetch('/api/accounts/users'));
-        }
-
-        const responses = await Promise.all(requests);
-        const [groupsResponse, devicesResponse, accountsResponse] = responses;
+        const includeDevices = (options?.includeDevices ?? true) && canManageDevices.value && hasPermission('devices.view');
+        const includeAccounts = (options?.includeAccounts ?? true) && canManageAccounts.value;
+        const [groupsResponse, devicesResponse, accountsResponse] = await Promise.all([
+          apiFetch('/api/device-groups'),
+          includeDevices ? apiFetch('/api/devices') : Promise.resolve(null),
+          includeAccounts ? apiFetch('/api/accounts/users') : Promise.resolve(null),
+        ]);
 
         if (!groupsResponse.ok) {
           throw new Error(await readApiErrorMessage(groupsResponse, t('Settings.LoadFailed', '加载失败')));

@@ -26,24 +26,15 @@ export function normalizeIceCandidate(candidate: unknown): RTCIceCandidateInit |
   if (!candidate) return null;
 
   if (typeof candidate === 'string') {
+    const candidateString = candidate;
     try {
-      const parsed = JSON.parse(candidate);
+      const parsed = JSON.parse(candidateString);
       if (parsed && typeof parsed === 'object') {
-        let candidateText = parsed.candidate;
-        if (typeof candidateText === 'string') {
-          candidateText = deepParseCandidateText(candidateText);
-        }
-        const normalized: RTCIceCandidateInit = { candidate: ensureCandidatePrefix(String(candidateText)) };
-        if (typeof parsed.sdpMid === 'string') normalized.sdpMid = parsed.sdpMid;
-        if (typeof parsed.sdpMLineIndex === 'number') normalized.sdpMLineIndex = parsed.sdpMLineIndex;
-        if (typeof parsed.usernameFragment === 'string') normalized.usernameFragment = parsed.usernameFragment;
-        if (normalized.sdpMid === undefined && normalized.sdpMLineIndex === undefined) {
-          normalized.sdpMLineIndex = 0;
-        }
-        return normalized;
+        candidate = parsed;
       }
     } catch {
-      return { candidate: ensureCandidatePrefix(candidate), sdpMLineIndex: 0 };
+      if (!candidateString.trim()) return null;
+      return { candidate: ensureCandidatePrefix(candidateString), sdpMLineIndex: 0 };
     }
   }
 
@@ -57,7 +48,7 @@ export function normalizeIceCandidate(candidate: unknown): RTCIceCandidateInit |
   if (typeof candidateText === 'string') {
     candidateText = deepParseCandidateText(candidateText);
   }
-  if (typeof candidateText !== 'string' || candidateText.length === 0) {
+  if (typeof candidateText !== 'string' || candidateText.trim().length === 0) {
     return null;
   }
 

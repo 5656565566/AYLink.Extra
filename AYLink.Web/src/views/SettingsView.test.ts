@@ -2,14 +2,16 @@ import { ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsView from './SettingsView.vue';
+import { apiFetch } from '../utils/api';
 import { loadLocalWebRtcFileTransferPreferred, loadLocalWebRtcOverrideEnabled, setLocalWebRtcFileTransferPreferred } from '../services/webrtcSettings';
 
 enableAutoUnmount(afterEach);
 
 const currentUser = ref({ Id: 1, Username: 'test' });
+const { permissions } = vi.hoisted(() => ({ permissions: new Set<string>() }));
 vi.mock('../services/auth', () => ({
   useAuth: () => ({ currentUser }),
-  hasPermission: () => false,
+  hasPermission: (permission: string) => permissions.has(permission),
   logout: vi.fn(),
   logoutAll: vi.fn(),
 }));
@@ -25,7 +27,58 @@ vi.mock('../utils/api', () => ({
 
 beforeEach(() => {
   localStorage.clear();
+  permissions.clear();
+  vi.mocked(apiFetch).mockClear();
+  vi.mocked(apiFetch).mockImplementation(async (url) => {
+    if (url === '/api/device-groups') return new Response(JSON.stringify({ items: [{ Id: 1, Name: 'Group', Description: '', DeviceCount: 0, UserCount: 0, RoleCount: 0 }] }));
+    if (url === '/api/accounts/users') return new Response(JSON.stringify({ users: [{ Id: 2, Username: 'user' }], roles: [{ Id: 3, Name: 'role' }] }));
+    if (url === '/api/devices') return new Response(JSON.stringify([{ Id: 4, Name: 'Device' }]));
+    return new Response('{"version":"1.0.0"}');
+  });
   currentUser.value = { Id: 1, Username: 'test' };
+});
+
+describe('group management permissions', () => {
+  it('does not show or load group management for a device-only administrator', async () => {
+    permissions.add('devices.manage');
+    permissions.add('devices.view');
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('分组管理');
+    expect(vi.mocked(apiFetch).mock.calls.map(([url]) => url)).not.toContain('/api/device-groups');
+  });
+
+  it.each([
+    ['accounts.manage'],
+    ['accounts.manage', 'devices.manage'],
+    ['accounts.manage', 'devices.view'],
+    ['accounts.manage', 'devices.manage', 'devices.view'],
+  ].map((granted) => ({ granted })))('loads only permitted data for $granted', async ({ granted }) => {
+    granted.forEach((permission) => permissions.add(permission));
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const vm = wrapper.vm as unknown as {
+      groupManagementError: string;
+      groupManagementDevices: unknown[];
+      groupManagementUsers: unknown[];
+      groupManagementRoles: unknown[];
+      refreshGroupManagementList: () => Promise<void>;
+    };
+    const requests = vi.mocked(apiFetch).mock.calls.map(([url]) => url);
+    expect(requests).toContain('/api/device-groups');
+    expect(requests).toContain('/api/accounts/users');
+    const includeDevices = permissions.has('devices.manage') && permissions.has('devices.view');
+    expect(requests.includes('/api/devices')).toBe(includeDevices);
+    expect(vm.groupManagementDevices).toHaveLength(includeDevices ? 1 : 0);
+    expect(vm.groupManagementUsers).toHaveLength(1);
+    expect(vm.groupManagementRoles).toHaveLength(1);
+    expect(vm.groupManagementError).toBe('');
+    vi.mocked(apiFetch).mockClear();
+    await vm.refreshGroupManagementList();
+    expect(vi.mocked(apiFetch).mock.calls.map(([url]) => url)).toEqual(['/api/device-groups']);
+    expect(vm.groupManagementUsers).toHaveLength(1);
+    expect(vm.groupManagementRoles).toHaveLength(1);
+  });
 });
 
 describe('local WebRTC file transfer preference', () => {

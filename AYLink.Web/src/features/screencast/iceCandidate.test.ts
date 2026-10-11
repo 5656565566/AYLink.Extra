@@ -50,6 +50,27 @@ describe('normalizeIceCandidate', () => {
     expect(normalizeIceCandidate({ sdpMid: '0' })).toBeNull();
   });
 
+  it.each([
+    {},
+    { sdpMid: '0' },
+    { candidate: null },
+    { candidate: 123 },
+    { candidate: '' },
+    { candidate: '   ' },
+    [],
+  ].map((payload) => ({ payload })))('rejects the same invalid object and JSON payload: $payload', ({ payload }) => {
+    expect(normalizeIceCandidate(payload)).toBeNull();
+    expect(normalizeIceCandidate(JSON.stringify(payload))).toBeNull();
+  });
+
+  it.each([
+    { candidate: '1 1 udp 1 127.0.0.1 9 typ host', sdpMid: 'video', sdpMLineIndex: 2, usernameFragment: 'user' },
+    { Candidate: '1 1 udp 1 127.0.0.1 9 typ host', SdpMid: 'video', SdpMLineIndex: '2', UsernameFragment: 'user' },
+    { candidate: JSON.stringify({ candidate: '1 1 udp 1 127.0.0.1 9 typ host' }) },
+  ])('normalizes valid JSON and object payloads identically: %j', (payload) => {
+    expect(normalizeIceCandidate(JSON.stringify(payload))).toEqual(normalizeIceCandidate(payload));
+  });
+
   it('warns and returns null for invalid payload types', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 

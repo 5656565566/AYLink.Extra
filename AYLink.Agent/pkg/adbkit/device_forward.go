@@ -1,6 +1,7 @@
 package adbkit
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -41,26 +42,37 @@ func (d *Device) Forward(local, remote string) (bool, error) {
 
 // ForwardRemove removes a port forward on the server for this device.
 func (d *Device) ForwardRemove(local string) (bool, error) {
-	conn, err := d.client.Connection()
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHostCommandTimeout)
+	defer cancel()
+	return d.ForwardRemoveContext(ctx, local)
+}
+
+func (d *Device) ForwardRemoveContext(ctx context.Context, local string) (bool, error) {
+	conn, err := d.client.ConnectionContext(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	stopContextClose := closeConnOnContextDone(ctx, conn)
+	defer stopContextClose()
 
 	cmd := fmt.Sprintf("%s:killforward:%s", d.descriptor.getHostPrefix(), local)
 	if _, err := conn.Write([]byte(fmt.Sprintf("%04x%s", len(cmd), cmd))); err != nil {
-		return false, err
+		return false, contextError(ctx, err)
 	}
 
 	transport := NewTransport(conn)
 	status, err := transport.ReadStatus()
 	if err != nil {
-		return false, err
+		return false, contextError(ctx, err)
 	}
 	if status == StatusOkay {
 		status, err := transport.ReadStatus()
 		if err != nil {
-			return false, err
+			return false, contextError(ctx, err)
 		}
 		if status == StatusOkay {
 			return true, nil

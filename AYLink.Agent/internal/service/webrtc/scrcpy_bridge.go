@@ -195,12 +195,8 @@ func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
 
 			if peerConnection.ConnectionState() == pion.PeerConnectionStateConnected {
 				// 转发原始 Opus 数据载荷
-				if packet.Codec == domainscrcpy.AudioCodecOpus {
-					// 过滤 Config 包 Config 包不能发送给 WebRTC 的轨道 否则会导致解码器错误而没有声音
-					if packet.IsConfig {
-						continue
-					}
-
+				// Config 包不能发送给轨道，但仍需释放其载荷。
+				if packet.Codec == domainscrcpy.AudioCodecOpus && !packet.IsConfig {
 					_ = b.track.WriteSample(media.Sample{
 						Data:     packet.Data,
 						Duration: defaultAudioSampleDuration,

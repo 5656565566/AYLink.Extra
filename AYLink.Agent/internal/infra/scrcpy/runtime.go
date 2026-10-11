@@ -50,7 +50,8 @@ var mediaPacketBufferPool = sync.Pool{
 }
 
 type runtime struct {
-	logger logging.Logger
+	logger  logging.Logger
+	session *domainscrcpy.Session
 
 	videoConn   net.Conn
 	audioConn   net.Conn
@@ -59,6 +60,7 @@ type runtime struct {
 	controlMu           sync.Mutex
 	controlEnqueueMu    sync.Mutex
 	closeOnce           sync.Once
+	closeErr            error
 	controlWrites       chan []byte
 	controlReadMu       sync.Mutex
 	controlBuffer       []byte
@@ -105,10 +107,20 @@ type cachedVideoPacket struct {
 	cachedAt   time.Time
 }
 
-func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session) (domainscrcpy.Runtime, error) {
+func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session) (_ domainscrcpy.Runtime, returnErr error) {
 	if session == nil {
 		return nil, errors.New("scrcpy session is nil")
 	}
+	var rt *runtime
+	defer func() {
+		if returnErr != nil {
+			if rt != nil {
+				returnErr = errors.Join(returnErr, rt.Close())
+			} else {
+				returnErr = errors.Join(returnErr, session.Close())
+			}
+		}
+	}()
 	if session.VideoPort == 0 {
 		return nil, errors.New("scrcpy video port is not available")
 	}
@@ -119,8 +131,9 @@ func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session
 		return nil, fmt.Errorf("connect scrcpy video socket: %w", err)
 	}
 
-	rt := &runtime{
+	rt = &runtime{
 		logger:                s.logger,
+		session:               session,
 		videoConn:             videoConn,
 		videoSubscribers:      make(map[int]chan domainscrcpy.VideoPacket),
 		audioSubscribers:      make(map[int]chan domainscrcpy.AudioPacket),
@@ -131,18 +144,15 @@ func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session
 		done:                  make(chan struct{}),
 		controlWrites:         make(chan []byte, controlQueueSize),
 	}
-	go rt.readVideoLoop()
 
 	var audioConn net.Conn
 	if session.AudioPort != 0 {
 		s.logger.Info("scrcpy runtime connecting audio socket", "port", session.AudioPort)
 		audioConn, err = dialLocalPort(ctx, session.AudioPort)
 		if err != nil {
-			_ = rt.Close()
 			return nil, fmt.Errorf("connect scrcpy audio socket: %w", err)
 		}
 		rt.audioConn = audioConn
-		go rt.readAudioLoop()
 	}
 
 	var controlConn net.Conn
@@ -150,10 +160,16 @@ func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session
 		s.logger.Info("scrcpy runtime connecting control socket", "port", session.ControlPort)
 		controlConn, err = dialLocalPort(ctx, session.ControlPort)
 		if err != nil {
-			_ = rt.Close()
 			return nil, fmt.Errorf("connect scrcpy control socket: %w", err)
 		}
 		rt.controlConn = controlConn
+	}
+	// 完成所有连接后再启动读取，避免提前关闭时漏掉尚未接管的连接。
+	go rt.readVideoLoop()
+	if rt.audioConn != nil {
+		go rt.readAudioLoop()
+	}
+	if rt.controlConn != nil {
 		go rt.writeControlLoop()
 		go rt.readControlLoop()
 	}
@@ -668,28 +684,33 @@ func (r *runtime) dropQueuedControlPayloads(kind droppableControlPayloadKind) {
 }
 
 func (r *runtime) Close() error {
-	var closeErr error
 	r.closeOnce.Do(func() {
 		close(r.done)
 		r.markSourceRuntimeClosed()
 		r.closeAllSubscribers()
 		if r.videoConn != nil {
-			if err := r.videoConn.Close(); err != nil && closeErr == nil {
-				closeErr = err
+			if err := r.videoConn.Close(); err != nil && r.closeErr == nil {
+				r.closeErr = err
 			}
 		}
 		if r.audioConn != nil {
-			if err := r.audioConn.Close(); err != nil && closeErr == nil {
-				closeErr = err
+			if err := r.audioConn.Close(); err != nil && r.closeErr == nil {
+				r.closeErr = err
 			}
 		}
 		if r.controlConn != nil {
-			if err := r.controlConn.Close(); err != nil && closeErr == nil {
-				closeErr = err
+			if err := r.controlConn.Close(); err != nil && r.closeErr == nil {
+				r.closeErr = err
+			}
+		}
+		if r.session != nil {
+			if err := r.session.Close(); err != nil {
+				r.closeErr = errors.Join(r.closeErr, err)
+				r.logger.Warn("scrcpy session cleanup failed", "scid", r.session.SCID, "err", err)
 			}
 		}
 	})
-	return closeErr
+	return r.closeErr
 }
 
 func (r *runtime) readVideoLoop() {
@@ -920,11 +941,20 @@ func (r *runtime) readAudioLoop() {
 			return
 		}
 
-		if cap(payloadBuffer) < packetSize {
-			payloadBuffer = make([]byte, packetSize)
+		var payload []byte
+		if codec == domainscrcpy.AudioCodecOpus {
+			// 透传载荷由订阅者持有，全部释放前不能复用。
+			payload = acquireMediaPacketBuffer(packetSize)
+		} else {
+			if cap(payloadBuffer) < packetSize {
+				payloadBuffer = make([]byte, packetSize)
+			}
+			payload = payloadBuffer[:packetSize]
 		}
-		payload := payloadBuffer[:packetSize]
 		if _, err := io.ReadFull(r.audioConn, payload); err != nil {
+			if codec == domainscrcpy.AudioCodecOpus {
+				releaseMediaPacketBuffer(payload)
+			}
 			r.emitError(fmt.Errorf("read scrcpy audio packet payload: %w", err))
 			return
 		}

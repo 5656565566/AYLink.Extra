@@ -2,6 +2,7 @@ package scrcpy
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -60,6 +61,20 @@ type Session struct {
 	VideoPort   int
 	AudioPort   int
 	ControlPort int
+	CloseFunc   func() error `json:"-"`
+
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// Close releases the shell and forwards owned by this session exactly once.
+func (s *Session) Close() error {
+	s.closeOnce.Do(func() {
+		if s.CloseFunc != nil {
+			s.closeErr = s.CloseFunc()
+		}
+	})
+	return s.closeErr
 }
 
 type VideoCodec string

@@ -3,6 +3,7 @@ package scrcpy
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -139,7 +140,7 @@ func (s *Service) ListAudioEncoderOptions(ctx context.Context, serial string) ([
 	return options, nil
 }
 
-func (s *Service) StartSession(ctx context.Context, serial string, config domainscrcpy.SessionConfig) (*domainscrcpy.Session, error) {
+func (s *Service) StartSession(ctx context.Context, serial string, config domainscrcpy.SessionConfig) (_ *domainscrcpy.Session, returnErr error) {
 	device := s.client.Device(adbkit.DeviceWithSerial(serial))
 	if err := s.pushServer(device); err != nil {
 		return nil, err
@@ -178,12 +179,25 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 		return nil, err
 	}
 
-	ports := &domainscrcpy.Session{}
-	ports.SCID = scid
+	ports := &domainscrcpy.Session{SCID: scid}
+	var ownedPorts []int
+	ports.CloseFunc = func() error {
+		closeErr := shellSession.Close()
+		for _, port := range ownedPorts {
+			if _, err := device.ForwardRemove(fmt.Sprintf("tcp:%d", port)); err != nil {
+				closeErr = errors.Join(closeErr, fmt.Errorf("remove scrcpy forward %d: %w", port, err))
+			}
+		}
+		return closeErr
+	}
+	defer func() {
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, ports.Close())
+		}
+	}()
 
 	select {
 	case <-ctx.Done():
-		_ = shellSession.Close()
 		return nil, ctx.Err()
 	case <-time.After(300 * time.Millisecond):
 	}
@@ -191,39 +205,36 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 	if options.Video {
 		port, err := allocateTCPPort()
 		if err != nil {
-			_ = shellSession.Close()
 			return nil, err
 		}
 		if _, err := device.Forward(fmt.Sprintf("tcp:%d", port), fmt.Sprintf("localabstract:scrcpy_%d", scid)); err != nil {
-			_ = shellSession.Close()
 			return nil, err
 		}
+		ownedPorts = append(ownedPorts, port)
 		ports.VideoPort = port
 	}
 
 	if options.Audio {
 		port, err := allocateTCPPort()
 		if err != nil {
-			_ = shellSession.Close()
 			return nil, err
 		}
 		if _, err := device.Forward(fmt.Sprintf("tcp:%d", port), fmt.Sprintf("localabstract:scrcpy_%d", scid)); err != nil {
-			_ = shellSession.Close()
 			return nil, err
 		}
+		ownedPorts = append(ownedPorts, port)
 		ports.AudioPort = port
 	}
 
 	if options.Control {
 		port, err := allocateTCPPort()
 		if err != nil {
-			_ = shellSession.Close()
 			return nil, err
 		}
 		if _, err := device.Forward(fmt.Sprintf("tcp:%d", port), fmt.Sprintf("localabstract:scrcpy_%d", scid)); err != nil {
-			_ = shellSession.Close()
 			return nil, err
 		}
+		ownedPorts = append(ownedPorts, port)
 		ports.ControlPort = port
 	}
 
@@ -231,7 +242,11 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 		pipeReader, pipeWriter := io.Pipe()
 		defer pipeReader.Close()
 		defer pipeWriter.Close()
-		defer shellSession.Close()
+		defer func() {
+			if err := ports.Close(); err != nil {
+				s.logger.Warn("scrcpy session cleanup failed", "serial", serial, "scid", scid, "err", err)
+			}
+		}()
 
 		go func() {
 			defer pipeWriter.Close()
@@ -283,7 +298,6 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 	// 然后本地读到 EOF 表现为首帧始终无法到达
 	// 轮询设备侧 socket 是否已经就绪 防止过早连接
 	if err := s.waitForServerReady(ctx, device, scid); err != nil {
-		_ = shellSession.Close()
 		return nil, err
 	}
 

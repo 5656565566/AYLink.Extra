@@ -118,97 +118,22 @@ function validateAction(action: InputMappingAction | unknown, path: string, issu
 
   switch (action.type) {
     case 'tap':
-      validateNormalizedPoint(action.point, `${path}.point`, issues);
-      {
-        const durationMs = action.durationMs;
-        if (durationMs !== null && durationMs !== undefined && (!isFiniteNumber(durationMs) || durationMs < 0)) {
-          issues.push({ path: `${path}.durationMs`, message: '点击时长必须是非负数字' });
-        }
-      }
+      validateTapAction(action, path, issues);
       break;
     case 'rapidTap':
-      validateNormalizedPoint(action.point, `${path}.point`, issues);
-      if (action.mode !== 'whileHeld' && action.mode !== 'burst') {
-        issues.push({ path: `${path}.mode`, message: '连击模式无效' });
-      }
-      {
-        const tapsPerSecond = action.tapsPerSecond;
-        if (!isFiniteNumber(tapsPerSecond) || tapsPerSecond <= 0 || tapsPerSecond > 60) {
-          issues.push({ path: `${path}.tapsPerSecond`, message: '每秒连击次数必须是 1..60 之间的数字' });
-        }
-      }
-      {
-        const tapCount = action.tapCount;
-        if (action.mode === 'burst' && (!Number.isInteger(tapCount) || typeof tapCount !== 'number' || tapCount <= 0 || tapCount > 200)) {
-          issues.push({ path: `${path}.tapCount`, message: '连击次数必须是 1..200 之间的整数' });
-        }
-      }
+      validateRapidTapAction(action, path, issues);
       break;
     case 'hold':
       validateNormalizedPoint(action.point, `${path}.point`, issues);
       break;
     case 'virtualJoystick':
-      validateNormalizedPoint(action.center, `${path}.center`, issues);
-      validateDirection(action.direction, `${path}.direction`, issues);
-      if (action.controlMode !== null && action.controlMode !== undefined && action.controlMode !== 'slide' && action.controlMode !== 'tap') {
-        issues.push({ path: `${path}.controlMode`, message: '方向按键操作方式无效' });
-      }
-      {
-        const radius = action.radius;
-        if (!isFiniteNumber(radius) || radius <= 0 || radius > 1) {
-          issues.push({ path: `${path}.radius`, message: '摇杆半径必须是 0..1 之间的正数' });
-        }
-      }
+      validateVirtualJoystickAction(action, path, issues);
       break;
     case 'swipe':
-      validateNormalizedPoint(action.from, `${path}.from`, issues);
-      validateNormalizedPoint(action.to, `${path}.to`, issues);
-      if (action.path !== null && action.path !== undefined) {
-        if (!Array.isArray(action.path) || action.path.length < 2) {
-          issues.push({ path: `${path}.path`, message: '滑动轨迹至少需要两个点' });
-        } else {
-          action.path.forEach((point, index) => validateNormalizedPoint(point, `${path}.path[${index}]`, issues));
-        }
-      }
-      if (action.straight !== null && action.straight !== undefined && typeof action.straight !== 'boolean') {
-        issues.push({ path: `${path}.straight`, message: '直线轨迹开关必须是布尔值' });
-      }
-      if (action.startHoldMs !== null && action.startHoldMs !== undefined && (!isFiniteNumber(action.startHoldMs) || action.startHoldMs < 0)) {
-        issues.push({ path: `${path}.startHoldMs`, message: '起始停留时间必须是非负数字' });
-      }
-      {
-        const durationMs = action.durationMs;
-        if (!isFiniteNumber(durationMs) || durationMs <= 0) {
-          issues.push({ path: `${path}.durationMs`, message: '滑动时长必须是正数' });
-        }
-      }
+      validateSwipeAction(action, path, issues);
       break;
     case 'mouseLook':
-      validateNormalizedPoint(action.touchStart, `${path}.touchStart`, issues);
-      {
-        const sensitivityX = action.sensitivityX;
-        if (!isFiniteNumber(sensitivityX) || sensitivityX <= 0) {
-          issues.push({ path: `${path}.sensitivityX`, message: '横向灵敏度必须是正数' });
-        }
-      }
-      {
-        const sensitivityY = action.sensitivityY;
-        if (!isFiniteNumber(sensitivityY) || sensitivityY <= 0) {
-          issues.push({ path: `${path}.sensitivityY`, message: '纵向灵敏度必须是正数' });
-        }
-      }
-      {
-        const maxStep = action.maxStep;
-        if (maxStep !== null && maxStep !== undefined && (!isFiniteNumber(maxStep) || maxStep <= 0 || maxStep > 1)) {
-          issues.push({ path: `${path}.maxStep`, message: 'maxStep 必须是 0..1 之间的正数' });
-        }
-      }
-      for (const axis of ['rangeX', 'rangeY'] as const) {
-        const range = action[axis];
-        if (range !== null && range !== undefined && (!isFiniteNumber(range) || range <= 0 || range > 1)) {
-          issues.push({ path: `${path}.${axis}`, message: '视角范围必须是 0..1 之间的正数' });
-        }
-      }
+      validateMouseLookAction(action, path, issues);
       break;
     case 'hidKey':
       if (typeof action.code !== 'string' || action.code.trim().length === 0) {
@@ -226,6 +151,85 @@ function validateAction(action: InputMappingAction | unknown, path: string, issu
     default:
       issues.push({ path: `${path}.type`, message: `未知动作类型 ${action.type}` });
       break;
+  }
+}
+
+function validateTapAction(action: Record<string, unknown>, path: string, issues: InputMappingValidationIssue[]) {
+  validateNormalizedPoint(action.point, `${path}.point`, issues);
+  const durationMs = action.durationMs;
+  if (durationMs !== null && durationMs !== undefined && (!isFiniteNumber(durationMs) || durationMs < 0)) {
+    issues.push({ path: `${path}.durationMs`, message: '点击时长必须是非负数字' });
+  }
+}
+
+function validateRapidTapAction(action: Record<string, unknown>, path: string, issues: InputMappingValidationIssue[]) {
+  validateNormalizedPoint(action.point, `${path}.point`, issues);
+  if (action.mode !== 'whileHeld' && action.mode !== 'burst') {
+    issues.push({ path: `${path}.mode`, message: '连击模式无效' });
+  }
+  const tapsPerSecond = action.tapsPerSecond;
+  if (!isFiniteNumber(tapsPerSecond) || tapsPerSecond <= 0 || tapsPerSecond > 60) {
+    issues.push({ path: `${path}.tapsPerSecond`, message: '每秒连击次数必须是 1..60 之间的数字' });
+  }
+  const tapCount = action.tapCount;
+  if (action.mode === 'burst' && (!Number.isInteger(tapCount) || typeof tapCount !== 'number' || tapCount <= 0 || tapCount > 200)) {
+    issues.push({ path: `${path}.tapCount`, message: '连击次数必须是 1..200 之间的整数' });
+  }
+}
+
+function validateVirtualJoystickAction(action: Record<string, unknown>, path: string, issues: InputMappingValidationIssue[]) {
+  validateNormalizedPoint(action.center, `${path}.center`, issues);
+  validateDirection(action.direction, `${path}.direction`, issues);
+  if (action.controlMode !== null && action.controlMode !== undefined && action.controlMode !== 'slide' && action.controlMode !== 'tap') {
+    issues.push({ path: `${path}.controlMode`, message: '方向按键操作方式无效' });
+  }
+  const radius = action.radius;
+  if (!isFiniteNumber(radius) || radius <= 0 || radius > 1) {
+    issues.push({ path: `${path}.radius`, message: '摇杆半径必须是 0..1 之间的正数' });
+  }
+}
+
+function validateSwipeAction(action: Record<string, unknown>, path: string, issues: InputMappingValidationIssue[]) {
+  validateNormalizedPoint(action.from, `${path}.from`, issues);
+  validateNormalizedPoint(action.to, `${path}.to`, issues);
+  if (action.path !== null && action.path !== undefined) {
+    if (!Array.isArray(action.path) || action.path.length < 2) {
+      issues.push({ path: `${path}.path`, message: '滑动轨迹至少需要两个点' });
+    } else {
+      action.path.forEach((point, index) => validateNormalizedPoint(point, `${path}.path[${index}]`, issues));
+    }
+  }
+  if (action.straight !== null && action.straight !== undefined && typeof action.straight !== 'boolean') {
+    issues.push({ path: `${path}.straight`, message: '直线轨迹开关必须是布尔值' });
+  }
+  if (action.startHoldMs !== null && action.startHoldMs !== undefined && (!isFiniteNumber(action.startHoldMs) || action.startHoldMs < 0)) {
+    issues.push({ path: `${path}.startHoldMs`, message: '起始停留时间必须是非负数字' });
+  }
+  const durationMs = action.durationMs;
+  if (!isFiniteNumber(durationMs) || durationMs <= 0) {
+    issues.push({ path: `${path}.durationMs`, message: '滑动时长必须是正数' });
+  }
+}
+
+function validateMouseLookAction(action: Record<string, unknown>, path: string, issues: InputMappingValidationIssue[]) {
+  validateNormalizedPoint(action.touchStart, `${path}.touchStart`, issues);
+  const sensitivityX = action.sensitivityX;
+  if (!isFiniteNumber(sensitivityX) || sensitivityX <= 0) {
+    issues.push({ path: `${path}.sensitivityX`, message: '横向灵敏度必须是正数' });
+  }
+  const sensitivityY = action.sensitivityY;
+  if (!isFiniteNumber(sensitivityY) || sensitivityY <= 0) {
+    issues.push({ path: `${path}.sensitivityY`, message: '纵向灵敏度必须是正数' });
+  }
+  const maxStep = action.maxStep;
+  if (maxStep !== null && maxStep !== undefined && (!isFiniteNumber(maxStep) || maxStep <= 0 || maxStep > 1)) {
+    issues.push({ path: `${path}.maxStep`, message: 'maxStep 必须是 0..1 之间的正数' });
+  }
+  for (const axis of ['rangeX', 'rangeY'] as const) {
+    const range = action[axis];
+    if (range !== null && range !== undefined && (!isFiniteNumber(range) || range <= 0 || range > 1)) {
+      issues.push({ path: `${path}.${axis}`, message: '视角范围必须是 0..1 之间的正数' });
+    }
   }
 }
 

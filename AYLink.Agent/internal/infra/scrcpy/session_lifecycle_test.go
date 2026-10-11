@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,59 @@ func TestStartSessionFailureRemovesOnlyOwnedForwards(t *testing.T) {
 				t.Fatalf("expected startup failure, got session %v, error %v", session, err)
 			}
 			adb.assertCleaned(t)
+		})
+	}
+}
+
+func TestStartSessionKeepsForwardOrderForEnabledStreams(t *testing.T) {
+	for _, enabled := range []struct {
+		name    string
+		video   bool
+		audio   bool
+		control bool
+	}{
+		{name: "video", video: true},
+		{name: "audio", audio: true},
+		{name: "control", control: true},
+		{name: "video and control", video: true, control: true},
+		{name: "all streams", video: true, audio: true, control: true},
+	} {
+		t.Run(enabled.name, func(t *testing.T) {
+			adb, service := newSessionTestService(t)
+			session, err := service.StartSession(context.Background(), "test", domainscrcpy.SessionConfig{
+				Video: enabled.video, Audio: enabled.audio, Control: enabled.control,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = session.Close() })
+			var expected []string
+			for _, stream := range []struct {
+				enabled bool
+				port    int
+			}{{enabled.video, session.VideoPort}, {enabled.audio, session.AudioPort}, {enabled.control, session.ControlPort}} {
+				if (stream.port != 0) != stream.enabled {
+					t.Fatalf("stream enabled=%v has unexpected port %d", stream.enabled, stream.port)
+				}
+				if stream.enabled {
+					expected = append(expected, "tcp:"+strconv.Itoa(stream.port))
+				}
+			}
+			adb.mu.Lock()
+			created := append([]string(nil), adb.created...)
+			adb.mu.Unlock()
+			if !slices.Equal(created, expected) {
+				t.Fatalf("forward creation order changed: got %v, want %v", created, expected)
+			}
+			if err := session.Close(); err != nil {
+				t.Fatal(err)
+			}
+			adb.assertCleaned(t)
+			adb.mu.Lock()
+			defer adb.mu.Unlock()
+			if !slices.Equal(adb.removed, expected) {
+				t.Fatalf("forward removal order changed: got %v, want %v", adb.removed, expected)
+			}
 		})
 	}
 }
@@ -148,6 +202,7 @@ type sessionTestADB struct {
 	connections  []net.Conn
 	workers      sync.WaitGroup
 	forwards     map[string]string
+	created      []string
 	removed      []string
 	forwardCount int
 	failForward  int
@@ -249,6 +304,9 @@ func (a *sessionTestADB) serve(conn net.Conn) {
 				_, _ = io.WriteString(conn, "scrcpy_"+scid)
 			}
 			return
+		case strings.HasPrefix(command, "shell:") && strings.Contains(command, "list_encoders=true"):
+			_, _ = io.WriteString(conn, "OKAY--audio-codec=opus --audio-encoder=c2.android.opus.encoder\n")
+			return
 		case strings.Contains(command, ":forward:"):
 			_, endpoints, _ := strings.Cut(command, ":forward:")
 			local, remote, _ := strings.Cut(endpoints, ";")
@@ -257,6 +315,7 @@ func (a *sessionTestADB) serve(conn net.Conn) {
 			fail := a.forwardCount == a.failForward
 			if !fail {
 				a.forwards[local] = remote
+				a.created = append(a.created, local)
 			}
 			a.mu.Unlock()
 			if fail {

@@ -203,11 +203,8 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 	}
 
 	if options.Video {
-		port, err := allocateTCPPort()
+		port, err := createSessionForward(device, scid)
 		if err != nil {
-			return nil, err
-		}
-		if _, err := device.Forward(fmt.Sprintf("tcp:%d", port), fmt.Sprintf("localabstract:scrcpy_%d", scid)); err != nil {
 			return nil, err
 		}
 		ownedPorts = append(ownedPorts, port)
@@ -215,11 +212,8 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 	}
 
 	if options.Audio {
-		port, err := allocateTCPPort()
+		port, err := createSessionForward(device, scid)
 		if err != nil {
-			return nil, err
-		}
-		if _, err := device.Forward(fmt.Sprintf("tcp:%d", port), fmt.Sprintf("localabstract:scrcpy_%d", scid)); err != nil {
 			return nil, err
 		}
 		ownedPorts = append(ownedPorts, port)
@@ -227,71 +221,15 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 	}
 
 	if options.Control {
-		port, err := allocateTCPPort()
+		port, err := createSessionForward(device, scid)
 		if err != nil {
-			return nil, err
-		}
-		if _, err := device.Forward(fmt.Sprintf("tcp:%d", port), fmt.Sprintf("localabstract:scrcpy_%d", scid)); err != nil {
 			return nil, err
 		}
 		ownedPorts = append(ownedPorts, port)
 		ports.ControlPort = port
 	}
 
-	go func() {
-		pipeReader, pipeWriter := io.Pipe()
-		defer pipeReader.Close()
-		defer pipeWriter.Close()
-		defer func() {
-			if err := ports.Close(); err != nil {
-				s.logger.Warn("scrcpy session cleanup failed", "serial", serial, "scid", scid, "err", err)
-			}
-		}()
-
-		go func() {
-			defer pipeWriter.Close()
-			for {
-				packet, err := shellSession.ReadPacket()
-				if err != nil {
-					if err != io.EOF {
-						s.logger.Warn("scrcpy shell packet read failed", "serial", serial, "scid", scid, "err", err)
-					}
-					return
-				}
-
-				switch packet.ID {
-				case adbkit.ShellPacketStdout, adbkit.ShellPacketStderr:
-					if len(packet.Data) == 0 {
-						continue
-					}
-					if _, err := pipeWriter.Write(packet.Data); err != nil {
-						return
-					}
-				case adbkit.ShellPacketExit:
-					s.logger.Info("scrcpy shell session exit", "serial", serial, "scid", scid, "code", strings.TrimSpace(string(packet.Data)))
-					return
-				}
-			}
-		}()
-
-		scanner := bufio.NewScanner(pipeReader)
-		buffer := make([]byte, 0, 16*1024)
-		scanner.Buffer(buffer, 512*1024)
-
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			s.logger.Info("scrcpy", "serial", serial, "scid", scid, "line", line)
-		}
-
-		if err := scanner.Err(); err != nil {
-			s.logger.Warn("scrcpy server stream ended with error", "serial", serial, "scid", scid, "err", err)
-			return
-		}
-		s.logger.Info("scrcpy server stream ended", "serial", serial, "scid", scid)
-	}()
+	go s.readSessionLogs(serial, scid, ports, shellSession)
 
 	// 设备端创建 scrcpy localabstract socket 存在启动竞态 尤其是到安卓设备延迟高
 	// 若客户端过早连接转发端口 adbd 会报 "failed to connect to socket"
@@ -303,6 +241,72 @@ func (s *Service) StartSession(ctx context.Context, serial string, config domain
 
 	s.logger.Info("scrcpy session started", "serial", serial, "scid", scid, "videoPort", ports.VideoPort, "audioPort", ports.AudioPort, "controlPort", ports.ControlPort)
 	return ports, nil
+}
+
+func createSessionForward(device *adbkit.Device, scid int) (int, error) {
+	port, err := allocateTCPPort()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := device.Forward(fmt.Sprintf("tcp:%d", port), fmt.Sprintf("localabstract:scrcpy_%d", scid)); err != nil {
+		return 0, err
+	}
+	return port, nil
+}
+
+func (s *Service) readSessionLogs(serial string, scid int, session *domainscrcpy.Session, shellSession *adbkit.ShellSession) {
+	pipeReader, pipeWriter := io.Pipe()
+	defer pipeReader.Close()
+	defer pipeWriter.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			s.logger.Warn("scrcpy session cleanup failed", "serial", serial, "scid", scid, "err", err)
+		}
+	}()
+
+	go func() {
+		defer pipeWriter.Close()
+		for {
+			packet, err := shellSession.ReadPacket()
+			if err != nil {
+				if err != io.EOF {
+					s.logger.Warn("scrcpy shell packet read failed", "serial", serial, "scid", scid, "err", err)
+				}
+				return
+			}
+
+			switch packet.ID {
+			case adbkit.ShellPacketStdout, adbkit.ShellPacketStderr:
+				if len(packet.Data) == 0 {
+					continue
+				}
+				if _, err := pipeWriter.Write(packet.Data); err != nil {
+					return
+				}
+			case adbkit.ShellPacketExit:
+				s.logger.Info("scrcpy shell session exit", "serial", serial, "scid", scid, "code", strings.TrimSpace(string(packet.Data)))
+				return
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(pipeReader)
+	buffer := make([]byte, 0, 16*1024)
+	scanner.Buffer(buffer, 512*1024)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		s.logger.Info("scrcpy", "serial", serial, "scid", scid, "line", line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		s.logger.Warn("scrcpy server stream ended with error", "serial", serial, "scid", scid, "err", err)
+		return
+	}
+	s.logger.Info("scrcpy server stream ended", "serial", serial, "scid", scid)
 }
 
 func (s *Service) waitForServerReady(ctx context.Context, device *adbkit.Device, scid int) error {

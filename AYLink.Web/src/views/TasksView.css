@@ -86,9 +86,6 @@
   background: var(--fluent-control-fill-default);
   color: var(--fluent-text-primary);
   outline: none;
-}
-
-.task-search {
   width: min(260px, 28vw);
   padding: 0 10px;
 }

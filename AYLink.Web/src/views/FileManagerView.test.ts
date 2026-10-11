@@ -1,8 +1,10 @@
 import { computed, ref } from 'vue';
-import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FileManagerView from './FileManagerView.vue';
 import type { FileEntry, FileManagerTab } from '../types/files';
+
+enableAutoUnmount(afterEach);
 
 const {
   notificationShow,
@@ -26,7 +28,7 @@ const {
   dialogPrompt: vi.fn(async () => 'renamed.txt'),
   apiFetch: vi.fn(),
   readApiErrorMessage: vi.fn(async (_response: Response, fallback: string) => fallback),
-  uploadFormDataWithProgress: vi.fn(async (_url: string, _formData: FormData, options?: { onProgress?: (progress: { loaded: number; total: number | null; progress: number | null }) => void }) => {
+  uploadFormDataWithProgress: vi.fn(async (_url: string, _formData: FormData, options?: { signal?: AbortSignal; onProgress?: (progress: { loaded: number; total: number | null; progress: number | null }) => void }) => {
     options?.onProgress?.({ loaded: 12, total: 12, progress: 100 });
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   }),
@@ -104,7 +106,9 @@ vi.mock('../features/files/useFileManagerTabs', () => ({
     joinRemotePath: (basePath: string, name: string) => `${basePath}${name}/`.replace(/\/+/g, '/'),
     parentPath: (path: string) => path === '/' ? '/' : '/sdcard/',
     persistTabs: vi.fn(),
-    updateActiveTabPath: vi.fn(),
+    updateActiveTabPath: vi.fn((path: string) => {
+      if (activeTabRef.value) activeTabRef.value.path = path;
+    }),
     upsertTab: vi.fn(),
     createTabFromRoute: vi.fn(),
     createTabFromRequest: vi.fn(),
@@ -296,5 +300,235 @@ describe('FileManagerView', () => {
     expect(uploadFormDataWithProgress).toHaveBeenCalledTimes(1);
     const [url] = uploadFormDataWithProgress.mock.calls[0];
     expect(url).toBe('/api/devices/device-a/files/upload?path=%2Fsdcard%2F&relativePath=Album%2FNested%2Fphoto.png');
+  });
+
+  const loadDirectory = async (wrapper: ReturnType<typeof mountView>, items: FileEntry[]) => {
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: currentPathRef.value, items }), { status: 200 }));
+    await (wrapper.vm as unknown as { loadFiles: () => Promise<void> }).loadFiles();
+    await flushPromises();
+  };
+
+  const sampleEntries: FileEntry[] = [
+    { Name: 'photo10.png', IsDirectory: false, Size: 100 },
+    { Name: 'Download', IsDirectory: true, Size: 0 },
+    { Name: 'photo2.png', IsDirectory: false, Size: 200 },
+    { Name: '..', IsDirectory: true, Size: 0 },
+  ];
+
+  it('sorts names naturally with directories first and filters only the current listing', async () => {
+    const wrapper = mountView();
+    await loadDirectory(wrapper, sampleEntries);
+    const names = () => wrapper.findAll('.file-row .file-name__text').map((item) => item.text());
+
+    expect(names()).toEqual(['Download', 'photo2.png', 'photo10.png']);
+    const requests = apiFetch.mock.calls.length;
+    await wrapper.find('.search-button').trigger('click');
+    await wrapper.find('.file-search input').setValue('PHOTO');
+    expect(names()).toEqual(['photo2.png', 'photo10.png']);
+    expect(apiFetch).toHaveBeenCalledTimes(requests);
+    await wrapper.find('.sort-size').trigger('click');
+    expect(names()).toEqual(['photo10.png', 'photo2.png']);
+    await wrapper.find('.sort-size').trigger('click');
+    expect(names()).toEqual(['photo2.png', 'photo10.png']);
+    await wrapper.find('.search-button').trigger('click');
+    await wrapper.find('.search-clear').trigger('click');
+    expect(names()).toEqual(['Download', 'photo2.png', 'photo10.png']);
+  });
+
+  it('distinguishes an empty directory from no search results', async () => {
+    const wrapper = mountView();
+    await loadDirectory(wrapper, sampleEntries);
+    await wrapper.find('.search-button').trigger('click');
+    await wrapper.find('.file-search input').setValue('missing');
+    expect(wrapper.find('.empty-state').text()).toContain('没有匹配的文件');
+    await wrapper.find('.empty-state button').trigger('click');
+    expect(wrapper.findAll('.file-row')).toHaveLength(3);
+    await loadDirectory(wrapper, []);
+    expect(wrapper.find('.empty-state').text()).toContain('当前目录为空');
+    expect(wrapper.find('.empty-state button').text()).toBe('上传文件');
+  });
+
+  it('expands search with input focus and preserves the filter when collapsed', async () => {
+    const wrapper = mountView();
+    await loadDirectory(wrapper, sampleEntries);
+    const trigger = wrapper.find('.search-button');
+    expect(wrapper.find('.file-search').exists()).toBe(false);
+    await trigger.trigger('click');
+    expect(trigger.attributes('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(wrapper.find('.file-search input').element);
+    await wrapper.find('.file-search input').setValue('photo');
+    await wrapper.find('.file-search input').trigger('keydown', { key: 'Escape' });
+    expect(wrapper.find('.file-search').exists()).toBe(false);
+    expect(trigger.attributes('aria-expanded')).toBe('false');
+    expect(trigger.classes()).toContain('is-active');
+    expect(document.activeElement).toBe(trigger.element);
+    expect(wrapper.findAll('.file-row')).toHaveLength(2);
+    await trigger.trigger('click');
+    expect((wrapper.find('.file-search input').element as HTMLInputElement).value).toBe('photo');
+    await wrapper.find('.search-clear').trigger('click');
+    expect(wrapper.findAll('.file-row')).toHaveLength(3);
+    await trigger.trigger('click');
+    expect(trigger.classes()).not.toContain('is-active');
+  });
+
+  it('collapses search on an outside click or when opening upload actions', async () => {
+    const wrapper = mountView();
+    await loadDirectory(wrapper, sampleEntries);
+    await wrapper.find('.search-button').trigger('click');
+    await wrapper.find('.file-search input').setValue('photo');
+    await wrapper.find('.file-row').trigger('click');
+    expect(wrapper.find('.file-search').exists()).toBe(false);
+    expect(wrapper.findAll('.file-row')).toHaveLength(2);
+    await wrapper.find('.search-button').trigger('click');
+    await wrapper.find('.upload-button').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.file-search').exists()).toBe(false);
+    expect(wrapper.findAll('[role="menuitem"]').map((item) => item.text())).toEqual(['上传文件', '上传文件夹']);
+  });
+
+  it('opens a breadcrumb ancestor with the correct remote path', async () => {
+    activeTabRef.value!.path = '/sdcard/Download/reports/';
+    const wrapper = mountView();
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: '/sdcard/Download/', items: [] }), { status: 200 }));
+    const ancestor = wrapper.findAll('.breadcrumb-button').find((item) => item.text() === 'Download');
+    expect(ancestor).toBeDefined();
+    await ancestor!.trigger('click');
+    await flushPromises();
+    expect(apiFetch).toHaveBeenCalledWith('/api/devices/device-a/files/list', expect.objectContaining({
+      body: JSON.stringify({ path: '/sdcard/Download/' })
+    }));
+  });
+
+  it('submits an edited path once on Enter and cancels edits on Escape', async () => {
+    const wrapper = mountView();
+    await wrapper.find('.path-edit-button').trigger('click');
+    await wrapper.find('.path-input').setValue('/sdcard/Pictures');
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: '/sdcard/Pictures/', items: [] }), { status: 200 }));
+    await wrapper.find('.path-input').trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(apiFetch).toHaveBeenCalledWith('/api/devices/device-a/files/list', expect.objectContaining({
+      body: JSON.stringify({ path: '/sdcard/Pictures/' })
+    }));
+    await wrapper.find('.path-edit-button').trigger('click');
+    await wrapper.find('.path-input').setValue('/changed');
+    await wrapper.find('.path-input').trigger('keydown', { key: 'Escape' });
+    expect(wrapper.find('.path-input').exists()).toBe(false);
+    expect(currentPathRef.value).toBe('/sdcard/Pictures/');
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens row actions with keyboard focus and returns focus on Escape', async () => {
+    const wrapper = mountView();
+    await loadDirectory(wrapper, [sampleEntries[0]]);
+    const trigger = wrapper.find('.row-actions');
+    await trigger.trigger('click');
+    await flushPromises();
+    const items = wrapper.findAll('[role="menuitem"]');
+    expect(items.map((item) => item.text())).toContain('重命名');
+    expect(document.activeElement).toBe(items[0].element);
+    await items[0].trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[1].element);
+    await items[1].trigger('keydown', { key: 'Escape' });
+    expect(wrapper.find('.context-menu').exists()).toBe(false);
+    expect(document.activeElement).toBe(trigger.element);
+  });
+
+  it('offers both upload pickers from the upload menu', async () => {
+    const wrapper = mountView();
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+    await wrapper.find('.upload-button').trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('[role="menuitem"]').map((item) => item.text())).toEqual(['上传文件', '上传文件夹']);
+    await wrapper.findAll('[role="menuitem"]')[1].trigger('click');
+    expect(inputClick).toHaveBeenCalledTimes(1);
+    expect(inputClick.mock.instances[0]).toBe(wrapper.find('input[webkitdirectory]').element);
+    expect(wrapper.find('.context-menu').exists()).toBe(false);
+  });
+
+  it('keeps the listing visible during refresh and hides it when the directory changes', async () => {
+    const wrapper = mountView();
+    await loadDirectory(wrapper, [sampleEntries[0]]);
+    let resolve!: (response: Response) => void;
+    apiFetch.mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }));
+    const refresh = (wrapper.vm as unknown as { loadFiles: () => Promise<void> }).loadFiles();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.file-table').exists()).toBe(true);
+    expect(wrapper.find('.refresh-indicator').exists()).toBe(true);
+    expect(wrapper.find('.row-actions').attributes('disabled')).toBeDefined();
+    resolve(new Response(JSON.stringify({ path: '/sdcard/', items: [sampleEntries[0]] }), { status: 200 }));
+    await refresh;
+
+    apiFetch.mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }));
+    const navigate = (wrapper.vm as unknown as { navigateToPath: (path: string) => Promise<void> }).navigateToPath('/sdcard/Download/');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.file-table').exists()).toBe(false);
+    expect(wrapper.find('.empty-state').text()).toContain('正在加载文件列表');
+    resolve(new Response(JSON.stringify({ path: '/sdcard/Download/', items: [] }), { status: 200 }));
+    await navigate;
+  });
+
+  it('hides the old listing and clears search when switching devices at the same path', async () => {
+    const wrapper = mountView();
+    await loadDirectory(wrapper, [sampleEntries[0]]);
+    await wrapper.find('.search-button').trigger('click');
+    await wrapper.find('.file-search input').setValue('photo');
+    tabsRef.value[1].path = '/sdcard/';
+    activeTabKeyRef.value = 'device-b::files';
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.file-table').exists()).toBe(false);
+    expect(wrapper.find('.file-search').exists()).toBe(false);
+    expect(wrapper.find('.search-button').classes()).not.toContain('is-active');
+    await wrapper.find('.search-button').trigger('click');
+    expect((wrapper.find('.file-search input').element as HTMLInputElement).value).toBe('');
+  });
+
+  it('offers retry after a listing error', async () => {
+    const wrapper = mountView();
+    apiFetch.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await (wrapper.vm as unknown as { loadFiles: () => Promise<void> }).loadFiles();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.empty-state').text()).toContain('无法读取当前目录');
+    apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ path: '/sdcard/', items: sampleEntries }), { status: 200 }));
+    await wrapper.find('.retry-button').trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('.file-row')).toHaveLength(3);
+  });
+
+  it('ignores an old response body that finishes after a device switch', async () => {
+    const wrapper = mountView();
+    let resolveOldBody!: (body: unknown) => void;
+    const oldResponse = new Response(null, { status: 200 });
+    vi.spyOn(oldResponse, 'json').mockImplementation(() => new Promise((resolve) => { resolveOldBody = resolve; }));
+    apiFetch.mockResolvedValueOnce(oldResponse);
+    const oldLoad = (wrapper.vm as unknown as { loadFiles: () => Promise<void> }).loadFiles();
+    await flushPromises();
+    activeTabKeyRef.value = 'device-b::files';
+    await loadDirectory(wrapper, [{ Name: 'new.txt', IsDirectory: false, Size: 8 }]);
+    resolveOldBody({ path: '/sdcard/', items: sampleEntries });
+    await oldLoad;
+    expect(currentPathRef.value).toBe('/sdcard/Download/');
+    expect(wrapper.findAll('.file-name__text').map((item) => item.text())).toEqual(['new.txt']);
+  });
+
+  it('shows upload progress from the task service and cancels the original request', async () => {
+    const wrapper = mountView();
+    let signal: AbortSignal | undefined;
+    uploadFormDataWithProgress.mockImplementationOnce((_url, _formData, options) => {
+      signal = options?.signal;
+      options?.onProgress?.({ loaded: 5, total: 10, progress: 50 });
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    });
+    const upload = (wrapper.vm as unknown as { uploadSelectedFiles: (files: File[], preserve: boolean) => Promise<void> })
+      .uploadSelectedFiles([new File(['0123456789'], 'sample.txt')], false);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.transfer-bar progress').attributes('value')).toBe('50');
+    await wrapper.find('.transfer-bar button').trigger('click');
+    await upload;
+    await flushPromises();
+    expect(signal?.aborted).toBe(true);
+    expect(wrapper.find('.transfer-bar').exists()).toBe(false);
   });
 });

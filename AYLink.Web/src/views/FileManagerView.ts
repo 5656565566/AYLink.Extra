@@ -1,5 +1,12 @@
 import { defineComponent } from 'vue';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  ArrowClockwise20Regular, ArrowDownload20Regular, ArrowLeft20Regular, ArrowUpload20Regular,
+  ChevronDown16Regular, ChevronRight16Regular, Copy20Regular, Delete20Regular,
+  Dismiss16Regular, Document20Regular, DocumentText20Regular, Edit20Regular,
+  ErrorCircle24Regular, Folder20Regular, FolderOpen24Regular, FolderZip20Regular,
+  Image20Regular, MoreHorizontal20Regular, PlugDisconnected24Regular, Search20Regular, Search24Regular,
+} from '@vicons/fluent';
 import WorkspaceTabs from '../components/WorkspaceTabs.vue';
 import { useFileManagerTabs } from '../features/files/useFileManagerTabs';
 import type { FileEntry } from '../types/files';
@@ -15,11 +22,17 @@ import { formatBytes, readResponseBlobWithProgress, uploadFormDataWithProgress }
 import { normalizeDeviceId, normalizeRemotePath } from '../lib/input/normalize';
 
 const BLOB_DOWNLOAD_MAX_BYTES = 128 * 1024 * 1024;
+type FileKind = 'folder' | 'image' | 'archive' | 'document' | 'file';
+type MenuAction = 'open' | 'download' | 'browser-download' | 'copy-path' | 'rename' | 'delete' | 'upload-files' | 'upload-folder';
 
 export default defineComponent({
   name: 'FileManagerView',
   components: {
-    WorkspaceTabs
+    WorkspaceTabs,
+    ArrowClockwise20Regular, ArrowLeft20Regular, ArrowUpload20Regular,
+    ChevronDown16Regular, ChevronRight16Regular, Dismiss16Regular, Edit20Regular,
+    ErrorCircle24Regular, Folder20Regular, FolderOpen24Regular,
+    MoreHorizontal20Regular, PlugDisconnected24Regular, Search20Regular, Search24Regular,
   },
   setup() {
     const { t } = useI18n();
@@ -35,10 +48,26 @@ export default defineComponent({
     const selectedEntry = ref<FileEntry | null>(null);
     const fileInput = ref<HTMLInputElement | null>(null);
     const folderInput = ref<HTMLInputElement | null>(null);
+    const pathInput = ref<HTMLInputElement | null>(null);
+    const pathEditing = ref(false);
+    const pathDraft = ref('');
+    const searchQuery = ref('');
+    const searchExpanded = ref(false);
+    const searchInput = ref<HTMLInputElement | null>(null);
+    const searchButton = ref<HTMLButtonElement | null>(null);
+    const searchControl = ref<HTMLElement | null>(null);
+    const sortField = ref<'name' | 'size'>('name');
+    const sortDirection = ref<'ascending' | 'descending'>('ascending');
+    const loadedTabKey = ref('');
+    const loadedPath = ref('');
+    const menuElement = ref<HTMLElement | null>(null);
+    let menuTrigger: HTMLElement | null = null;
+    const transferTaskIds = ref<number[]>([]);
     const contextMenu = ref({
       show: false,
       x: 0,
       y: 0,
+      kind: 'entry' as 'entry' | 'upload',
       entry: null as FileEntry | null
     });
 
@@ -72,7 +101,60 @@ export default defineComponent({
       async () => loadFiles(),
     );
 
-    const visibleEntries = computed(() => entries.value.filter((entry) => entry.Name !== '.' && entry.Name !== '..'));
+    const hasCurrentListing = computed(() => !!activeTab.value
+      && loadedTabKey.value === activeTabKey.value
+      && loadedPath.value === normalizePath(currentPath.value));
+    const directoryEntries = computed(() => hasCurrentListing.value
+      ? entries.value.filter((entry) => entry.Name !== '.' && entry.Name !== '..')
+      : []);
+    const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    const visibleEntries = computed(() => {
+      const query = searchQuery.value.trim().toLocaleLowerCase();
+      return directoryEntries.value
+        .filter((entry) => !query || entry.Name.toLocaleLowerCase().includes(query))
+        .sort((left, right) => {
+          if (left.IsDirectory !== right.IsDirectory) return left.IsDirectory ? -1 : 1;
+          const order = sortField.value === 'size' && !left.IsDirectory
+            ? left.Size - right.Size || nameCollator.compare(left.Name, right.Name)
+            : nameCollator.compare(left.Name, right.Name);
+          return sortDirection.value === 'ascending' ? order : -order;
+        });
+    });
+    const breadcrumbs = computed(() => {
+      const parts = normalizePath(currentPath.value).split('/').filter(Boolean);
+      return [
+        { name: '/', path: '/' },
+        ...parts.map((name, index) => ({ name, path: `/${parts.slice(0, index + 1).join('/')}/` })),
+      ];
+    });
+    const transferTasks = computed(() => taskService.tasks.value.filter((task) =>
+      transferTaskIds.value.includes(task.id) && task.status === 'running'));
+    const fileIcons = {
+      folder: Folder20Regular, image: Image20Regular, archive: FolderZip20Regular,
+      document: DocumentText20Regular, file: Document20Regular,
+    };
+    const getFileKind = (entry: FileEntry): FileKind => {
+      if (entry.IsDirectory) return 'folder';
+      const dot = entry.Name.lastIndexOf('.');
+      const extension = dot > 0 ? entry.Name.slice(dot + 1).toLowerCase() : '';
+      if (/^(png|jpe?g|gif|webp|svg|bmp|heic|avif)$/.test(extension)) return 'image';
+      if (/^(zip|rar|7z|tar|gz|bz2|xz|tgz)$/.test(extension)) return 'archive';
+      if (/^(txt|md|pdf|docx?|xlsx?|pptx?|csv|odt)$/.test(extension)) return 'document';
+      return 'file';
+    };
+    const getFileType = (entry: FileEntry) => {
+      switch (getFileKind(entry)) {
+        case 'folder': return t('FilePage.Directory', '目录');
+        case 'image': return t('FilePage.Image', '图片');
+        case 'archive': return t('FilePage.Archive', '压缩包');
+        case 'document': return t('FilePage.Document', '文档');
+        default: return t('FilePage.File', '文件');
+      }
+    };
+    const setSort = (field: 'name' | 'size') => {
+      sortDirection.value = sortField.value === field && sortDirection.value === 'ascending' ? 'descending' : 'ascending';
+      sortField.value = field;
+    };
     const activeDeviceId = computed(() => activeTab.value?.deviceId ?? '');
     const normalizedActiveDeviceId = computed(() => normalizeDeviceId(activeDeviceId.value));
 
@@ -90,17 +172,24 @@ export default defineComponent({
     };
 
     const loadFiles = async () => {
+      closeContextMenu();
       const { requestId, signal } = filesRequest.begin();
       const tab = activeTab.value;
       const targetDeviceId = normalizeDeviceId(tab?.deviceId ?? '');
       if (!tab) {
         entries.value = [];
+        selectedEntry.value = null;
+        errorMessage.value = '';
+        loading.value = false;
+        loadedTabKey.value = '';
         filesRequest.finalize(requestId);
         return;
       }
       if (!targetDeviceId) {
         errorMessage.value = t('Common.InvalidDevice', '无效的设备标识');
         entries.value = [];
+        loading.value = false;
+        loadedTabKey.value = '';
         filesRequest.finalize(requestId);
         return;
       }
@@ -126,11 +215,14 @@ export default defineComponent({
         }
 
         const payload = await response.json();
+        if (!filesRequest.isLatest(requestId)) return;
         updateActiveTabPath(payload.path ?? tab.path);
         entries.value = Array.isArray(payload.items) ? payload.items : [];
+        loadedTabKey.value = tab.key;
+        loadedPath.value = normalizePath(payload.path ?? tab.path);
         selectedEntry.value = null;
       } catch (error) {
-        if (!isAbortError(error)) {
+        if (filesRequest.isLatest(requestId) && !isAbortError(error)) {
           console.error('Failed to load files', error);
           errorMessage.value = t('FilePage.LoadFailed', '文件列表加载失败');
           entries.value = [];
@@ -144,43 +236,88 @@ export default defineComponent({
     };
 
     const openEntry = async (entry: FileEntry) => {
-      if (!entry.IsDirectory) return;
+      if (!entry.IsDirectory || loading.value) return;
 
-      updateActiveTabPath(joinRemotePath(currentPath.value, entry.Name));
-      await loadFiles();
+      await navigateToPath(joinRemotePath(currentPath.value, entry.Name));
     };
 
     const selectEntry = (entry: FileEntry) => {
       selectedEntry.value = entry;
     };
 
-    const onContextMenu = (event: MouseEvent, entry: FileEntry) => {
-      selectedEntry.value = entry;
-
-      const menuWidth = 180;
-      const menuHeight = 252;
-      let x = event.clientX;
-      let y = event.clientY;
-
-      if (x + menuWidth > window.innerWidth) {
-        x = window.innerWidth - menuWidth;
+    const showMenu = async (event: MouseEvent | KeyboardEvent, entry: FileEntry | null) => {
+      if (!activeTab.value || loading.value || (!entry && uploading.value)) return;
+      closeSearch();
+      if (event.type === 'click' && contextMenu.value.show && menuTrigger === event.currentTarget) {
+        closeContextMenu(true);
+        return;
       }
-
-      if (y + menuHeight > window.innerHeight) {
-        y = window.innerHeight - menuHeight;
-      }
-
+      if (entry) selectedEntry.value = entry;
+      menuTrigger = event.currentTarget as HTMLElement;
+      const bounds = menuTrigger.getBoundingClientRect();
+      const atPointer = event.type === 'contextmenu' && event instanceof MouseEvent;
       contextMenu.value = {
         show: true,
-        x,
-        y,
+        x: atPointer ? event.clientX : bounds.left,
+        y: atPointer ? event.clientY : bounds.bottom + 4,
+        kind: entry ? 'entry' : 'upload',
         entry
       };
+      await nextTick();
+      if (!contextMenu.value.show || !menuElement.value) return;
+      const menuBounds = menuElement.value.getBoundingClientRect();
+      contextMenu.value.x = Math.max(8, Math.min(contextMenu.value.x, window.innerWidth - menuBounds.width - 8));
+      contextMenu.value.y = Math.max(8, Math.min(contextMenu.value.y, window.innerHeight - menuBounds.height - 8));
+      // Move focus after the positioned menu has finished rendering.
+      await nextTick();
+      if (contextMenu.value.show) menuElement.value?.querySelector<HTMLButtonElement>('button')?.focus();
     };
 
-    const closeContextMenu = () => {
+    const onContextMenu = (event: MouseEvent | KeyboardEvent, entry: FileEntry) => showMenu(event, entry);
+
+    const closeContextMenu = (restoreFocus = false) => {
+      if (!contextMenu.value.show) return;
       contextMenu.value.show = false;
+      if (restoreFocus && menuTrigger?.isConnected) menuTrigger.focus();
     };
+
+    const onMenuKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' || event.key === 'Tab') {
+        if (event.key === 'Escape') event.preventDefault();
+        event.stopPropagation();
+        closeContextMenu(true);
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const items = Array.from(menuElement.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+      if (!items.length) return;
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+      items[nextIndex]?.focus();
+    };
+
+    const menuActions = computed(() => {
+      if (contextMenu.value.kind === 'upload') {
+        return [
+          { action: 'upload-files' as MenuAction, label: t('FilePage.UploadFiles', '上传文件'), icon: ArrowUpload20Regular },
+          { action: 'upload-folder' as MenuAction, label: t('FilePage.UploadFolder', '上传文件夹'), icon: Folder20Regular },
+        ];
+      }
+      const entry = contextMenu.value.entry;
+      if (!entry) return [];
+      const actions: { action: MenuAction; label: string; icon: typeof Folder20Regular }[] = [];
+      if (entry.IsDirectory) actions.push({ action: 'open', label: t('FilePage.ActionOpen', '打开'), icon: Folder20Regular });
+      if (canUseBlobDownload(entry)) actions.push({ action: 'download', label: t('FilePage.ActionDownload', '下载'), icon: ArrowDownload20Regular });
+      if (!entry.IsDirectory) actions.push({ action: 'browser-download', label: t('FilePage.ActionBrowserDownload', '浏览器下载'), icon: ArrowDownload20Regular });
+      actions.push(
+        { action: 'copy-path', label: t('FilePage.ActionCopyPath', '复制路径'), icon: Copy20Regular },
+        { action: 'rename', label: t('FilePage.ActionRename', '重命名'), icon: Edit20Regular },
+        { action: 'delete', label: t('FilePage.ActionDelete', '删除'), icon: Delete20Regular },
+      );
+      return actions;
+    });
 
     const downloadEntry = async (entry: FileEntry) => {
       if (!canUseBlobDownload(entry)) {
@@ -205,6 +342,7 @@ export default defineComponent({
         isCancelable: true,
         cancelAction: () => controller.abort()
       });
+      transferTaskIds.value = [...transferTasks.value.map((item) => item.id), task.id];
       const toastId = notifications.showProgress({
         type: 'info',
         title,
@@ -345,6 +483,7 @@ export default defineComponent({
         isCancelable: true,
         cancelAction: () => controller.abort()
       });
+      transferTaskIds.value = [...transferTasks.value.map((item) => item.id), task.id];
       const toastId = notifications.showProgress({
         type: 'info',
         title,
@@ -535,8 +674,11 @@ export default defineComponent({
       await loadFiles();
     };
 
-    const handleContextAction = async (action: 'open' | 'download' | 'browser-download' | 'copy-path' | 'rename' | 'delete') => {
+    const handleContextAction = async (action: MenuAction) => {
       const entry = contextMenu.value.entry;
+      closeContextMenu(true);
+      if (action === 'upload-files') { triggerUploadFiles(); return; }
+      if (action === 'upload-folder') { triggerUploadFolder(); return; }
       if (!entry || !activeDeviceId.value) return;
 
       try {
@@ -568,19 +710,49 @@ export default defineComponent({
           message: error instanceof Error ? error.message : t('Common.OperationFailed', '操作失败')
         });
       }
+    };
 
-      closeContextMenu();
+    const navigateToPath = async (path: string) => {
+      if (!activeTab.value || loading.value) return;
+      updateActiveTabPath(normalizePath(path));
+      await loadFiles();
     };
 
     const goUp = async () => {
-      updateActiveTabPath(parentPath(currentPath.value));
-      await loadFiles();
+      if (canGoUp.value) await navigateToPath(parentPath(currentPath.value));
     };
 
-    const openTypedPath = async (event: Event) => {
-      const value = (event.target as HTMLInputElement).value;
-      updateActiveTabPath(value);
-      await loadFiles();
+    const beginPathEdit = async () => {
+      if (!activeTab.value || loading.value) return;
+      closeSearch();
+      pathDraft.value = currentPath.value;
+      pathEditing.value = true;
+      await nextTick();
+      pathInput.value?.focus();
+      pathInput.value?.select();
+    };
+
+    const openTypedPath = async () => {
+      const path = pathDraft.value.trim();
+      pathEditing.value = false;
+      if (path) await navigateToPath(path);
+    };
+
+    const closeSearch = (restoreFocus = false) => {
+      searchExpanded.value = false;
+      if (restoreFocus) searchButton.value?.focus();
+    };
+
+    const toggleSearch = async () => {
+      if (!activeTab.value) return;
+      if (searchExpanded.value) {
+        closeSearch();
+        return;
+      }
+      closeContextMenu();
+      searchExpanded.value = true;
+      await nextTick();
+      searchInput.value?.focus();
     };
 
     const formatFileSize = (size: number) => {
@@ -594,13 +766,32 @@ export default defineComponent({
       await loadFiles();
     };
 
+    watch([activeTabKey, currentPath], () => {
+      searchQuery.value = '';
+      closeSearch();
+      selectedEntry.value = null;
+      pathEditing.value = false;
+      closeContextMenu();
+    }, { flush: 'sync' });
+
+    watch(searchQuery, () => {
+      selectedEntry.value = null;
+      closeContextMenu();
+    });
+
+    const onDocumentClick = (event: Event) => {
+      closeContextMenu();
+      if (!(event.target instanceof Node) || !searchControl.value?.contains(event.target)) closeSearch();
+    };
     onMounted(() => {
-      document.addEventListener('click', closeContextMenu);
+      document.addEventListener('click', onDocumentClick);
+      window.addEventListener('resize', onDocumentClick);
     });
 
     onUnmounted(() => {
       filesRequest.dispose();
-      document.removeEventListener('click', closeContextMenu);
+      document.removeEventListener('click', onDocumentClick);
+      window.removeEventListener('resize', onDocumentClick);
     });
 
     return {
@@ -622,6 +813,33 @@ export default defineComponent({
       currentPath,
       canGoUp,
       visibleEntries,
+      directoryEntries,
+      hasCurrentListing,
+      breadcrumbs,
+      pathInput,
+      pathEditing,
+      pathDraft,
+      beginPathEdit,
+      navigateToPath,
+      searchQuery,
+      searchExpanded,
+      searchInput,
+      searchButton,
+      searchControl,
+      toggleSearch,
+      closeSearch,
+      sortField,
+      sortDirection,
+      setSort,
+      fileIcons,
+      getFileKind,
+      getFileType,
+      menuElement,
+      menuActions,
+      showMenu,
+      onMenuKeydown,
+      transferTasks,
+      requestCancelTransfer: taskService.requestCancel,
       tabItems,
       buildTabKey,
       normalizePath,

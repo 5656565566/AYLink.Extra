@@ -1,137 +1,296 @@
 <template>
-  <div class="page-container" @click="closeContextMenu">
+  <div class="page-container" @click="closeContextMenu()">
     <WorkspaceTabs
       :tabs="tabItems"
       :active-key="activeTabKey"
       @select="activateTab"
       @close="closeTab">
       <template #icon>
-        <svg class="workspace-tab__icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 3C1.5 2.17157 2.17157 1.5 3 1.5H5.80155C6.19266 1.5 6.5685 1.65215 6.84928 1.9242L8.25667 3.28781C8.35026 3.3785 8.47554 3.42928 8.60533 3.42928H13C13.8284 3.42928 14.5 4.10085 14.5 4.92928V12C14.5 12.8284 13.8284 13.5 13 13.5H3C2.17157 13.5 1.5 12.8284 1.5 12V3ZM3 2.5C2.72386 2.5 2.5 2.72386 2.5 3V12C2.5 12.2761 2.72386 12.5 3 12.5H13C13.2761 12.5 13.5 12.2761 13.5 12V4.92928C13.5 4.65314 13.2761 4.42928 13 4.42928H8.39467C8.13506 4.42928 7.8845 4.32773 7.69733 4.14652L6.15072 2.64966C6.05713 2.55896 5.93185 2.50818 5.80206 2.50818H3Z" fill="currentColor" stroke="currentColor" stroke-width="0.5"/></svg>
+        <Folder20Regular class="workspace-tab__icon" aria-hidden="true" />
       </template>
     </WorkspaceTabs>
 
     <div class="toolbar">
       <div class="path-bar">
-        <button class="icon-button" type="button" :disabled="!canGoUp || loading" :title="t('FilePage.GoUp', '返回上级')" @click="goUp">
-          <svg viewBox="0 0 16 16" fill="none">
-            <path d="M8 3.5L3.5 8M3.5 8L8 12.5M3.5 8H13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+        <button
+          class="path-back-button icon-button transparent"
+          type="button"
+          :disabled="!canGoUp || loading"
+          :title="t('FilePage.GoUp', '返回上级')"
+          :aria-label="t('FilePage.GoUp', '返回上级')"
+          @click="goUp">
+          <ArrowLeft20Regular aria-hidden="true" />
         </button>
-        <input
-          class="path-input"
-          type="text"
-          :value="currentPath"
-          :disabled="!activeTab"
-          @keyup.enter="openTypedPath"
-          @change="openTypedPath"
-        />
-        <button class="transparent" type="button" :disabled="!activeTab || loading" @click="loadFiles">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M12.5 8C12.5 10.4853 10.4853 12.5 8 12.5C5.51472 12.5 3.5 10.4853 3.5 8C3.5 6.42557 4.30823 4.98188 5.61868 4.14811C5.85042 3.99818 5.92617 3.68412 5.77977 3.44759C5.63336 3.21106 5.32356 3.12933 5.09182 3.27926C3.4116 4.35627 2.5 6.13601 2.5 8C2.5 11.0376 4.96243 13.5 8 13.5C11.0376 13.5 13.5 11.0376 13.5 8C13.5 5.56611 11.9567 3.5042 9.77121 2.76634C9.51347 2.67931 9.22744 2.82522 9.13886 3.08055C9.05027 3.33588 9.19163 3.61908 9.44937 3.70611C11.2389 4.30799 12.5 6.00287 12.5 8Z"/></svg>
-          {{ loading ? t('Common.Refreshing', '刷新中...') : t('Common.Refresh', '刷新') }}
-        </button>
-        <button class="transparent" type="button" :disabled="!activeTab || uploading" @click="triggerUploadFiles">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 11.5V3.5M8 3.5L5 6.5M8 3.5L11 6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M3 10.5V12.5C3 13.0523 3.44772 13.5 4 13.5H12C12.5523 13.5 13 13.0523 13 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-          {{ t('FilePage.UploadFiles', '上传文件') }}
-        </button>
-        <button class="transparent" type="button" :disabled="!activeTab || uploading" @click="triggerUploadFolder">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M2.5 4.5C2.5 3.94772 2.94772 3.5 3.5 3.5H6.1L7.1 4.75H12.5C13.0523 4.75 13.5 5.19772 13.5 5.75V12C13.5 12.5523 13.0523 13 12.5 13H3.5C2.94772 13 2.5 12.5523 2.5 12V4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-            <path d="M8 11V7M8 7L6.5 8.5M8 7L9.5 8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          {{ t('FilePage.UploadFolder', '上传文件夹') }}
-        </button>
-        <input ref="fileInput" class="file-upload-input" type="file" multiple @change="handleFilesSelected" />
-        <input ref="folderInput" class="file-upload-input" type="file" multiple webkitdirectory @change="handleFolderSelected" />
+        <div class="path-address" :title="activeTab ? currentPath : undefined" @click.self="beginPathEdit">
+          <input
+            v-if="pathEditing"
+            ref="pathInput"
+            v-model="pathDraft"
+            class="path-input"
+            type="text"
+            :aria-label="t('FilePage.EditPath', '输入目录路径')"
+            @keydown.enter.prevent="openTypedPath"
+            @keydown.esc.prevent="pathEditing = false"
+            @blur="pathEditing = false"
+          />
+          <nav
+            v-else
+            class="breadcrumbs"
+            :aria-label="t('FilePage.CurrentDirectory', '当前目录')"
+            @click.self="beginPathEdit">
+            <template v-for="(crumb, index) in breadcrumbs" :key="crumb.path">
+              <ChevronRight16Regular v-if="index" class="breadcrumb-separator" aria-hidden="true" />
+              <button
+                class="breadcrumb-button transparent"
+                type="button"
+                :disabled="!activeTab || loading"
+                :aria-current="index === breadcrumbs.length - 1 ? 'page' : undefined"
+                :aria-label="index === 0 ? t('FilePage.RootDirectory', '根目录') : undefined"
+                @click.stop="navigateToPath(crumb.path)">
+                {{ crumb.name }}
+              </button>
+            </template>
+          </nav>
+        </div>
+        <div class="path-actions">
+          <button
+            v-if="!pathEditing"
+            class="path-edit-button icon-button transparent"
+            type="button"
+            :disabled="!activeTab || loading"
+            :title="t('FilePage.EditPath', '输入目录路径')"
+            :aria-label="t('FilePage.EditPath', '输入目录路径')"
+            @click="beginPathEdit">
+            <Edit20Regular aria-hidden="true" />
+          </button>
+          <button
+            class="icon-button transparent refresh-button"
+            type="button"
+            :disabled="!activeTab || loading"
+            :title="t('Common.Refresh', '刷新')"
+            :aria-label="t('Common.Refresh', '刷新')"
+            @click="loadFiles">
+            <ArrowClockwise20Regular :class="{ spinning: loading }" aria-hidden="true" />
+          </button>
+          <div ref="searchControl" class="search-control">
+            <button
+              ref="searchButton"
+              class="search-button icon-button transparent"
+              :class="{ 'is-active': searchExpanded || searchQuery.trim() }"
+              type="button"
+              :disabled="!activeTab"
+              :title="t('FilePage.SearchDirectory', '搜索当前目录')"
+              :aria-label="t('FilePage.SearchDirectory', '搜索当前目录')"
+              :aria-expanded="searchExpanded"
+              :aria-controls="searchExpanded ? 'file-search-panel' : undefined"
+              @click.stop="toggleSearch">
+              <Search20Regular aria-hidden="true" />
+            </button>
+            <div
+              v-if="searchExpanded"
+              id="file-search-panel"
+              class="file-search"
+              role="search"
+              @click.stop
+              @keydown.esc.prevent.stop="closeSearch(true)">
+              <Search20Regular aria-hidden="true" />
+              <input
+                ref="searchInput"
+                v-model="searchQuery"
+                type="search"
+                :placeholder="t('FilePage.SearchDirectory', '搜索当前目录')"
+                :aria-label="t('FilePage.SearchDirectory', '搜索当前目录')"
+              />
+              <button
+                v-if="searchQuery"
+                class="search-clear icon-button transparent"
+                type="button"
+                :aria-label="t('FilePage.ClearSearch', '清除搜索')"
+                @click="searchQuery = ''">
+                <Dismiss16Regular aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <button
+            class="upload-button icon-button transparent"
+            type="button"
+            :disabled="!activeTab || uploading || loading"
+            :title="t('FilePage.Upload', '上传')"
+            :aria-label="t('FilePage.Upload', '上传')"
+            aria-haspopup="menu"
+            :aria-expanded="contextMenu.show && contextMenu.kind === 'upload'"
+            :aria-controls="contextMenu.show && contextMenu.kind === 'upload' ? 'file-action-menu' : undefined"
+            @click.stop="showMenu($event, null)"
+            @keydown.down.prevent.stop="showMenu($event, null)">
+            <ArrowUpload20Regular aria-hidden="true" />
+          </button>
+        </div>
       </div>
+      <input ref="fileInput" class="file-upload-input" type="file" multiple @change="handleFilesSelected" />
+      <input ref="folderInput" class="file-upload-input" type="file" multiple webkitdirectory @change="handleFolderSelected" />
     </div>
 
-    <div class="content-area" @scroll="closeContextMenu">
-      <div v-if="loading" class="empty-state">
+    <div class="content-area" :aria-busy="loading" @scroll="closeContextMenu()">
+      <div v-if="loading && hasCurrentListing" class="refresh-indicator" role="status">
+        <span class="sr-only">{{ t('Common.Refreshing', '刷新中...') }}</span>
+      </div>
+      <div v-if="loading && !hasCurrentListing" class="empty-state" role="status">
         <div class="spinner"></div>
         <p>{{ t('FilePage.LoadingFiles', '正在加载文件列表...') }}</p>
       </div>
       <div v-else-if="!activeTab" class="empty-state">
+        <PlugDisconnected24Regular class="empty-state__icon" aria-hidden="true" />
+        <p class="empty-state__title">{{ t('FilePage.NoDeviceSelected', '未选择设备') }}</p>
         <p>{{ t('FilePage.OpenFromHome', '请从首页选择一个设备打开文件管理') }}</p>
       </div>
-      <div v-else-if="errorMessage" class="empty-state">
+      <div v-else-if="errorMessage" class="empty-state" role="alert">
+        <ErrorCircle24Regular class="empty-state__icon" aria-hidden="true" />
+        <p class="empty-state__title">{{ t('FilePage.ReadFailed', '无法读取当前目录') }}</p>
         <p>{{ errorMessage }}</p>
+        <button class="retry-button" type="button" :disabled="loading" @click="loadFiles">
+          <ArrowClockwise20Regular aria-hidden="true" />
+          {{ t('FilePage.Retry', '重试') }}
+        </button>
       </div>
       <div v-else-if="visibleEntries.length === 0" class="empty-state">
-        <p>{{ t('FilePage.EmptyDirectory', '当前目录为空') }}</p>
+        <Search24Regular v-if="searchQuery.trim()" class="empty-state__icon" aria-hidden="true" />
+        <FolderOpen24Regular v-else class="empty-state__icon" aria-hidden="true" />
+        <p class="empty-state__title">
+          {{ searchQuery.trim() ? t('FilePage.NoSearchResults', '没有匹配的文件') : t('FilePage.EmptyDirectory', '当前目录为空') }}
+        </p>
+        <button v-if="searchQuery.trim()" type="button" @click="searchQuery = ''">
+          {{ t('FilePage.ClearSearch', '清除搜索') }}
+        </button>
+        <button v-else type="button" :disabled="uploading || loading" @click="triggerUploadFiles">
+          <ArrowUpload20Regular aria-hidden="true" />
+          {{ t('FilePage.UploadFiles', '上传文件') }}
+        </button>
       </div>
-      <table v-else class="file-table">
+      <table v-else class="file-table" :aria-label="t('FilePage.Title', '文件管理')">
+        <colgroup>
+          <col />
+          <col class="type-column" />
+          <col class="size-column" />
+          <col class="actions-column" />
+        </colgroup>
         <thead>
           <tr>
-            <th>{{ t('FilePage.NameHeader', '名称') }}</th>
-            <th>{{ t('FilePage.TypeHeader', '类型') }}</th>
-            <th>{{ t('FilePage.SizeHeader', '大小') }}</th>
+            <th scope="col" :aria-sort="sortField === 'name' ? sortDirection : 'none'">
+              <button class="sort-name sort-button transparent" type="button" @click="setSort('name')">
+                {{ t('FilePage.NameHeader', '名称') }}
+                <ChevronDown16Regular
+                  class="sort-arrow"
+                  :class="{ 'is-active': sortField === 'name', 'is-ascending': sortDirection === 'ascending' }"
+                  aria-hidden="true" />
+              </button>
+            </th>
+            <th scope="col" class="type-cell">{{ t('FilePage.TypeHeader', '类型') }}</th>
+            <th scope="col" class="size-cell" :aria-sort="sortField === 'size' ? sortDirection : 'none'">
+              <button class="sort-size sort-button transparent" type="button" @click="setSort('size')">
+                {{ t('FilePage.SizeHeader', '大小') }}
+                <ChevronDown16Regular
+                  class="sort-arrow"
+                  :class="{ 'is-active': sortField === 'size', 'is-ascending': sortDirection === 'ascending' }"
+                  aria-hidden="true" />
+              </button>
+            </th>
+            <th scope="col"><span class="sr-only">{{ t('FilePage.MoreActions', '更多操作') }}</span></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="canGoUp" class="file-row" @dblclick="goUp">
-            <td>
-              <div class="file-name">
-                <span class="file-icon">..</span>
-                <span>{{ t('FilePage.ParentDirectory', '上级目录') }}</span>
-              </div>
-            </td>
-            <td>{{ t('FilePage.Directory', '目录') }}</td>
-            <td>-</td>
-          </tr>
           <tr
             v-for="entry in visibleEntries"
             :key="entry.Name"
             class="file-row"
             :class="{ selected: selectedEntry?.Name === entry.Name }"
+            tabindex="0"
             @click="selectEntry(entry)"
             @dblclick="openEntry(entry)"
-            @contextmenu.prevent="onContextMenu($event, entry)"
-          >
+            @keydown.enter.prevent="openEntry(entry)"
+            @keydown.shift.f10.prevent.stop="onContextMenu($event, entry)"
+            @contextmenu.prevent.stop="onContextMenu($event, entry)">
             <td>
               <div class="file-name">
-                <span class="file-icon">{{ entry.IsDirectory ? 'DIR' : 'FILE' }}</span>
-                <span>{{ entry.Name }}</span>
+                <span class="file-icon" :class="'file-icon--' + getFileKind(entry)">
+                  <component :is="fileIcons[getFileKind(entry)]" aria-hidden="true" />
+                </span>
+                <span class="file-name__text" :title="entry.Name">{{ entry.Name }}</span>
               </div>
             </td>
-            <td>{{ entry.IsDirectory ? t('FilePage.Directory', '目录') : t('FilePage.File', '文件') }}</td>
-            <td>{{ entry.IsDirectory ? '-' : formatFileSize(entry.Size) }}</td>
+            <td class="type-cell">{{ getFileType(entry) }}</td>
+            <td class="size-cell">{{ entry.IsDirectory ? '—' : formatFileSize(entry.Size) }}</td>
+            <td class="actions-cell">
+              <button
+                class="row-actions icon-button transparent"
+                type="button"
+                :disabled="loading"
+                :title="t('FilePage.MoreActions', '更多操作')"
+                :aria-label="t('FilePage.EntryActions', '更多操作：{0}', entry.Name)"
+                aria-haspopup="menu"
+                :aria-expanded="contextMenu.show && contextMenu.kind === 'entry' && contextMenu.entry?.Name === entry.Name"
+                :aria-controls="contextMenu.show && contextMenu.kind === 'entry' && contextMenu.entry?.Name === entry.Name ? 'file-action-menu' : undefined"
+                @click.stop="onContextMenu($event, entry)"
+                @dblclick.stop
+                @keydown.enter.stop
+                @keydown.down.prevent.stop="onContextMenu($event, entry)">
+                <MoreHorizontal20Regular aria-hidden="true" />
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
     </div>
 
+    <div v-if="transferTasks[0]" class="transfer-bar">
+      <span class="transfer-detail" :title="transferTasks[0].detail">{{ transferTasks[0].detail }}</span>
+      <progress
+        :value="transferTasks[0].isIndeterminate ? undefined : transferTasks[0].progress"
+        max="100"
+        :aria-label="transferTasks[0].title" />
+      <button
+        v-if="transferTasks[0].isCancelable"
+        class="transparent"
+        type="button"
+        @click="requestCancelTransfer(transferTasks[0])">
+        {{ t('Common.Cancel', '取消') }}
+      </button>
+      <button class="transparent transfer-all" type="button" @click="router.push({ name: 'tasks' })">
+        {{ t('FilePage.TransferCount', '传输任务 ({0})', transferTasks.length) }}
+      </button>
+    </div>
     <div class="footer-bar">
-      {{ activeTab ? t('FilePage.ItemCount', '{0} 个项目', visibleEntries.length) : t('FilePage.NoDeviceSelected', '未选择设备') }}
+      <span v-if="activeTab">
+        {{ searchQuery.trim()
+          ? t('FilePage.FilteredCount', '显示 {0} / {1} 个项目', visibleEntries.length, directoryEntries.length)
+          : t('FilePage.ItemCount', '{0} 个项目', directoryEntries.length) }}
+      </span>
+      <span v-else>{{ t('FilePage.NoDeviceSelected', '未选择设备') }}</span>
+      <span v-if="selectedEntry" class="selection-summary" :title="selectedEntry.Name">{{ selectedEntry.Name }}</span>
     </div>
 
     <Teleport to="body">
       <div
         v-if="contextMenu.show"
+        id="file-action-menu"
+        ref="menuElement"
         class="context-menu"
+        role="menu"
+        :aria-label="contextMenu.kind === 'upload' ? t('FilePage.Upload', '上传') : t('FilePage.MoreActions', '更多操作')"
         :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
         @click.stop
-      >
-        <div v-if="contextMenu.entry?.IsDirectory" class="context-menu-item" @click="handleContextAction('open')">
-          {{ t('FilePage.ActionOpen', '打开') }}
-        </div>
-        <div v-if="canUseBlobDownload(contextMenu.entry)" class="context-menu-item" @click="handleContextAction('download')">
-          {{ t('FilePage.ActionDownload', '下载') }}
-        </div>
-        <div v-if="!contextMenu.entry?.IsDirectory" class="context-menu-item" @click="handleContextAction('browser-download')">
-          {{ t('FilePage.ActionBrowserDownload', '浏览器下载') }}
-        </div>
-        <div class="context-menu-item" @click="handleContextAction('copy-path')">
-          {{ t('FilePage.ActionCopyPath', '复制路径') }}
-        </div>
-        <div class="context-menu-item" @click="handleContextAction('rename')">
-          {{ t('FilePage.ActionRename', '重命名') }}
-        </div>
-        <div class="context-menu-item danger" @click="handleContextAction('delete')">
-          {{ t('FilePage.ActionDelete', '删除') }}
-        </div>
+        @keydown="onMenuKeydown">
+        <button
+          v-for="item in menuActions"
+          :key="item.action"
+          class="context-menu-item"
+          :class="{ danger: item.action === 'delete' }"
+          type="button"
+          role="menuitem"
+          tabindex="-1"
+          @click="handleContextAction(item.action)">
+          <component :is="item.icon" aria-hidden="true" />
+          {{ item.label }}
+        </button>
       </div>
     </Teleport>
   </div>

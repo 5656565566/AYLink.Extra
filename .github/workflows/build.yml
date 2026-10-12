@@ -81,7 +81,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.25.1'
+        go-version: '1.27.2'
         cache: true
         cache-dependency-path: AYLink.Agent/go.sum
 

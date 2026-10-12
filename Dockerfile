@@ -17,7 +17,7 @@ RUN npm run build
 # =============================================================================
 # Build Agent
 # =============================================================================
-FROM golang:1.25.1-alpine AS agent-builder
+FROM golang:1.27.2-alpine AS agent-builder
 
 ARG SCRCPY_SERVER_VERSION=4.1
 

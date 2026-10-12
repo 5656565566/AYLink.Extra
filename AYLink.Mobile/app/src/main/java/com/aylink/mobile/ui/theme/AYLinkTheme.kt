@@ -1,6 +1,10 @@
 package com.aylink.mobile.ui.theme
 
+import android.graphics.Color
 import android.os.Build
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -8,7 +12,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import com.aylink.mobile.data.repo.LocalUiSettings
 import com.aylink.mobile.data.repo.ThemeMode
 
@@ -21,6 +28,7 @@ fun AYLinkTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val darkTheme =
         when (settings.themeMode) {
             ThemeMode.SYSTEM -> isSystemInDarkTheme()
@@ -35,6 +43,16 @@ fun AYLinkTheme(
             darkTheme -> DarkColors
             else -> LightColors
         }
+
+    if (!view.isInEditMode) {
+        SideEffect {
+            // 应用内可以独立选择深浅主题，系统栏不能只依赖系统夜间模式。
+            (view.context as? ComponentActivity)?.enableEdgeToEdge(
+                statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { darkTheme },
+                navigationBarStyle = SystemBarStyle.auto(colorScheme.background.toArgb(), colorScheme.background.toArgb()) { darkTheme },
+            )
+        }
+    }
 
     MaterialTheme(
         colorScheme = colorScheme,

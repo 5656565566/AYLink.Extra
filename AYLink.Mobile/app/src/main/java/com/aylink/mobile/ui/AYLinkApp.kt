@@ -1,6 +1,10 @@
 package com.aylink.mobile.ui
 
+import android.graphics.Color
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +37,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +46,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -282,6 +288,16 @@ fun AYLinkApp(container: AppContainer) {
         }
 
     AYLinkTheme(settings = localSettings) {
+        val view = LocalView.current
+        if (currentScreen is Screen.Remote && !view.isInEditMode) {
+            SideEffect {
+                // 投屏背景固定为黑色，临时显示系统栏时仍需使用浅色图标。
+                (view.context as? ComponentActivity)?.enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+                    navigationBarStyle = SystemBarStyle.dark(Color.BLACK),
+                )
+            }
+        }
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,

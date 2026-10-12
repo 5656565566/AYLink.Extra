@@ -293,6 +293,7 @@ fun RemoteScreen(
         modifier =
             Modifier
                 .fillMaxSize()
+                .background(Color.Black)
                 .windowInsetsPadding(
                     WindowInsets.safeDrawing.only(
                         WindowInsetsSides.Horizontal + WindowInsetsSides.Top + WindowInsetsSides.Bottom,
@@ -307,7 +308,7 @@ fun RemoteScreen(
                             right = position.x + size.width,
                             bottom = position.y + size.height,
                         )
-                }.background(Color.Black),
+                },
     ) {
         RemoteVideoSurface(
             viewportSize = viewportSize,

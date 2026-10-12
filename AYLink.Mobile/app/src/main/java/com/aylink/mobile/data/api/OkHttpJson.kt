@@ -70,6 +70,20 @@ suspend fun OkHttpClient.executeRaw(request: Request): Response =
         awaitResponse(request)
     }
 
+internal suspend fun Response.checkSuccess(json: Json) =
+    withContext(Dispatchers.IO) {
+        // 即使调用者只关心状态，也读完响应以结束 RTC 请求通道。
+        val text = body?.string().orEmpty()
+        if (!isSuccessful) {
+            val error = runCatching { json.decodeFromString(ApiErrorResponse.serializer(), text).error }.getOrNull()
+            val message =
+                error?.message?.takeIf { it.isNotBlank() }
+                    ?: error?.messageKey?.takeIf { it.isNotBlank() }
+                    ?: text.ifBlank { "Unknown Error" }
+            throw ApiException(code, "HTTP $code: $message")
+        }
+    }
+
 private suspend fun OkHttpClient.awaitResponse(request: Request): Response =
     suspendCancellableCoroutine { continuation ->
         val call = newCall(request)

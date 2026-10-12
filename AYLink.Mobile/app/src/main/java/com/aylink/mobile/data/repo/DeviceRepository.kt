@@ -12,6 +12,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import com.aylink.mobile.data.api.AgentApi
 import com.aylink.mobile.data.api.ApiException
+import com.aylink.mobile.data.api.downloadFilename
 import com.aylink.mobile.data.model.Device
 import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.DeviceAppInfo
@@ -303,8 +304,8 @@ class DeviceRepository(
         val allSizesKnown = sources.all { it.size != null }
         val totalBytes = sources.sumOf { it.size ?: 0L }.takeIf { allSizesKnown && it > 0 }
         var completedBytes = 0L
-        authRepository.withAuthorizedRequest { baseUrl, token ->
-            sources.forEach { source ->
+        sources.forEach { source ->
+            authRepository.withAuthorizedRequest { baseUrl, token ->
                 var currentLoadedBytes = 0L
                 agentApi.uploadFile(
                     baseUrl = baseUrl,
@@ -581,13 +582,7 @@ class DeviceRepository(
     private fun resolveResponseFileName(
         response: okhttp3.Response,
         fallback: String,
-    ): String =
-        response
-            .header("Content-Disposition")
-            ?.substringAfter("filename=\"", "")
-            ?.substringBefore('"')
-            ?.takeIf { it.isNotBlank() }
-            ?: fallback
+    ): String = downloadFilename(response.header("Content-Disposition"), fallback)
 
     private fun resolveApkDisplayName(uri: Uri): String {
         val fallback =

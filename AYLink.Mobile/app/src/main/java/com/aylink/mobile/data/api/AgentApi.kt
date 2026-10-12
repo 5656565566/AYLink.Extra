@@ -16,6 +16,7 @@ import com.aylink.mobile.data.model.ScrcpySessionActionRequest
 import com.aylink.mobile.data.model.VideoStreamHealthSnapshot
 import com.aylink.mobile.data.model.WebRtcTicketRequest
 import com.aylink.mobile.data.model.WebRtcTicketResponse
+import com.aylink.mobile.data.transport.DeviceTransport
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -31,6 +32,7 @@ import java.util.concurrent.TimeUnit
 class AgentApi(
     private val client: OkHttpClient,
     private val json: Json,
+    private val deviceTransport: DeviceTransport,
 ) {
     private val transferClient: OkHttpClient =
         client
@@ -246,7 +248,7 @@ class AgentApi(
             authorized("$baseUrl/api/devices/$deviceId/files/download", token)
                 .post(body)
                 .build()
-        return transferClient.executeRaw(request)
+        return deviceTransport.executeFile(request, deviceId, transferClient)
     }
 
     suspend fun uploadFile(
@@ -278,7 +280,9 @@ class AgentApi(
             authorized(uploadUrl.toString(), token)
                 .post(body)
                 .build()
-        transferClient.executeEmpty(request, json)
+        deviceTransport.executeFile(request, deviceId, transferClient).use { response ->
+            response.checkSuccess(json)
+        }
     }
 
     suspend fun installApp(
@@ -298,7 +302,9 @@ class AgentApi(
             authorized("$baseUrl/api/devices/$deviceId/apps/install", token)
                 .post(body)
                 .build()
-        transferClient.executeEmpty(request, json)
+        deviceTransport.executeFile(request, deviceId, transferClient).use { response ->
+            response.checkSuccess(json)
+        }
     }
 
     suspend fun createWebRtcTicket(

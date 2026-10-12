@@ -5,23 +5,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aylink.mobile.data.model.Device
 import com.aylink.mobile.data.repo.SessionStore
+import com.aylink.mobile.data.transport.TerminalConnection
+import com.aylink.mobile.data.transport.TerminalListener
+import com.aylink.mobile.data.transport.TerminalTransport
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import kotlin.math.max
 
 @Immutable
@@ -44,7 +41,7 @@ sealed interface TerminalEvent {
 class TerminalViewModel(
     private val device: Device,
     private val sessionStore: SessionStore,
-    private val okHttpClient: OkHttpClient,
+    private val terminalTransport: TerminalTransport,
     private val json: Json,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TerminalUiState(device = device))
@@ -53,7 +50,7 @@ class TerminalViewModel(
     private val _events = MutableSharedFlow<TerminalEvent>(extraBufferCapacity = 64)
     val events = _events.asSharedFlow()
 
-    private var webSocket: WebSocket? = null
+    private var connection: TerminalConnection? = null
     private var connectJob: Job? = null
     private var lastTerminalSize: TerminalSize? = null
 
@@ -65,7 +62,7 @@ class TerminalViewModel(
         if (data.isEmpty()) {
             return
         }
-        webSocket?.send(
+        connection?.send(
             json.encodeToString(
                 TerminalClientMessage.serializer(),
                 TerminalClientMessage(type = "input", data = data),
@@ -85,7 +82,7 @@ class TerminalViewModel(
             return
         }
         lastTerminalSize = next
-        webSocket?.send(
+        connection?.send(
             json.encodeToString(
                 TerminalClientMessage.serializer(),
                 TerminalClientMessage(type = "resize", cols = next.cols, rows = next.rows),
@@ -104,9 +101,7 @@ class TerminalViewModel(
         }
         connectJob =
             viewModelScope.launch {
-                val baseUrl = sessionStore.baseUrl.first()
-                val token = sessionStore.token.first().orEmpty()
-                if (token.isBlank()) {
+                if (!sessionStore.hasSession) {
                     _uiState.update {
                         it.copy(
                             connecting = false,
@@ -118,7 +113,6 @@ class TerminalViewModel(
                     }
                     return@launch
                 }
-
                 _uiState.update {
                     it.copy(
                         connecting = true,
@@ -129,19 +123,12 @@ class TerminalViewModel(
                     )
                 }
 
-                val requestBuilder = Request.Builder()
-                requestBuilder.url(buildWebSocketUrl(baseUrl, device.id))
-                requestBuilder.header("Authorization", "Bearer $token")
-                val request = requestBuilder.build()
-
-                webSocket =
-                    okHttpClient.newWebSocket(
-                        request,
-                        object : WebSocketListener() {
-                            override fun onOpen(
-                                webSocket: WebSocket,
-                                response: Response,
-                            ) {
+                connection =
+                    terminalTransport.connect(
+                        viewModelScope,
+                        device.id,
+                        object : TerminalListener {
+                            override fun onOpen(connection: TerminalConnection) {
                                 _uiState.update {
                                     it.copy(
                                         connecting = false,
@@ -151,7 +138,7 @@ class TerminalViewModel(
                                     )
                                 }
                                 lastTerminalSize?.let { size ->
-                                    webSocket.send(
+                                    connection.send(
                                         json.encodeToString(
                                             TerminalClientMessage.serializer(),
                                             TerminalClientMessage(
@@ -165,7 +152,7 @@ class TerminalViewModel(
                             }
 
                             override fun onMessage(
-                                webSocket: WebSocket,
+                                connection: TerminalConnection,
                                 text: String,
                             ) {
                                 runCatching {
@@ -183,7 +170,7 @@ class TerminalViewModel(
                                                 )
                                             }
                                             lastTerminalSize?.let { size ->
-                                                webSocket.send(
+                                                connection.send(
                                                     json.encodeToString(
                                                         TerminalClientMessage.serializer(),
                                                         TerminalClientMessage(
@@ -233,19 +220,7 @@ class TerminalViewModel(
                                 }
                             }
 
-                            override fun onClosing(
-                                webSocket: WebSocket,
-                                code: Int,
-                                reason: String,
-                            ) {
-                                webSocket.close(code, reason)
-                            }
-
-                            override fun onClosed(
-                                webSocket: WebSocket,
-                                code: Int,
-                                reason: String,
-                            ) {
+                            override fun onClosed(reason: String) {
                                 _uiState.update {
                                     it.copy(
                                         connecting = false,
@@ -256,17 +231,13 @@ class TerminalViewModel(
                                 }
                             }
 
-                            override fun onFailure(
-                                webSocket: WebSocket,
-                                t: Throwable,
-                                response: Response?,
-                            ) {
+                            override fun onFailure(error: Throwable) {
                                 _uiState.update {
                                     it.copy(
                                         connecting = false,
                                         ready = false,
                                         disconnected = true,
-                                        errorMessage = t.message ?: "终端连接失败",
+                                        errorMessage = error.message ?: "终端连接失败",
                                         statusText = "连接异常",
                                     )
                                 }
@@ -279,27 +250,13 @@ class TerminalViewModel(
     private fun disconnect() {
         connectJob?.cancel()
         connectJob = null
-        webSocket?.close(1000, "closed")
-        webSocket = null
+        connection?.close()
+        connection = null
     }
 
     override fun onCleared() {
         disconnect()
         super.onCleared()
-    }
-
-    private fun buildWebSocketUrl(
-        baseUrl: String,
-        deviceId: Int,
-    ): String {
-        val normalized = baseUrl.removeSuffix("/")
-        val wsBase =
-            when {
-                normalized.startsWith("https://") -> "wss://${normalized.removePrefix("https://")}"
-                normalized.startsWith("http://") -> "ws://${normalized.removePrefix("http://")}"
-                else -> normalized
-            }
-        return "$wsBase/api/devices/$deviceId/terminal/ws"
     }
 
     @Serializable

@@ -15,12 +15,12 @@ def appVersionCode = resolveAndroidVersionCode(System.getenv("ANDROID_VERSION_CO
 
 android {
     namespace = 'com.aylink.mobile'
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.aylink.mobile"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
 
@@ -59,10 +59,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         compose = true
         buildConfig = true
@@ -72,6 +68,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 
@@ -86,6 +88,7 @@ ktlint {
 }
 
 dependencies {
+    testImplementation "junit:junit:4.13.2"
     def composeBom = platform("androidx.compose:compose-bom:2025.10.00")
     implementation composeBom
     androidTestImplementation composeBom
@@ -114,7 +117,7 @@ dependencies {
 
     implementation "com.termux.termux-app:terminal-view:0.118.0"
 
-    implementation "io.github.webrtc-sdk:android:144.7559.09"
+    implementation "io.github.webrtc-sdk:android:144.7559.15"
 }
 
 static int resolveAndroidVersionCode(String explicitVersionCode, String versionName) {

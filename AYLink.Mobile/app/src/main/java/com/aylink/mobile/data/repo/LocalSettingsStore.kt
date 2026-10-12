@@ -34,6 +34,7 @@ data class LocalUiSettings(
     val pointerSamplingRateHz: PointerSamplingRateHz = PointerSamplingRateHz.HZ_120,
     val weakNetworkMode: Boolean = false,
     val debugMode: Boolean = false,
+    val preferWebRtcFileTransfer: Boolean = true,
 )
 
 class LocalSettingsStore(
@@ -59,6 +60,7 @@ class LocalSettingsStore(
                     ),
                 weakNetworkMode = preferences.getBoolean(KEY_WEAK_NETWORK_MODE, false),
                 debugMode = preferences.getBoolean(KEY_DEBUG_MODE, false),
+                preferWebRtcFileTransfer = preferences.getBoolean(KEY_PREFER_WEBRTC_FILE_TRANSFER, true),
             ),
         )
 
@@ -110,6 +112,11 @@ class LocalSettingsStore(
         preferences.edit { putBoolean(KEY_DEBUG_MODE, enabled) }
     }
 
+    fun updatePreferWebRtcFileTransfer(enabled: Boolean) {
+        _settings.value = _settings.value.copy(preferWebRtcFileTransfer = enabled)
+        preferences.edit { putBoolean(KEY_PREFER_WEBRTC_FILE_TRANSFER, enabled) }
+    }
+
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DYNAMIC_COLOR = "dynamic_color"
@@ -119,5 +126,6 @@ class LocalSettingsStore(
         private const val KEY_POINTER_SAMPLING_RATE_HZ = "pointer_sampling_rate_hz"
         private const val KEY_WEAK_NETWORK_MODE = "weak_network_mode"
         private const val KEY_DEBUG_MODE = "debug_mode"
+        private const val KEY_PREFER_WEBRTC_FILE_TRANSFER = "prefer_webrtc_file_transfer"
     }
 }

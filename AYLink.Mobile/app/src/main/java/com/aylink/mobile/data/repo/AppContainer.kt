@@ -2,6 +2,8 @@ package com.aylink.mobile.data.repo
 
 import android.content.Context
 import com.aylink.mobile.data.api.AgentApi
+import com.aylink.mobile.data.transport.DeviceTransport
+import com.aylink.mobile.data.transport.TerminalTransport
 import com.aylink.mobile.logging.AppLogger
 import com.aylink.mobile.logging.DiagnosticHttpLoggingInterceptor
 import com.aylink.mobile.logging.DiagnosticLogExporter
@@ -28,7 +30,12 @@ class AppContainer(
 
     val sessionStore = SessionStore(context)
     val localSettingsStore = LocalSettingsStore(context)
-    val agentApi = AgentApi(okHttpClient, json)
+    val deviceTransport =
+        DeviceTransport(context.applicationContext, okHttpClient, json, sessionStore, appLogger) {
+            localSettingsStore.settings.value.preferWebRtcFileTransfer
+        }
+    val agentApi = AgentApi(okHttpClient, json, deviceTransport)
     val authRepository = AuthRepository(sessionStore, agentApi)
+    val terminalTransport = TerminalTransport(okHttpClient, authRepository, deviceTransport)
     val deviceRepository = DeviceRepository(context.applicationContext, authRepository, agentApi)
 }

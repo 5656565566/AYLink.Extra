@@ -2,6 +2,7 @@ package com.aylink.mobile.data.repo
 
 import com.aylink.mobile.data.api.AgentApi
 import com.aylink.mobile.data.api.ApiException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,7 +36,9 @@ class AuthRepository(
     }
 
     suspend fun <T> withAuthorizedRequest(block: suspend (baseUrl: String, token: String) -> T): T {
+        val generation = sessionStore.transportGeneration.value
         val (baseUrl, token) = requireSession()
+        if (generation != sessionStore.transportGeneration.value) throw CancellationException("Account session changed")
         return try {
             block(baseUrl, token)
         } catch (error: ApiException) {
@@ -43,13 +46,17 @@ class AuthRepository(
                 throw error
             }
 
-            val refreshedToken = refreshSession() ?: throw IllegalStateException("登录已过期，请重新登录", error)
+            if (generation != sessionStore.transportGeneration.value) throw CancellationException("Account session changed")
+
+            val refreshedToken = refreshSession(generation) ?: throw IllegalStateException("登录已过期，请重新登录", error)
+            if (generation != sessionStore.transportGeneration.value) throw CancellationException("Account session changed")
             block(baseUrl, refreshedToken)
         }
     }
 
-    private suspend fun refreshSession(): String? =
+    private suspend fun refreshSession(generation: Long): String? =
         refreshMutex.withLock {
+            if (generation != sessionStore.transportGeneration.value) throw CancellationException("Account session changed")
             val baseUrl = sessionStore.baseUrl.first()
             val refreshToken = sessionStore.refreshToken.first()
             if (refreshToken.isNullOrBlank()) {
@@ -59,6 +66,7 @@ class AuthRepository(
 
             return try {
                 val response = agentApi.refresh(baseUrl, refreshToken)
+                if (generation != sessionStore.transportGeneration.value) throw CancellationException("Account session changed")
                 val nextAccessToken = response.accessToken?.takeIf { it.isNotBlank() }
                 if (nextAccessToken.isNullOrBlank()) {
                     sessionStore.clearSession()
@@ -71,6 +79,7 @@ class AuthRepository(
                     nextAccessToken
                 }
             } catch (error: ApiException) {
+                if (generation != sessionStore.transportGeneration.value) throw CancellationException("Account session changed")
                 if (error.statusCode == 401) {
                     sessionStore.clearSession()
                     null

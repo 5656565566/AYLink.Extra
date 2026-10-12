@@ -447,7 +447,7 @@ fun AYLinkApp(container: AppContainer) {
                                     TerminalViewModel(
                                         device = screen.device,
                                         sessionStore = container.sessionStore,
-                                        okHttpClient = container.okHttpClient,
+                                        terminalTransport = container.terminalTransport,
                                         json = container.json,
                                     )
                                 }

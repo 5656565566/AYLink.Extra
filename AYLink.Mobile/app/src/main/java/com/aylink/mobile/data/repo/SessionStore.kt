@@ -24,6 +24,7 @@ class SessionStore(
     private val _refreshToken = MutableStateFlow(preferences.getString(KEY_REFRESH_TOKEN, null))
     private val _lastSelectedDevice = MutableStateFlow(readDevice(KEY_LAST_SELECTED_DEVICE))
     private val _lastRemoteDevice = MutableStateFlow(readLastRemoteDevice())
+    private val _transportGeneration = MutableStateFlow(0L)
 
     val baseUrl: StateFlow<String> = _baseUrl.asStateFlow()
     val username: StateFlow<String> = _username.asStateFlow()
@@ -31,6 +32,7 @@ class SessionStore(
     val refreshToken: StateFlow<String?> = _refreshToken.asStateFlow()
     val lastSelectedDevice: StateFlow<Device?> = _lastSelectedDevice.asStateFlow()
     val lastRemoteDevice: StateFlow<Device?> = _lastRemoteDevice.asStateFlow()
+    val transportGeneration: StateFlow<Long> = _transportGeneration.asStateFlow()
     val hasConfiguredBaseUrl: Boolean
         get() = !preferences.getString(KEY_BASE_URL, null).isNullOrBlank()
     val hasSession: Boolean
@@ -46,8 +48,11 @@ class SessionStore(
     }
 
     fun updateUsername(value: String) {
-        _username.value = value.trim().ifBlank { DEFAULT_USERNAME }
+        val normalized = value.trim().ifBlank { DEFAULT_USERNAME }
+        val changed = _username.value != normalized
+        _username.value = normalized
         preferences.edit { putString(KEY_USERNAME, _username.value) }
+        if (changed) _transportGeneration.value += 1
     }
 
     fun updateSession(
@@ -76,6 +81,7 @@ class SessionStore(
             remove(KEY_TOKEN)
             remove(KEY_REFRESH_TOKEN)
         }
+        _transportGeneration.value += 1
     }
 
     fun updateLastSelectedDevice(device: Device?) {

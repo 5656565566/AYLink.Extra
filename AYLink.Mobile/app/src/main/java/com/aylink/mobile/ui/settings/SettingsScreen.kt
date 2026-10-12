@@ -127,6 +127,17 @@ fun SettingsScreen(
         }
 
         SettingCard(
+            title = "文件传输",
+            description = "WebRTC 建连失败时使用 HTTP；关闭后文件和 APK 传输直接使用 HTTP",
+        ) {
+            SettingSwitchRow(
+                title = "文件上传下载优先使用 WebRTC",
+                checked = settings.preferWebRtcFileTransfer,
+                onCheckedChange = settingsStore::updatePreferWebRtcFileTransfer,
+            )
+        }
+
+        SettingCard(
             title = "文件下载",
             description = "设置文件管理下载到本机时的保存位置",
         ) {

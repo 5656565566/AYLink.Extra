@@ -2,8 +2,8 @@ package com.aylink.mobile.ui.devices
 
 import android.annotation.SuppressLint
 import android.net.Uri
-import androidx.core.net.toUri
 import androidx.compose.runtime.Immutable
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aylink.mobile.data.model.FileEntry

@@ -1,11 +1,10 @@
 package com.aylink.mobile.ui
 
 import android.graphics.Color
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -37,7 +36,6 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,8 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -68,6 +66,8 @@ import com.aylink.mobile.ui.login.LoginViewModel
 import com.aylink.mobile.ui.remote.RemoteScreen
 import com.aylink.mobile.ui.remote.RemoteViewModel
 import com.aylink.mobile.ui.settings.SettingsScreen
+import com.aylink.mobile.ui.terminal.TerminalBackgroundColor
+import com.aylink.mobile.ui.terminal.TerminalOptionsMenu
 import com.aylink.mobile.ui.terminal.TerminalScreen
 import com.aylink.mobile.ui.terminal.TerminalViewModel
 import com.aylink.mobile.ui.theme.AYLinkTheme
@@ -80,6 +80,9 @@ fun MainLayout(
     selectedDevice: com.aylink.mobile.data.model.Device?,
     onNavigate: (Screen) -> Unit,
     onLogout: () -> Unit,
+    actions: @Composable RowScope.() -> Unit = {},
+    // 终端全屏时由终端状态统一关闭顶部栏，其他页面不受影响。
+    terminalChromeVisible: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     fun currentDeviceOrNull(): com.aylink.mobile.data.model.Device? =
@@ -101,6 +104,9 @@ fun MainLayout(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        // 注意：Material3 的 gesturesEnabled 同时控制拖拽手势和点击遮罩关闭（Scrim.onClose 里
+        // 也读它），终端页一旦把它置 false，侧边栏就打不开了，所以这里必须保持 true。
+        // 终端页的防误触改由 TerminalScreen 的空格键输入区自己处理，不依赖这个开关。
         gesturesEnabled = true,
         drawerContent = {
             ModalDrawerSheet(
@@ -200,30 +206,34 @@ fun MainLayout(
         },
     ) {
         Scaffold(
+            containerColor = if (currentScreen is Screen.Terminal) TerminalBackgroundColor else MaterialTheme.colorScheme.background,
             topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            when (currentScreen) {
-                                is Screen.Devices -> "设备列表"
-                                is Screen.Remote -> "远程控制"
-                                is Screen.AppManager -> "应用管理"
-                                Screen.AppManagerHome -> "应用管理"
-                                is Screen.FileManager -> "文件管理"
-                                Screen.FileManagerHome -> "文件管理"
-                                is Screen.Terminal -> "终端"
-                                Screen.TerminalHome -> "终端"
-                                is Screen.Settings -> "设置"
-                                else -> "AYLink"
-                            },
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
-                        }
-                    },
-                )
+                if (terminalChromeVisible) {
+                    TopAppBar(
+                        title = {
+                            Text(
+                                when (currentScreen) {
+                                    is Screen.Devices -> "设备列表"
+                                    is Screen.Remote -> "远程控制"
+                                    is Screen.AppManager -> "应用管理"
+                                    Screen.AppManagerHome -> "应用管理"
+                                    is Screen.FileManager -> "文件管理"
+                                    Screen.FileManagerHome -> "文件管理"
+                                    is Screen.Terminal -> "终端"
+                                    Screen.TerminalHome -> "终端"
+                                    is Screen.Settings -> "设置"
+                                    else -> "AYLink"
+                                },
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Menu")
+                            }
+                        },
+                        actions = actions,
+                    )
+                }
             },
         ) { innerPadding ->
             Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
@@ -287,17 +297,17 @@ fun AYLinkApp(container: AppContainer) {
             )
         }
 
-    AYLinkTheme(settings = localSettings) {
-        val view = LocalView.current
-        if (currentScreen is Screen.Remote && !view.isInEditMode) {
-            SideEffect {
-                // 投屏背景固定为黑色，临时显示系统栏时仍需使用浅色图标。
-                (view.context as? ComponentActivity)?.enableEdgeToEdge(
-                    statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-                    navigationBarStyle = SystemBarStyle.dark(Color.BLACK),
-                )
-            }
-        }
+    AYLinkTheme(
+        settings = localSettings,
+        // 终端的状态栏位于主题 TopAppBar 上；只有投屏的顶部背景固定为黑色。
+        statusBarStyle = if (currentScreen is Screen.Remote) SystemBarStyle.dark(Color.TRANSPARENT) else null,
+        navigationBarStyle =
+            when (currentScreen) {
+                is Screen.Terminal -> SystemBarStyle.dark(TerminalBackgroundColor.toArgb())
+                is Screen.Remote -> SystemBarStyle.dark(Color.BLACK)
+                else -> null
+            },
+    ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
@@ -358,6 +368,19 @@ fun AYLinkApp(container: AppContainer) {
                     else -> {}
                 }
             } else {
+                val terminalViewModel =
+                    (currentScreen as? Screen.Terminal)?.let { screen ->
+                        rememberManagedViewModel("terminal-$sessionScopeKey-${screen.device.id}") {
+                            TerminalViewModel(
+                                device = screen.device,
+                                sessionStore = container.sessionStore,
+                                terminalTransport = container.terminalTransport,
+                                json = container.json,
+                            )
+                        }
+                    }
+                // 顶部栏显隐由终端状态统一决定，非终端页不受全屏影响。
+                val terminalChromeVisible = rememberTerminalChromeVisible(terminalViewModel)
                 MainLayout(
                     currentScreen = currentScreen,
                     selectedDevice = lastSelectedDevice,
@@ -366,6 +389,13 @@ fun AYLinkApp(container: AppContainer) {
                         container.sessionStore.clearSession()
                         currentScreen = Screen.Login
                     },
+                    actions = {
+                        terminalViewModel?.let {
+                            // 断开后回到未选择设备状态，终端页不再绑定这台设备。
+                            TerminalOptionsMenu(it, onDisconnected = { currentScreen = Screen.TerminalHome })
+                        }
+                    },
+                    terminalChromeVisible = terminalChromeVisible,
                 ) {
                     when (val screen = currentScreen) {
                         Screen.Devices -> {
@@ -458,16 +488,7 @@ fun AYLinkApp(container: AppContainer) {
                             )
                         }
                         is Screen.Terminal -> {
-                            val viewModel =
-                                rememberManagedViewModel("terminal-$sessionScopeKey-${screen.device.id}") {
-                                    TerminalViewModel(
-                                        device = screen.device,
-                                        sessionStore = container.sessionStore,
-                                        terminalTransport = container.terminalTransport,
-                                        json = container.json,
-                                    )
-                                }
-                            TerminalScreen(viewModel = viewModel)
+                            terminalViewModel?.let { TerminalScreen(viewModel = it) }
                         }
                         Screen.Settings -> {
                             SettingsScreen(
@@ -511,6 +532,14 @@ private fun rememberDisposableViewModelStoreOwner(key: Any): ViewModelStoreOwner
             override val viewModelStore: ViewModelStore = store
         }
     }
+}
+
+// 只在终端页创建 ViewModel，因此按是否存在分别收集；非终端页没有全屏状态。
+@Composable
+private fun rememberTerminalChromeVisible(viewModel: TerminalViewModel?): Boolean {
+    if (viewModel == null) return true
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    return state.chromeVisible
 }
 
 private inline fun <reified VM : ViewModel> managedViewModelFactory(crossinline creator: () -> VM): ViewModelProvider.Factory =

@@ -25,6 +25,8 @@ private val DarkColors = darkColorScheme()
 @Composable
 fun AYLinkTheme(
     settings: LocalUiSettings,
+    statusBarStyle: SystemBarStyle? = null,
+    navigationBarStyle: SystemBarStyle? = null,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -48,8 +50,10 @@ fun AYLinkTheme(
         SideEffect {
             // 应用内可以独立选择深浅主题，系统栏不能只依赖系统夜间模式。
             (view.context as? ComponentActivity)?.enableEdgeToEdge(
-                statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { darkTheme },
-                navigationBarStyle = SystemBarStyle.auto(colorScheme.background.toArgb(), colorScheme.background.toArgb()) { darkTheme },
+                statusBarStyle = statusBarStyle ?: SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { darkTheme },
+                navigationBarStyle =
+                    navigationBarStyle
+                        ?: SystemBarStyle.auto(colorScheme.background.toArgb(), colorScheme.background.toArgb()) { darkTheme },
             )
         }
     }

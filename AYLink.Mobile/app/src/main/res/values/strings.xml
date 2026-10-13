@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AYLink</string>
+    <string name="terminal_copy">Copy</string>
+    <string name="terminal_paste">Paste</string>
+    <string name="terminal_hide_keyboard">Hide keyboard</string>
+    <string name="terminal_show_keyboard">Show keyboard</string>
+    <string name="terminal_disconnect">Disconnect</string>
+    <string name="terminal_orientation">Screen orientation: %s</string>
+    <string name="terminal_orientation_follow_system">Follow system</string>
+    <string name="terminal_orientation_landscape">Lock landscape</string>
+    <string name="terminal_orientation_portrait">Lock portrait</string>
+    <string name="terminal_fullscreen">Fullscreen</string>
+    <string name="terminal_exit_fullscreen">Exit fullscreen</string>
 </resources>

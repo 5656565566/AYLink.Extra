@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">安易连</string>
+    <string name="terminal_copy">复制</string>
+    <string name="terminal_paste">粘贴</string>
+    <string name="terminal_hide_keyboard">隐藏键盘</string>
+    <string name="terminal_show_keyboard">显示键盘</string>
+    <string name="terminal_disconnect">断开连接</string>
+    <string name="terminal_orientation">屏幕方向：%s</string>
+    <string name="terminal_orientation_follow_system">跟随系统</string>
+    <string name="terminal_orientation_landscape">锁定横屏</string>
+    <string name="terminal_orientation_portrait">锁定竖屏</string>
+    <string name="terminal_fullscreen">全屏</string>
+    <string name="terminal_exit_fullscreen">退出全屏</string>
 </resources>

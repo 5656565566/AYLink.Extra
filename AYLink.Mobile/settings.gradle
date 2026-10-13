@@ -33,3 +33,4 @@ dependencyResolutionManagement {
 
 rootProject.name = 'AYLink.Mobile'
 include ':app'
+include ':terminal-emulator'

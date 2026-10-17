@@ -2,7 +2,6 @@ package webrtc
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -195,7 +194,7 @@ func (b *scrcpyAudioBridge) run(peerConnection *pion.PeerConnection) {
 
 			if peerConnection.ConnectionState() == pion.PeerConnectionStateConnected {
 				// 转发原始 Opus 数据载荷
-				// Config 包不能发送给轨道，但仍需释放其载荷。
+				// Config 包不能发送给轨道 但仍需释放其载荷
 				if packet.Codec == domainscrcpy.AudioCodecOpus && !packet.IsConfig {
 					_ = b.track.WriteSample(media.Sample{
 						Data:     packet.Data,
@@ -231,6 +230,7 @@ type scrcpyVideoBridge struct {
 	pendingFramePTS   int64
 	pendingGeneration uint64
 	lastSentPTS       int64
+	hasSentPTS        bool
 	h264LengthSize    int
 	peerConnected     bool
 	lastFrameWriteAt  time.Time
@@ -395,7 +395,7 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 		b.pendingFramePTS = 0
 		b.pendingGeneration = 0
 		b.lastSentPTS = 0
-		b.lastFrameWriteAt = time.Time{}
+		b.hasSentPTS = false
 		b.lastConfigAt = now
 		b.setStateLocked(videoBridgeStateWaitingKeyFrame, now)
 		b.logDebugLocked("webrtc video config arrived",
@@ -414,7 +414,7 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 		return
 	}
 
-	isIDR := packet.IsKeyFrame || containsH264IDR(annexB)
+	isIDR := packet.IsKeyFrame
 	if b.state != videoBridgeStateReady {
 		if !isIDR {
 			return
@@ -443,11 +443,7 @@ func (b *scrcpyVideoBridge) handlePacket(peerConnection *pion.PeerConnection, pa
 	}
 
 	now := time.Now()
-	b.advanceVideoTimestampAfterIdleLocked(now)
-	if err := b.track.WriteSample(media.Sample{
-		Data:     annexB,
-		Duration: b.getDuration(packet.PresentationTimestamp),
-	}); err == nil {
+	if err := b.writeVideoSampleLocked(annexB, packet.PresentationTimestamp, now); err == nil {
 		now = time.Now()
 		b.stallReadyCount = 0
 		b.lastFrameWriteAt = now
@@ -517,10 +513,7 @@ func (b *scrcpyVideoBridge) flushPendingLocked() {
 		return
 	}
 
-	if err := b.track.WriteSample(media.Sample{
-		Data:     b.pendingKeyFrame,
-		Duration: defaultVideoSampleDuration,
-	}); err == nil {
+	if err := b.writeVideoSampleLocked(b.pendingKeyFrame, b.pendingFramePTS, time.Now()); err == nil {
 		now := time.Now()
 		b.stallReadyCount = 0
 		b.lastFrameWriteAt = now
@@ -530,7 +523,6 @@ func (b *scrcpyVideoBridge) flushPendingLocked() {
 			"generation", b.generation,
 			"pts", b.pendingFramePTS,
 		)
-		b.lastSentPTS = b.pendingFramePTS
 		b.pendingKeyFrame = nil
 		b.pendingFramePTS = 0
 		b.pendingGeneration = 0
@@ -729,51 +721,35 @@ func (b *scrcpyVideoBridge) logDebugLocked(message string, args ...any) {
 }
 
 func (b *scrcpyVideoBridge) getDuration(pts int64) time.Duration {
-	if pts <= 0 {
-		return defaultVideoSampleDuration
-	}
-	if b.lastSentPTS == 0 {
-		b.lastSentPTS = pts
+	if !b.hasSentPTS || pts < 0 {
 		return defaultVideoSampleDuration
 	}
 	delta := pts - b.lastSentPTS
-	b.lastSentPTS = pts
 	if delta <= 0 {
 		return defaultVideoSampleDuration
 	}
-
-	candidates := []time.Duration{
-		time.Duration(delta) * time.Microsecond,
-		time.Duration(delta) * time.Millisecond,
-		time.Duration(delta) * time.Second / 90000,
-	}
-	for _, candidate := range candidates {
-		if candidate >= 10*time.Millisecond && candidate <= 100*time.Millisecond {
-			return candidate
-		}
-	}
-	return defaultVideoSampleDuration
+	return time.Duration(delta) * time.Microsecond
 }
 
-func (b *scrcpyVideoBridge) advanceVideoTimestampAfterIdleLocked(now time.Time) {
-	duration := b.getVideoTimestampResyncDuration(now)
-	if duration <= 0 {
-		return
+func (b *scrcpyVideoBridge) writeVideoSampleLocked(data []byte, pts int64, now time.Time) error {
+	if b.hasSentPTS || !b.lastFrameWriteAt.IsZero() {
+		duration := b.getDuration(pts)
+		if !b.hasSentPTS || pts < 0 || pts <= b.lastSentPTS {
+			if idleDuration := b.getVideoTimestampResyncDuration(now); idleDuration > 0 {
+				duration = idleDuration
+			}
+		}
+		// Pion 在完成分包后才推进 Duration
+		// 因此需要在当前帧之前写入一个空样本
+		// 使其 RTP 时间戳与当前 PTS 对齐 包括可变帧率产生的间隔
+		if err := b.track.WriteSample(media.Sample{Duration: duration}); err != nil {
+			return err
+		}
 	}
-
-	if err := b.track.WriteSample(media.Sample{Duration: duration}); err != nil {
-		b.logDebugLocked("webrtc video timestamp resync failed",
-			"idleDuration", now.Sub(b.lastFrameWriteAt).String(),
-			"resyncDuration", duration.String(),
-			"error", err,
-		)
-		return
-	}
-
-	b.logDebugLocked("webrtc video timestamp resynced after source idle",
-		"idleDuration", now.Sub(b.lastFrameWriteAt).String(),
-		"resyncDuration", duration.String(),
-	)
+	// 即使后续传输写入失败 分包器的时间戳也已经推进
+	b.lastSentPTS = pts
+	b.hasSentPTS = pts >= 0
+	return b.track.WriteSample(media.Sample{Data: data})
 }
 
 func (b *scrcpyVideoBridge) getVideoTimestampResyncDuration(now time.Time) time.Duration {
@@ -784,11 +760,7 @@ func (b *scrcpyVideoBridge) getVideoTimestampResyncDuration(now time.Time) time.
 	if idleDuration <= videoTimestampResyncGap {
 		return 0
 	}
-	resyncDuration := idleDuration - defaultVideoSampleDuration
-	if resyncDuration <= 0 {
-		return 0
-	}
-	return resyncDuration
+	return idleDuration
 }
 
 func (b *scrcpyVideoBridge) normalizeH264(sample []byte, isConfig bool) []byte {
@@ -918,26 +890,6 @@ func readLengthPrefix(buffer []byte, lengthSize int) int {
 	}
 }
 
-func containsH264IDR(sample []byte) bool {
-	for i := 0; i+4 < len(sample); i++ {
-		startCodeLength := 0
-		if i+3 < len(sample) && sample[i] == 0 && sample[i+1] == 0 && sample[i+2] == 1 {
-			startCodeLength = 3
-		} else if i+4 < len(sample) && sample[i] == 0 && sample[i+1] == 0 && sample[i+2] == 0 && sample[i+3] == 1 {
-			startCodeLength = 4
-		}
-		if startCodeLength == 0 {
-			continue
-		}
-
-		headerIndex := i + startCodeLength
-		if headerIndex < len(sample) && (sample[headerIndex]&0x1F) == 5 {
-			return true
-		}
-	}
-	return false
-}
-
 func isTerminalPeerConnectionState(state pion.PeerConnectionState) bool {
 	return state == pion.PeerConnectionStateClosed ||
 		state == pion.PeerConnectionStateFailed
@@ -973,16 +925,4 @@ func cloneBytes(value []byte) []byte {
 	clone := make([]byte, len(value))
 	copy(clone, value)
 	return clone
-}
-
-func waitForContext(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("nil context")
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return nil
-	}
 }

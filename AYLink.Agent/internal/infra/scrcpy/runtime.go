@@ -1,6 +1,7 @@
 package scrcpy
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -164,7 +165,7 @@ func (s *Service) OpenRuntime(ctx context.Context, session *domainscrcpy.Session
 		}
 		rt.controlConn = controlConn
 	}
-	// 完成所有连接后再启动读取，避免提前关闭时漏掉尚未接管的连接。
+	// 完成所有连接后再启动读取 避免提前关闭时漏掉尚未接管的连接
 	go rt.readVideoLoop()
 	if rt.audioConn != nil {
 		go rt.readAudioLoop()
@@ -377,7 +378,8 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 
 	configPacket := r.latestVideoConfig
 	keyFramePacket := r.latestVideoKeyFrame
-	if configPacket.generation == 0 || keyFramePacket.generation == 0 || keyFramePacket.generation != configPacket.generation {
+	if configPacket.generation == 0 || keyFramePacket.generation != configPacket.generation ||
+		len(configPacket.packet.Data) == 0 || len(keyFramePacket.packet.Data) == 0 {
 		r.videoMu.Unlock()
 		return false
 	}
@@ -405,12 +407,13 @@ func (r *runtime) ReplayLatestVideoKeyFrame() bool {
 	}
 
 	for _, sub := range r.videoSubscribers {
-		if packet := cloneCachedVideoPacket(configPacket); len(packet.Data) > 0 {
-			offerCriticalVideoPacketToSubscriber(sub, packet)
+		// 生产者持有 videoMu 消费者只能增加空闲空间
+		// 在排队配置之前预留两个槽位 以防止IDR将其驱逐
+		if cap(sub)-len(sub) < 2 {
+			releaseQueuedVideoPackets(sub)
 		}
-		if packet := cloneCachedVideoPacket(keyFramePacket); len(packet.Data) > 0 {
-			offerCriticalVideoPacketToSubscriber(sub, packet)
-		}
+		offerCriticalVideoPacketToSubscriber(sub, cloneCachedVideoPacket(configPacket))
+		offerCriticalVideoPacketToSubscriber(sub, cloneCachedVideoPacket(keyFramePacket))
 	}
 	subscriberCount := len(r.videoSubscribers)
 	generation := keyFramePacket.generation
@@ -828,21 +831,17 @@ func containsH264IDRPacket(sample []byte) bool {
 }
 
 func containsAnnexBIDRPacket(sample []byte) bool {
-	for i := 0; i+4 < len(sample); i++ {
-		startCodeLength := 0
-		if i+3 < len(sample) && sample[i] == 0 && sample[i+1] == 0 && sample[i+2] == 1 {
-			startCodeLength = 3
-		} else if i+4 < len(sample) && sample[i] == 0 && sample[i+1] == 0 && sample[i+2] == 0 && sample[i+3] == 1 {
-			startCodeLength = 4
+	for offset := 0; offset+3 < len(sample); {
+		// 四字节起始码包含相同的三字节后缀
+		index := bytes.Index(sample[offset:], []byte{0, 0, 1})
+		if index < 0 {
+			return false
 		}
-		if startCodeLength == 0 {
-			continue
-		}
-
-		headerIndex := i + startCodeLength
+		headerIndex := offset + index + 3
 		if headerIndex < len(sample) && (sample[headerIndex]&0x1F) == 5 {
 			return true
 		}
+		offset = headerIndex
 	}
 	return false
 }
@@ -943,7 +942,7 @@ func (r *runtime) readAudioLoop() {
 
 		var payload []byte
 		if codec == domainscrcpy.AudioCodecOpus {
-			// 透传载荷由订阅者持有，全部释放前不能复用。
+			// 透传载荷由订阅者持有 全部释放前不能复用
 			payload = acquireMediaPacketBuffer(packetSize)
 		} else {
 			if cap(payloadBuffer) < packetSize {
@@ -1229,6 +1228,10 @@ func (r *runtime) emitError(err error) {
 }
 
 func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
+	// 在健康统计、缓存和分发之前 重新识别关键帧
+	if !packet.IsConfig {
+		packet.IsKeyFrame = isVideoKeyFramePacket(packet)
+	}
 	r.recordVideoPacketHealth(packet)
 
 	r.videoMu.Lock()
@@ -1247,7 +1250,7 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 		r.videoGeneration++
 		r.latestVideoConfig = cloneVideoPacketForCache(packet, r.videoGeneration)
 		r.latestVideoKeyFrame = cachedVideoPacket{}
-	} else if isVideoKeyFramePacket(packet) {
+	} else if packet.IsKeyFrame {
 		r.latestVideoKeyFrame = cloneVideoPacketForCache(packet, r.videoGeneration)
 	}
 
@@ -1259,12 +1262,10 @@ func (r *runtime) offerLatestVideoPacket(packet domainscrcpy.VideoPacket) {
 		return
 	}
 
-	releases := sharedReleaseFuncs(count, packet.Release)
-	index := 0
+	release := sharedReleaseFunc(count, packet.Release)
 	for _, sub := range r.videoSubscribers {
 		sharedPacket := packet
-		sharedPacket.Release = releases[index]
-		index++
+		sharedPacket.Release = release
 		offerLatestVideoPacketToSubscriber(sub, sharedPacket)
 	}
 }
@@ -1292,7 +1293,7 @@ func (r *runtime) recordVideoPacketHealth(packet domainscrcpy.VideoPacket) {
 		r.health.RepeatedPTSCount++
 	}
 
-	if isVideoKeyFramePacket(packet) {
+	if packet.IsKeyFrame {
 		r.health.LastKeyFrameAt = now
 	}
 }
@@ -1343,12 +1344,10 @@ func (r *runtime) offerLatestAudioPacket(packet domainscrcpy.AudioPacket) {
 		return
 	}
 
-	releases := sharedReleaseFuncs(count, packet.Release)
-	index := 0
+	release := sharedReleaseFunc(count, packet.Release)
 	for _, sub := range r.audioSubscribers {
 		sharedPacket := packet
-		sharedPacket.Release = releases[index]
-		index++
+		sharedPacket.Release = release
 		offerLatestAudioPacketToSubscriber(sub, sharedPacket)
 	}
 }
@@ -1446,11 +1445,7 @@ func offerCriticalVideoPacketToSubscriber(sub chan domainscrcpy.VideoPacket, pac
 }
 
 func isCriticalVideoPacket(packet domainscrcpy.VideoPacket) bool {
-	if packet.IsConfig || packet.IsKeyFrame {
-		return true
-	}
-
-	return packet.Codec == domainscrcpy.VideoCodecH264 && containsH264IDRPacket(packet.Data)
+	return packet.IsConfig || packet.IsKeyFrame
 }
 
 func offerLatestAudioPacketToSubscriber(sub chan domainscrcpy.AudioPacket, packet domainscrcpy.AudioPacket) {
@@ -1543,16 +1538,12 @@ func cloneVideoPacketValue(packet domainscrcpy.VideoPacket) domainscrcpy.VideoPa
 	return cloned
 }
 
-func sharedReleaseFuncs(count int, release func()) []func() {
+func sharedReleaseFunc(count int, release func()) func() {
 	if count <= 0 {
 		return nil
 	}
 	if release == nil {
-		releases := make([]func(), count)
-		for i := range releases {
-			releases[i] = func() {}
-		}
-		return releases
+		return func() {}
 	}
 
 	type sharedReleaseState struct {
@@ -1566,26 +1557,22 @@ func sharedReleaseFuncs(count int, release func()) []func() {
 		release:   release,
 	}
 
-	releases := make([]func(), count)
-	for i := range releases {
-		releases[i] = func() {
-			state.mu.Lock()
-			if state.remaining <= 0 {
-				state.mu.Unlock()
-				return
-			}
-			state.remaining--
-			if state.remaining == 0 && state.release != nil {
-				release := state.release
-				state.release = nil
-				state.mu.Unlock()
-				release()
-				return
-			}
+	return func() {
+		state.mu.Lock()
+		if state.remaining <= 0 {
 			state.mu.Unlock()
+			return
 		}
+		state.remaining--
+		if state.remaining == 0 && state.release != nil {
+			release := state.release
+			state.release = nil
+			state.mu.Unlock()
+			release()
+			return
+		}
+		state.mu.Unlock()
 	}
-	return releases
 }
 
 func acquireMediaPacketBuffer(size int) []byte {

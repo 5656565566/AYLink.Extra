@@ -260,7 +260,7 @@ func TestVideoTimestampResyncAdvancesAfterStaticIdle(t *testing.T) {
 	}
 
 	got := bridge.getVideoTimestampResyncDuration(now)
-	want := 20*time.Second - defaultVideoSampleDuration
+	want := 20 * time.Second
 	if got != want {
 		t.Fatalf("expected static idle timestamp resync %s, got %s", want, got)
 	}

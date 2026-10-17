@@ -54,8 +54,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aylink.mobile.data.repo.AppContainer
+import com.aylink.mobile.ui.devices.AppManagerOptionsMenu
 import com.aylink.mobile.ui.devices.AppManagerScreen
 import com.aylink.mobile.ui.devices.AppManagerViewModel
+import com.aylink.mobile.ui.devices.DeviceListOptionsMenu
 import com.aylink.mobile.ui.devices.DeviceListScreen
 import com.aylink.mobile.ui.devices.DeviceListViewModel
 import com.aylink.mobile.ui.devices.FileManagerScreen
@@ -368,6 +370,24 @@ fun AYLinkApp(container: AppContainer) {
                     else -> {}
                 }
             } else {
+                val deviceListViewModel =
+                    if (currentScreen == Screen.Devices) {
+                        rememberManagedViewModel("devices-$sessionScopeKey") {
+                            DeviceListViewModel(container.deviceRepository)
+                        }
+                    } else {
+                        null
+                    }
+                val appManagerScreen = currentScreen as? Screen.AppManager
+                val appManagerViewModel =
+                    appManagerScreen?.let { screen ->
+                        rememberManagedViewModel("app-manager-$sessionScopeKey-${screen.device.id}") {
+                            AppManagerViewModel(
+                                device = screen.device,
+                                deviceRepository = container.deviceRepository,
+                            )
+                        }
+                    }
                 val terminalViewModel =
                     (currentScreen as? Screen.Terminal)?.let { screen ->
                         rememberManagedViewModel("terminal-$sessionScopeKey-${screen.device.id}") {
@@ -390,6 +410,10 @@ fun AYLinkApp(container: AppContainer) {
                         currentScreen = Screen.Login
                     },
                     actions = {
+                        deviceListViewModel?.let { DeviceListOptionsMenu(it) }
+                        if (appManagerScreen != null && appManagerViewModel != null) {
+                            AppManagerOptionsMenu(appManagerViewModel, appManagerScreen.device)
+                        }
                         terminalViewModel?.let {
                             // 断开后回到未选择设备状态，终端页不再绑定这台设备。
                             TerminalOptionsMenu(it, onDisconnected = { currentScreen = Screen.TerminalHome })
@@ -399,38 +423,36 @@ fun AYLinkApp(container: AppContainer) {
                 ) {
                     when (val screen = currentScreen) {
                         Screen.Devices -> {
-                            val viewModel =
-                                rememberManagedViewModel("devices-$sessionScopeKey") {
-                                    DeviceListViewModel(container.deviceRepository)
-                                }
-                            DeviceListScreen(
-                                viewModel = viewModel,
-                                onEditAddress = {
-                                    container.sessionStore.clearSession()
-                                    currentScreen = Screen.AddressSetup
-                                },
-                                onLogout = {
-                                    container.sessionStore.clearSession()
-                                    currentScreen = Screen.Login
-                                },
-                                onOpenRemote = { device ->
-                                    container.sessionStore.updateLastSelectedDevice(device)
-                                    container.sessionStore.updateLastRemoteDevice(device)
-                                    currentScreen = remoteScreen(device)
-                                },
-                                onOpenAppManager = { device ->
-                                    container.sessionStore.updateLastSelectedDevice(device)
-                                    currentScreen = Screen.AppManager(device)
-                                },
-                                onOpenFileManager = { device ->
-                                    container.sessionStore.updateLastSelectedDevice(device)
-                                    currentScreen = Screen.FileManager(device)
-                                },
-                                onOpenTerminal = { device ->
-                                    container.sessionStore.updateLastSelectedDevice(device)
-                                    currentScreen = Screen.Terminal(device)
-                                },
-                            )
+                            deviceListViewModel?.let { viewModel ->
+                                DeviceListScreen(
+                                    viewModel = viewModel,
+                                    onEditAddress = {
+                                        container.sessionStore.clearSession()
+                                        currentScreen = Screen.AddressSetup
+                                    },
+                                    onLogout = {
+                                        container.sessionStore.clearSession()
+                                        currentScreen = Screen.Login
+                                    },
+                                    onOpenRemote = { device ->
+                                        container.sessionStore.updateLastSelectedDevice(device)
+                                        container.sessionStore.updateLastRemoteDevice(device)
+                                        currentScreen = remoteScreen(device)
+                                    },
+                                    onOpenAppManager = { device ->
+                                        container.sessionStore.updateLastSelectedDevice(device)
+                                        currentScreen = Screen.AppManager(device)
+                                    },
+                                    onOpenFileManager = { device ->
+                                        container.sessionStore.updateLastSelectedDevice(device)
+                                        currentScreen = Screen.FileManager(device)
+                                    },
+                                    onOpenTerminal = { device ->
+                                        container.sessionStore.updateLastSelectedDevice(device)
+                                        currentScreen = Screen.Terminal(device)
+                                    },
+                                )
+                            }
                         }
                         Screen.AppManagerHome -> {
                             FeatureEmptyScreen(
@@ -440,27 +462,22 @@ fun AYLinkApp(container: AppContainer) {
                             )
                         }
                         is Screen.AppManager -> {
-                            val viewModel =
-                                rememberManagedViewModel("app-manager-$sessionScopeKey-${screen.device.id}") {
-                                    AppManagerViewModel(
-                                        device = screen.device,
-                                        deviceRepository = container.deviceRepository,
-                                    )
-                                }
-                            AppManagerScreen(
-                                viewModel = viewModel,
-                                onOpenRemote = { device, appPackage, appName ->
-                                    container.sessionStore.updateLastSelectedDevice(device)
-                                    container.sessionStore.updateLastRemoteDevice(device)
-                                    currentScreen =
-                                        remoteScreen(
-                                            device = device,
-                                            appPackageName = appPackage,
-                                            appDisplayName = appName,
-                                            newDisplay = true,
-                                        )
-                                },
-                            )
+                            appManagerViewModel?.let { viewModel ->
+                                AppManagerScreen(
+                                    viewModel = viewModel,
+                                    onOpenRemote = { device, appPackage, appName ->
+                                        container.sessionStore.updateLastSelectedDevice(device)
+                                        container.sessionStore.updateLastRemoteDevice(device)
+                                        currentScreen =
+                                            remoteScreen(
+                                                device = device,
+                                                appPackageName = appPackage,
+                                                appDisplayName = appName,
+                                                newDisplay = true,
+                                            )
+                                    },
+                                )
+                            }
                         }
                         Screen.FileManagerHome -> {
                             FeatureEmptyScreen(

@@ -4,8 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,10 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -60,12 +56,6 @@ fun AppManagerScreen(
     val listState by viewModel.listUiState.collectAsStateWithLifecycle()
     val dialogState by viewModel.dialogUiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val apkPicker =
-        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) {
-                viewModel.handleIntent(AppManagerIntent.InstallApk(uri))
-            }
-        }
 
     LaunchedEffect(viewModel.effect) {
         viewModel.effect.collect { effect ->
@@ -91,43 +81,6 @@ fun AppManagerScreen(
         Column(
             modifier = Modifier.fillMaxSize(),
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CompactTopButton(
-                        onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream")) },
-                        enabled = !dialogState.installLoading && !listState.loading,
-                        text = if (dialogState.installLoading) "安装中..." else "安装 APK",
-                        icon = Icons.Default.Add,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        if (dialogState.installLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                    CompactTopButton(
-                        onClick = { viewModel.handleIntent(AppManagerIntent.Refresh) },
-                        enabled = !dialogState.installLoading && !listState.loading,
-                        text = "刷新",
-                        icon = Icons.Default.Refresh,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-
             if (dialogState.installLoading) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
@@ -306,36 +259,6 @@ private fun AppInfoDialog(
                 ) { Text("关闭") }
             },
         )
-    }
-}
-
-@Composable
-private fun CompactTopButton(
-    onClick: () -> Unit,
-    text: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    trailing: @Composable (() -> Unit)? = null,
-) {
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(40.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(text, style = MaterialTheme.typography.labelLarge)
-            trailing?.let {
-                Spacer(modifier = Modifier.width(6.dp))
-                it()
-            }
-        }
     }
 }
 

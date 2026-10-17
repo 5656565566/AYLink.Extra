@@ -20,8 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Warning
@@ -39,10 +37,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -51,7 +47,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aylink.mobile.data.model.Device
-import com.aylink.mobile.data.model.DeviceGroup
 import com.aylink.mobile.ui.remote.AyDialog
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items as lazyItems
@@ -70,25 +65,9 @@ fun DeviceListScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val contentState by viewModel.contentUiState.collectAsStateWithLifecycle()
     val dialogState by viewModel.dialogUiState.collectAsStateWithLifecycle()
-    var isGroupPickerOpen by remember { mutableStateOf(false) }
     val groupedDevices =
         remember(uiState.devices, uiState.selectedGroupId) {
             buildDeviceSections(uiState.devices, uiState.selectedGroupId)
-        }
-    val availableGroups =
-        remember(uiState.devices) {
-            uiState.devices
-                .flatMap { device -> device.groups }
-                .distinctBy(DeviceGroup::id)
-                .sortedBy { group -> group.name.ifBlank { "未分组" } }
-        }
-    val selectedGroupName =
-        remember(availableGroups, uiState.selectedGroupId) {
-            if (uiState.selectedGroupId == 0) {
-                "全部设备"
-            } else {
-                availableGroups.firstOrNull { it.id == uiState.selectedGroupId }?.name?.ifBlank { "未分组" } ?: "设备分组"
-            }
         }
 
     LaunchedEffect(viewModel.effect) {
@@ -146,13 +125,6 @@ fun DeviceListScreen(
                 Column(
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    DeviceListToolbar(
-                        viewMode = uiState.viewMode,
-                        selectedGroupName = selectedGroupName,
-                        hasCustomGroup = uiState.selectedGroupId != 0,
-                        onOpenGroupPicker = { isGroupPickerOpen = true },
-                        onToggleViewMode = { viewModel.handleIntent(DeviceListIntent.ToggleViewMode) },
-                    )
                     if (uiState.viewMode == DeviceListViewMode.PREVIEW) {
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 172.dp),
@@ -255,48 +227,6 @@ fun DeviceListScreen(
                 },
             )
         }
-
-        if (isGroupPickerOpen) {
-            AyDialog(
-                title = "选择分组",
-                onDismissRequest = { isGroupPickerOpen = false },
-                content = {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.handleIntent(DeviceListIntent.SelectGroup(0))
-                                isGroupPickerOpen = false
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("全部设备")
-                        }
-                        availableGroups.forEach { group ->
-                            OutlinedButton(
-                                onClick = {
-                                    viewModel.handleIntent(DeviceListIntent.SelectGroup(group.id))
-                                    isGroupPickerOpen = false
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(group.name.ifBlank { "未分组" })
-                            }
-                        }
-                    }
-                },
-                footer = {
-                    OutlinedButton(
-                        onClick = { isGroupPickerOpen = false },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("取消")
-                    }
-                },
-            )
-        }
     }
 }
 
@@ -366,78 +296,6 @@ fun DeviceCard(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DeviceListToolbar(
-    viewMode: DeviceListViewMode,
-    selectedGroupName: String,
-    hasCustomGroup: Boolean,
-    onOpenGroupPicker: () -> Unit,
-    onToggleViewMode: () -> Unit,
-) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        CompactToolbarButton(
-            text = selectedGroupName,
-            leadingIcon = if (hasCustomGroup) Icons.Default.CheckCircle else Icons.Default.ArrowDropDown,
-            trailingIcon = Icons.Default.ArrowDropDown,
-            modifier = Modifier.weight(1f),
-            onClick = onOpenGroupPicker,
-        )
-        CompactToolbarButton(
-            text = if (viewMode == DeviceListViewMode.PREVIEW) "列表" else "预览",
-            leadingIcon = Icons.AutoMirrored.Filled.List,
-            modifier = Modifier.weight(1f),
-            onClick = onToggleViewMode,
-        )
-    }
-}
-
-@Composable
-private fun CompactToolbarButton(
-    text: String,
-    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    modifier: Modifier = Modifier,
-    trailingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
-    onClick: () -> Unit,
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier.height(40.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                imageVector = leadingIcon,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = text,
-                maxLines = 1,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            if (trailingIcon != null) {
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    imageVector = trailingIcon,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
             }
         }
     }

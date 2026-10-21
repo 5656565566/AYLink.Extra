@@ -1,0 +1,32 @@
+version: 2
+
+updates:
+  # Go Modules
+  - package-ecosystem: "gomod"
+    directory: "/AYLink.Agent"
+    schedule:
+      interval: "weekly"
+
+  # Web: npm
+  - package-ecosystem: "npm"
+    directory: "/AYLink.Web"
+    schedule:
+      interval: "weekly"
+
+  # Android: Gradle
+  - package-ecosystem: "gradle"
+    directory: "/AYLink.Mobile"
+    schedule:
+      interval: "weekly"
+
+  # Dockerfile / Dockerfile.release
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

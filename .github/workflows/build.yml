@@ -19,6 +19,7 @@ env:
 
 jobs:
   changes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     outputs:
       mobile: ${{ steps.filter.outputs.mobile }}
@@ -81,7 +82,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.27.2'
+        go-version: '1.27.3'
         cache: true
         cache-dependency-path: AYLink.Agent/go.sum
 

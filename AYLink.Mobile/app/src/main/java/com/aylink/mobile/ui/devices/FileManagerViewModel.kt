@@ -13,6 +13,7 @@ import com.aylink.mobile.data.repo.FileTransferProgress
 import com.aylink.mobile.data.repo.LocalSettingsStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,6 +38,10 @@ data class FileManagerUiState(
     val files: List<FileEntry> = emptyList(),
     val loading: Boolean = false,
     val errorMessage: String? = null,
+    val pendingPath: String? = null,
+    val failedPath: String? = null,
+    val hasLoaded: Boolean = false,
+    val sortOrder: FileSortOrder = FileSortOrder.NAME_ASC,
     val selectedFile: FileEntry? = null,
     val isActionMenuOpen: Boolean = false,
     val actionLoading: Boolean = false,
@@ -47,6 +52,9 @@ data class FileManagerUiState(
     val downloadProgress: Float? = null,
     val isRenameDialogOpen: Boolean = false,
     val renameTargetName: String = "",
+    val isDeleteDialogOpen: Boolean = false,
+    val transferTitle: String? = null,
+    val isPathEditorOpen: Boolean = false,
 )
 
 @Immutable
@@ -55,7 +63,15 @@ data class FileManagerListUiState(
     val files: List<FileEntry> = emptyList(),
     val loading: Boolean = false,
     val errorMessage: String? = null,
-)
+    val pendingPath: String? = null,
+    val failedPath: String? = null,
+    val hasLoaded: Boolean = false,
+    val sortOrder: FileSortOrder = FileSortOrder.NAME_ASC,
+    val isPathEditorOpen: Boolean = false,
+) {
+    val showEmpty: Boolean
+        get() = hasLoaded && !loading && errorMessage == null && files.isEmpty()
+}
 
 @Immutable
 data class FileManagerDialogUiState(
@@ -69,10 +85,29 @@ data class FileManagerDialogUiState(
     val downloadProgress: Float? = null,
     val isRenameDialogOpen: Boolean = false,
     val renameTargetName: String = "",
-)
+    val isDeleteDialogOpen: Boolean = false,
+    val transferTitle: String? = null,
+) {
+    val busy: Boolean
+        get() = actionLoading || uploadLoading || downloadMessage != null
+}
 
 sealed interface FileManagerIntent {
     data object Refresh : FileManagerIntent
+
+    data object Retry : FileManagerIntent
+
+    data object ShowPathEditor : FileManagerIntent
+
+    data object HidePathEditor : FileManagerIntent
+
+    data class OpenPath(
+        val path: String,
+    ) : FileManagerIntent
+
+    data class SetSortOrder(
+        val order: FileSortOrder,
+    ) : FileManagerIntent
 
     data class OpenDirectory(
         val directoryName: String,
@@ -88,10 +123,12 @@ sealed interface FileManagerIntent {
 
     data class UploadFiles(
         val uris: List<Uri>,
+        val targetPath: String,
     ) : FileManagerIntent
 
     data class UploadFolder(
         val uri: Uri,
+        val targetPath: String,
     ) : FileManagerIntent
 
     data object CancelUpload : FileManagerIntent
@@ -115,6 +152,10 @@ sealed interface FileManagerIntent {
     data class DeleteFile(
         val path: String,
     ) : FileManagerIntent
+
+    data object ShowDeleteDialog : FileManagerIntent
+
+    data object HideDeleteDialog : FileManagerIntent
 
     data class ShowRenameDialog(
         val currentName: String,
@@ -162,8 +203,19 @@ class FileManagerViewModel(
     val uiState: StateFlow<FileManagerUiState> = _uiState.asStateFlow()
     val listUiState: StateFlow<FileManagerListUiState> =
         _uiState
-            .map { FileManagerListUiState(it.currentPath, it.files, it.loading, it.errorMessage) }
-            .distinctUntilChanged()
+            .map {
+                FileManagerListUiState(
+                    currentPath = it.currentPath,
+                    files = it.files,
+                    loading = it.loading,
+                    errorMessage = it.errorMessage,
+                    pendingPath = it.pendingPath,
+                    failedPath = it.failedPath,
+                    hasLoaded = it.hasLoaded,
+                    sortOrder = it.sortOrder,
+                    isPathEditorOpen = it.isPathEditorOpen,
+                )
+            }.distinctUntilChanged()
             .stateIn(
                 viewModelScope,
                 SharingStarted.WhileSubscribed(5_000),
@@ -183,6 +235,8 @@ class FileManagerViewModel(
                     downloadProgress = it.downloadProgress,
                     isRenameDialogOpen = it.isRenameDialogOpen,
                     renameTargetName = it.renameTargetName,
+                    isDeleteDialogOpen = it.isDeleteDialogOpen,
+                    transferTitle = it.transferTitle,
                 )
             }.distinctUntilChanged()
             .stateIn(
@@ -194,6 +248,10 @@ class FileManagerViewModel(
     private val _effect = MutableSharedFlow<FileManagerEffect>()
     val effect = _effect.asSharedFlow()
     private var uploadJob: Job? = null
+    private var loadJob: Job? = null
+
+    private val operationBusy: Boolean
+        get() = _uiState.value.let { it.actionLoading || it.uploadLoading || it.downloadMessage != null }
 
     init {
         handleIntent(FileManagerIntent.Refresh)
@@ -207,12 +265,21 @@ class FileManagerViewModel(
     fun handleIntent(intent: FileManagerIntent) {
         when (intent) {
             FileManagerIntent.Refresh -> loadFiles(_uiState.value.currentPath)
+            FileManagerIntent.Retry -> loadFiles(_uiState.value.failedPath ?: _uiState.value.currentPath)
+            FileManagerIntent.ShowPathEditor -> _uiState.update { it.copy(isPathEditorOpen = true) }
+            FileManagerIntent.HidePathEditor -> _uiState.update { it.copy(isPathEditorOpen = false) }
+            is FileManagerIntent.OpenPath -> {
+                if (intent.path.startsWith('/') && '\u0000' !in intent.path) {
+                    loadFiles(normalizeFilePath(intent.path))
+                }
+            }
+            is FileManagerIntent.SetSortOrder -> _uiState.update { it.copy(sortOrder = intent.order) }
             is FileManagerIntent.OpenDirectory -> {
-                val newPath = normalizePath(_uiState.value.currentPath + intent.directoryName)
+                val newPath = normalizeFilePath(_uiState.value.currentPath + intent.directoryName)
                 loadFiles(newPath)
             }
             FileManagerIntent.GoUp -> {
-                val parentPath = getParentPath(_uiState.value.currentPath)
+                val parentPath = parentFilePath(_uiState.value.currentPath)
                 if (parentPath != _uiState.value.currentPath) {
                     loadFiles(parentPath)
                 }
@@ -223,15 +290,22 @@ class FileManagerViewModel(
                 }
             }
             FileManagerIntent.HideActionMenu -> _uiState.update { it.copy(isActionMenuOpen = false) }
-            is FileManagerIntent.UploadFiles -> uploadFiles(intent.uris)
-            is FileManagerIntent.UploadFolder -> uploadFolder(intent.uri)
+            is FileManagerIntent.UploadFiles -> uploadFiles(intent.uris, intent.targetPath)
+            is FileManagerIntent.UploadFolder -> uploadFolder(intent.uri, intent.targetPath)
             FileManagerIntent.CancelUpload -> cancelUpload()
             is FileManagerIntent.DownloadFile -> downloadFile(intent.path)
-            is FileManagerIntent.OpenFile -> openFile(intent.path)
-            is FileManagerIntent.ShareFile -> shareFile(intent.path)
+            is FileManagerIntent.OpenFile -> downloadFile(intent.path, DownloadAction.OPEN)
+            is FileManagerIntent.ShareFile -> downloadFile(intent.path, DownloadAction.SHARE)
             is FileManagerIntent.CopyPath -> copyPath(intent.path)
             is FileManagerIntent.DeleteFile -> deleteFile(intent.path)
+            FileManagerIntent.ShowDeleteDialog -> {
+                if (!operationBusy) _uiState.update { it.copy(isActionMenuOpen = false, isDeleteDialogOpen = true) }
+            }
+            FileManagerIntent.HideDeleteDialog -> {
+                if (!operationBusy) _uiState.update { it.copy(isDeleteDialogOpen = false) }
+            }
             is FileManagerIntent.ShowRenameDialog -> {
+                if (operationBusy) return
                 _uiState.update {
                     it.copy(
                         isRenameDialogOpen = true,
@@ -240,87 +314,91 @@ class FileManagerViewModel(
                     )
                 }
             }
-            FileManagerIntent.HideRenameDialog -> _uiState.update { it.copy(isRenameDialogOpen = false) }
+            FileManagerIntent.HideRenameDialog -> {
+                if (!operationBusy) _uiState.update { it.copy(isRenameDialogOpen = false) }
+            }
             is FileManagerIntent.UpdateRenameTargetName -> _uiState.update { it.copy(renameTargetName = intent.newName) }
             is FileManagerIntent.RenameFile -> renameFile(intent.oldPath, intent.newName)
             FileManagerIntent.DismissError -> _uiState.update { it.copy(errorMessage = null) }
         }
     }
 
-    private fun normalizePath(path: String): String {
-        var normalized = path.replace("\\", "/").trim()
-        if (!normalized.startsWith("/")) {
-            normalized = "/$normalized"
-        }
-        if (!normalized.endsWith("/")) {
-            normalized = "$normalized/"
-        }
-        return normalized.replace(Regex("/+"), "/")
-    }
-
-    private fun getParentPath(path: String): String {
-        val normalized = normalizePath(path)
-        if (normalized == "/") {
-            return "/"
-        }
-        val parts = normalized.split("/").filter { it.isNotEmpty() }
-        val newParts = parts.dropLast(1)
-        return if (newParts.isEmpty()) "/" else "/${newParts.joinToString("/")}/"
-    }
-
-    private fun getEntryPath(
-        basePath: String,
-        entryName: String,
-    ): String {
-        val path = "${normalizePath(basePath)}$entryName"
-        return path.replace(Regex("/+"), "/")
-    }
-
     private fun loadFiles(path: String) {
+        loadJob?.cancel()
         _uiState.update {
             it.copy(
                 loading = true,
                 errorMessage = null,
-                currentPath = path,
+                pendingPath = path,
+                failedPath = null,
+                isPathEditorOpen = false,
                 isActionMenuOpen = false,
+                isRenameDialogOpen = false,
+                isDeleteDialogOpen = false,
                 selectedFile = null,
             )
         }
-        viewModelScope.launch {
-            val result = runCatching { deviceRepository.listFiles(deviceId, path) }
-            result.onSuccess { response ->
-                val filteredItems = response.items.filter { it.name != "." && it.name != ".." }
-                _uiState.update {
-                    it.copy(loading = false, files = filteredItems, currentPath = response.path)
+        loadJob =
+            viewModelScope.launch {
+                try {
+                    val response = deviceRepository.listFiles(deviceId, path)
+                    ensureActive()
+                    _uiState.update {
+                        it.copy(
+                            loading = false,
+                            files = response.items.filter { file -> file.name != "." && file.name != ".." },
+                            currentPath = normalizeFilePath(response.path),
+                            pendingPath = null,
+                            hasLoaded = true,
+                        )
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    ensureActive()
+                    _uiState.update {
+                        it.copy(
+                            loading = false,
+                            pendingPath = null,
+                            failedPath = path,
+                            errorMessage = "无法读取 $path：${error.message ?: "加载文件列表失败"}",
+                        )
+                    }
                 }
             }
-            result.onFailure { error ->
-                _uiState.update {
-                    it.copy(loading = false, errorMessage = error.message ?: "加载文件列表失败")
-                }
-            }
+    }
+
+    private fun refreshChangedDirectory(path: String) {
+        val state = _uiState.value
+        // 传输完成不能覆盖用户刚发起的目录跳转。
+        if (state.pendingPath == path || (state.pendingPath == null && state.currentPath == path)) {
+            loadFiles(path)
         }
     }
 
     private fun deleteFile(path: String) {
-        _uiState.update { it.copy(actionLoading = true) }
+        if (operationBusy || !_uiState.value.isDeleteDialogOpen) return
+        _uiState.update { it.copy(actionLoading = true, errorMessage = null, failedPath = null) }
         viewModelScope.launch {
             val result = runCatching { deviceRepository.deleteFile(deviceId, path) }
             result.onSuccess {
-                _uiState.update { it.copy(actionLoading = false, isActionMenuOpen = false) }
+                _uiState.update { it.copy(actionLoading = false, isDeleteDialogOpen = false) }
                 _effect.emit(FileManagerEffect.ShowToast("删除成功"))
-                loadFiles(_uiState.value.currentPath)
+                refreshChangedDirectory(parentFilePath(path))
             }
             result.onFailure { error ->
                 _uiState.update {
-                    it.copy(actionLoading = false, errorMessage = error.message ?: "删除失败")
+                    it.copy(actionLoading = false, isDeleteDialogOpen = false, errorMessage = error.message ?: "删除失败")
                 }
             }
         }
     }
 
-    private fun uploadFiles(uris: List<Uri>) {
-        if (uris.isEmpty() || uploadJob?.isActive == true) {
+    private fun uploadFiles(
+        uris: List<Uri>,
+        targetPath: String,
+    ) {
+        if (uris.isEmpty() || operationBusy || uploadJob?.isActive == true) {
             return
         }
         _uiState.update {
@@ -329,11 +407,12 @@ class FileManagerViewModel(
                 uploadMessage = "准备上传",
                 uploadProgress = null,
                 errorMessage = null,
+                failedPath = null,
+                transferTitle = "正在上传 ${uris.size} 个文件",
             )
         }
         uploadJob =
             viewModelScope.launch {
-                val targetPath = _uiState.value.currentPath
                 try {
                     deviceRepository.uploadFiles(deviceId, targetPath, uris) { progress ->
                         updateUploadProgress(progress)
@@ -343,10 +422,11 @@ class FileManagerViewModel(
                             uploadLoading = false,
                             uploadMessage = null,
                             uploadProgress = null,
+                            transferTitle = null,
                         )
                     }
                     _effect.emit(FileManagerEffect.ShowToast("上传成功"))
-                    loadFiles(targetPath)
+                    refreshChangedDirectory(targetPath)
                 } catch (_: CancellationException) {
                     clearUploadState()
                     _effect.tryEmit(FileManagerEffect.ShowToast("上传已取消"))
@@ -356,6 +436,7 @@ class FileManagerViewModel(
                             uploadLoading = false,
                             uploadMessage = null,
                             uploadProgress = null,
+                            transferTitle = null,
                             errorMessage = error.toTransferMessage("上传失败"),
                         )
                     }
@@ -365,8 +446,11 @@ class FileManagerViewModel(
             }
     }
 
-    private fun uploadFolder(uri: Uri) {
-        if (uploadJob?.isActive == true) {
+    private fun uploadFolder(
+        uri: Uri,
+        targetPath: String,
+    ) {
+        if (operationBusy || uploadJob?.isActive == true) {
             return
         }
         _uiState.update {
@@ -375,11 +459,12 @@ class FileManagerViewModel(
                 uploadMessage = "准备上传",
                 uploadProgress = null,
                 errorMessage = null,
+                failedPath = null,
+                transferTitle = "正在上传文件夹",
             )
         }
         uploadJob =
             viewModelScope.launch {
-                val targetPath = _uiState.value.currentPath
                 try {
                     deviceRepository.uploadFolder(deviceId, targetPath, uri) { progress ->
                         updateUploadProgress(progress)
@@ -389,10 +474,11 @@ class FileManagerViewModel(
                             uploadLoading = false,
                             uploadMessage = null,
                             uploadProgress = null,
+                            transferTitle = null,
                         )
                     }
                     _effect.emit(FileManagerEffect.ShowToast("上传成功"))
-                    loadFiles(targetPath)
+                    refreshChangedDirectory(targetPath)
                 } catch (_: CancellationException) {
                     clearUploadState()
                     _effect.tryEmit(FileManagerEffect.ShowToast("上传已取消"))
@@ -402,6 +488,7 @@ class FileManagerViewModel(
                             uploadLoading = false,
                             uploadMessage = null,
                             uploadProgress = null,
+                            transferTitle = null,
                             errorMessage = error.toTransferMessage("上传失败"),
                         )
                     }
@@ -415,43 +502,66 @@ class FileManagerViewModel(
         uploadJob?.cancel()
     }
 
-    private fun downloadFile(path: String) {
+    private enum class DownloadAction { SAVE, OPEN, SHARE }
+
+    private fun downloadFile(
+        path: String,
+        action: DownloadAction = DownloadAction.SAVE,
+    ) {
+        if (operationBusy) return
         _uiState.update {
             it.copy(
-                actionLoading = true,
+                isActionMenuOpen = false,
                 downloadMessage = "准备下载",
                 downloadProgress = null,
+                errorMessage = null,
+                failedPath = null,
+                transferTitle = "正在下载 ${path.substringAfterLast('/')}",
             )
         }
         viewModelScope.launch {
-            val result =
-                runCatching {
-                    deviceRepository.downloadFileToDownloads(
-                        deviceId = deviceId,
-                        path = path,
-                        downloadDirectoryUri = currentDownloadDirectoryUri(),
-                    ) { progress ->
-                        updateDownloadProgress(progress)
+            try {
+                val file =
+                    if (action == DownloadAction.SAVE) {
+                        deviceRepository.downloadFileToDownloads(
+                            deviceId = deviceId,
+                            path = path,
+                            downloadDirectoryUri = currentDownloadDirectoryUri(),
+                            onProgress = ::updateDownloadProgress,
+                        )
+                    } else {
+                        deviceRepository.downloadFileToCache(deviceId, path, ::updateDownloadProgress)
                     }
-                }
-            result.onSuccess { file ->
                 _uiState.update {
                     it.copy(
-                        actionLoading = false,
-                        isActionMenuOpen = false,
                         downloadMessage = null,
                         downloadProgress = null,
+                        transferTitle = null,
                     )
                 }
-                _effect.emit(FileManagerEffect.ShowToast("已保存到 ${file.localPath}"))
-            }
-            result.onFailure { error ->
+                _effect.emit(
+                    when (action) {
+                        DownloadAction.SAVE -> FileManagerEffect.ShowToast("已保存到 ${file.localPath}")
+                        DownloadAction.OPEN -> FileManagerEffect.OpenLocalFile(file)
+                        DownloadAction.SHARE -> FileManagerEffect.ShareLocalFile(file)
+                    },
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
                 _uiState.update {
                     it.copy(
-                        actionLoading = false,
                         downloadMessage = null,
                         downloadProgress = null,
-                        errorMessage = error.toTransferMessage("下载失败"),
+                        transferTitle = null,
+                        errorMessage =
+                            error.toTransferMessage(
+                                when (action) {
+                                    DownloadAction.SAVE -> "下载失败"
+                                    DownloadAction.OPEN -> "打开失败"
+                                    DownloadAction.SHARE -> "分享失败"
+                                },
+                            ),
                     )
                 }
             }
@@ -461,38 +571,6 @@ class FileManagerViewModel(
     private fun currentDownloadDirectoryUri(): Uri? =
         localSettingsStore.settings.value.downloadDirectoryUri
             ?.let { uriText -> runCatching { uriText.toUri() }.getOrNull() }
-
-    private fun openFile(path: String) {
-        _uiState.update { it.copy(actionLoading = true) }
-        viewModelScope.launch {
-            val result = runCatching { deviceRepository.downloadFileToCache(deviceId, path) }
-            result.onSuccess { file ->
-                _uiState.update { it.copy(actionLoading = false, isActionMenuOpen = false) }
-                _effect.emit(FileManagerEffect.OpenLocalFile(file))
-            }
-            result.onFailure { error ->
-                _uiState.update {
-                    it.copy(actionLoading = false, errorMessage = error.message ?: "打开失败")
-                }
-            }
-        }
-    }
-
-    private fun shareFile(path: String) {
-        _uiState.update { it.copy(actionLoading = true) }
-        viewModelScope.launch {
-            val result = runCatching { deviceRepository.downloadFileToCache(deviceId, path) }
-            result.onSuccess { file ->
-                _uiState.update { it.copy(actionLoading = false, isActionMenuOpen = false) }
-                _effect.emit(FileManagerEffect.ShareLocalFile(file))
-            }
-            result.onFailure { error ->
-                _uiState.update {
-                    it.copy(actionLoading = false, errorMessage = error.message ?: "分享失败")
-                }
-            }
-        }
-    }
 
     private fun copyPath(path: String) {
         viewModelScope.launch {
@@ -505,21 +583,23 @@ class FileManagerViewModel(
         oldPath: String,
         newName: String,
     ) {
-        if (newName.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "名称不能为空") }
+        if (operationBusy || !_uiState.value.isRenameDialogOpen) return
+        val error = fileNameError(newName)
+        if (error != null) {
+            _uiState.update { it.copy(errorMessage = error) }
             return
         }
-        _uiState.update { it.copy(actionLoading = true) }
+        _uiState.update { it.copy(actionLoading = true, errorMessage = null, failedPath = null) }
         viewModelScope.launch {
             val result = runCatching { deviceRepository.renameFile(deviceId, oldPath, newName) }
             result.onSuccess {
                 _uiState.update { it.copy(actionLoading = false, isRenameDialogOpen = false) }
                 _effect.emit(FileManagerEffect.ShowToast("重命名成功"))
-                loadFiles(_uiState.value.currentPath)
+                refreshChangedDirectory(parentFilePath(oldPath))
             }
             result.onFailure { error ->
                 _uiState.update {
-                    it.copy(actionLoading = false, errorMessage = error.message ?: "重命名失败")
+                    it.copy(actionLoading = false, isRenameDialogOpen = false, errorMessage = error.message ?: "重命名失败")
                 }
             }
         }
@@ -528,13 +608,17 @@ class FileManagerViewModel(
     private fun updateUploadProgress(progress: FileTransferProgress) {
         val message =
             progress.total?.let {
-                "正在上传 ${formatBytes(progress.loaded)} / ${formatBytes(it)}"
-            } ?: "正在上传 ${formatBytes(progress.loaded)}"
+                "${formatBytes(progress.loaded)} / ${formatBytes(it)}"
+            } ?: formatBytes(progress.loaded)
         _uiState.update {
-            it.copy(
-                uploadMessage = message,
-                uploadProgress = progress.fraction,
-            )
+            if (!it.uploadLoading) {
+                it
+            } else {
+                it.copy(
+                    uploadMessage = message,
+                    uploadProgress = progress.fraction,
+                )
+            }
         }
     }
 
@@ -544,6 +628,7 @@ class FileManagerViewModel(
                 uploadLoading = false,
                 uploadMessage = null,
                 uploadProgress = null,
+                transferTitle = null,
             )
         }
     }
@@ -551,13 +636,17 @@ class FileManagerViewModel(
     private fun updateDownloadProgress(progress: FileTransferProgress) {
         val message =
             progress.total?.let {
-                "正在下载 ${formatBytes(progress.loaded)} / ${formatBytes(it)}"
-            } ?: "正在下载 ${formatBytes(progress.loaded)}"
+                "${formatBytes(progress.loaded)} / ${formatBytes(it)}"
+            } ?: formatBytes(progress.loaded)
         _uiState.update {
-            it.copy(
-                downloadMessage = message,
-                downloadProgress = progress.fraction,
-            )
+            if (it.downloadMessage == null) {
+                it
+            } else {
+                it.copy(
+                    downloadMessage = message,
+                    downloadProgress = progress.fraction,
+                )
+            }
         }
     }
 

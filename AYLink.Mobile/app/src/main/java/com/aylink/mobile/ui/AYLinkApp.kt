@@ -60,6 +60,7 @@ import com.aylink.mobile.ui.devices.AppManagerViewModel
 import com.aylink.mobile.ui.devices.DeviceListOptionsMenu
 import com.aylink.mobile.ui.devices.DeviceListScreen
 import com.aylink.mobile.ui.devices.DeviceListViewModel
+import com.aylink.mobile.ui.devices.FileManagerOptionsMenu
 import com.aylink.mobile.ui.devices.FileManagerScreen
 import com.aylink.mobile.ui.devices.FileManagerViewModel
 import com.aylink.mobile.ui.login.AddressSetupScreen
@@ -388,6 +389,17 @@ fun AYLinkApp(container: AppContainer) {
                             )
                         }
                     }
+                val fileManagerScreen = currentScreen as? Screen.FileManager
+                val fileManagerViewModel =
+                    fileManagerScreen?.let { screen ->
+                        rememberManagedViewModel("file-manager-$sessionScopeKey-${screen.device.id}") {
+                            FileManagerViewModel(
+                                deviceId = screen.device.id,
+                                deviceRepository = container.deviceRepository,
+                                localSettingsStore = container.localSettingsStore,
+                            )
+                        }
+                    }
                 val terminalViewModel =
                     (currentScreen as? Screen.Terminal)?.let { screen ->
                         rememberManagedViewModel("terminal-$sessionScopeKey-${screen.device.id}") {
@@ -413,6 +425,9 @@ fun AYLinkApp(container: AppContainer) {
                         deviceListViewModel?.let { DeviceListOptionsMenu(it) }
                         if (appManagerScreen != null && appManagerViewModel != null) {
                             AppManagerOptionsMenu(appManagerViewModel, appManagerScreen.device)
+                        }
+                        if (fileManagerScreen != null && fileManagerViewModel != null) {
+                            FileManagerOptionsMenu(fileManagerViewModel, fileManagerScreen.device)
                         }
                         terminalViewModel?.let {
                             // 断开后回到未选择设备状态，终端页不再绑定这台设备。
@@ -487,15 +502,7 @@ fun AYLinkApp(container: AppContainer) {
                             )
                         }
                         is Screen.FileManager -> {
-                            val viewModel =
-                                rememberManagedViewModel("file-manager-$sessionScopeKey-${screen.device.id}") {
-                                    FileManagerViewModel(
-                                        deviceId = screen.device.id,
-                                        deviceRepository = container.deviceRepository,
-                                        localSettingsStore = container.localSettingsStore,
-                                    )
-                                }
-                            FileManagerScreen(viewModel = viewModel)
+                            fileManagerViewModel?.let { FileManagerScreen(viewModel = it) }
                         }
                         Screen.TerminalHome -> {
                             FeatureEmptyScreen(

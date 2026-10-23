@@ -23,18 +23,18 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.12.2",
-    "@vitejs/plugin-vue": "^6.0.6",
+    "@vitejs/plugin-vue": "^6.0.10",
     "@vue/test-utils": "^2.4.10",
     "@vue/tsconfig": "^0.9.1",
     "eslint": "^9.39.1",
-    "eslint-plugin-vue": "^10.5.1",
+    "eslint-plugin-vue": "^10.11.1",
     "globals": "^16.4.0",
     "happy-dom": "^20.0.8",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.46.3",
-    "vite": "^8.0.10",
-    "vitest": "^4.0.8",
-    "vue-tsc": "^3.2.7"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "vue-tsc": "^3.3.13"
   },
   "allowScripts": {
     "vue-demi@0.14.10": true

@@ -1,7 +1,7 @@
 # =============================================================================
 # Build Web
 # =============================================================================
-FROM node:25-alpine AS web-builder
+FROM node:26-alpine AS web-builder
 
 WORKDIR /src/AYLink.Web
 
@@ -46,7 +46,7 @@ RUN cd AYLink.Agent && \
 # =============================================================================
 # Runtime Environment
 # =============================================================================
-FROM alpine:3.22
+FROM alpine:3.24
 
 # 设置时区和安装基础依赖 包括 adb (android-tools)
 RUN apk add --no-cache tzdata ca-certificates android-tools

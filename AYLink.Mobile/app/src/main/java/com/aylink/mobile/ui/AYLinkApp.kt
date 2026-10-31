@@ -342,7 +342,8 @@ fun AYLinkApp(container: AppContainer) {
                         val viewModelStoreOwner = rememberDisposableViewModelStoreOwner(screen.instanceId)
                         val viewModel =
                             rememberManagedViewModel(
-                                key = "remote-$sessionScopeKey-${screen.device.id}-${screen.instanceId}",
+                                // 页面已有独立的 Store，刷新令牌不能在其中留下另一个播放会话。
+                                key = "remote-${screen.device.id}-${screen.instanceId}",
                                 viewModelStoreOwner = viewModelStoreOwner,
                             ) {
                                 RemoteViewModel(

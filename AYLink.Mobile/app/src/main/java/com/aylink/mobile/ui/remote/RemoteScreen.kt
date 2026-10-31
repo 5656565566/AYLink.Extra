@@ -4,28 +4,21 @@ import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -33,29 +26,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -65,13 +41,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -85,7 +59,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -98,14 +71,11 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aylink.mobile.data.model.Device
-import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.PointerControlMessage
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 import kotlin.math.abs
-import kotlin.math.roundToInt
 import android.graphics.Rect as AndroidRect
 
 private const val ORIENTATION_CHANGE_DEBOUNCE_MS = 450L
@@ -177,7 +147,6 @@ fun AyDialog(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun RemoteScreen(
     device: Device,
@@ -333,8 +302,7 @@ fun RemoteScreen(
                 viewModel.handleIntent(RemoteIntent.SetAppSelectDialogOpen(true))
             },
             onReconnectToApp = { viewModel.handleIntent(RemoteIntent.ReconnectToApp(it)) },
-            onToggleControlDialog = { viewModel.handleIntent(RemoteIntent.SetControlDialogOpen(it)) },
-            onToggleControlPanelCollapsed = { viewModel.handleIntent(RemoteIntent.SetControlPanelCollapsed(it)) },
+            onToggleControlMenu = { viewModel.handleIntent(RemoteIntent.SetControlMenuOpen(it)) },
             onToggleDebugOverlay = { viewModel.handleIntent(RemoteIntent.ToggleDebugOverlay) },
             onDismissAppPicker = { viewModel.handleIntent(RemoteIntent.SetAppSelectDialogOpen(false)) },
             onDisconnect = { viewModel.handleIntent(RemoteIntent.DisconnectAndNavigateBack) },
@@ -550,412 +518,6 @@ private fun RemoteTouchInputLayer(
                         }
                     }
                 },
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
-@Composable
-private fun RemoteFloatingControl(
-    device: Device,
-    viewportSize: IntSize,
-    controlState: RemoteControlUiState,
-    appPickerState: RemoteAppPickerUiState,
-    onSendKey: (String) -> Unit,
-    onSetFillMode: (Boolean) -> Unit,
-    onReconnectToDevice: () -> Unit,
-    onOpenAppPicker: () -> Unit,
-    onReconnectToApp: (DeviceApp) -> Unit,
-    onToggleControlDialog: (Boolean) -> Unit,
-    onToggleControlPanelCollapsed: (Boolean) -> Unit,
-    onToggleDebugOverlay: () -> Unit,
-    onDismissAppPicker: () -> Unit,
-    onDisconnect: () -> Unit,
-) {
-    val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
-    val fabSize = 56.dp
-    val fabSizePx = with(density) { fabSize.toPx() }
-    val fabMarginPx = with(density) { 16.dp.toPx() }
-    val collapsedPeekPx = with(density) { 20.dp.toPx() }
-    var fabOffset by remember { mutableStateOf(Offset(0f, 0f)) }
-    var isFabInitialized by remember { mutableStateOf(false) }
-    var isFabDockedRight by remember { mutableStateOf(true) }
-    var previousViewportSize by remember { mutableStateOf(IntSize.Zero) }
-    val fabAlpha by animateFloatAsState(
-        targetValue = if (controlState.isControlPanelCollapsed) 0.72f else 0.9f,
-        label = "fabAlpha",
-    )
-
-    fun expandedBounds(size: IntSize): Pair<Float, Float> {
-        val maxX = (size.width - fabSizePx - fabMarginPx).coerceAtLeast(fabMarginPx)
-        val maxY = (size.height - fabSizePx - fabMarginPx).coerceAtLeast(fabMarginPx)
-        return maxX to maxY
-    }
-
-    fun clampExpandedOffset(offset: Offset): Offset {
-        val (maxX, maxY) = expandedBounds(viewportSize)
-        return Offset(
-            x = offset.x.coerceIn(fabMarginPx, maxX),
-            y = offset.y.coerceIn(fabMarginPx, maxY),
-        )
-    }
-
-    fun dockFab(collapsed: Boolean) {
-        if (viewportSize.width <= 0 || viewportSize.height <= 0) {
-            return
-        }
-
-        val currentY = clampExpandedOffset(fabOffset).y
-        val dockX =
-            if (collapsed) {
-                if (isFabDockedRight) {
-                    viewportSize.width - collapsedPeekPx
-                } else {
-                    collapsedPeekPx - fabSizePx
-                }
-            } else if (isFabDockedRight) {
-                viewportSize.width - fabSizePx - fabMarginPx
-            } else {
-                fabMarginPx
-            }
-
-        fabOffset = Offset(dockX, currentY)
-        onToggleControlPanelCollapsed(collapsed)
-    }
-
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val dismissControlDialog: () -> Unit = {
-        scope.launch {
-            sheetState.hide()
-            onToggleControlDialog(false)
-            dockFab(collapsed = true)
-        }
-    }
-    val runControlAction: (Boolean, () -> Unit) -> Unit = { dismissAfter, action ->
-        action()
-        if (dismissAfter) {
-            dismissControlDialog()
-        }
-    }
-
-    LaunchedEffect(viewportSize) {
-        if (viewportSize.width > 0 && viewportSize.height > 0 && !isFabInitialized) {
-            fabOffset = Offset(viewportSize.width - fabSizePx - fabMarginPx, fabMarginPx * 2)
-            isFabInitialized = true
-            previousViewportSize = viewportSize
-        } else if (viewportSize.width > 0 && viewportSize.height > 0) {
-            if (previousViewportSize.width > 0 && previousViewportSize.height > 0) {
-                val (previousMaxX, previousMaxY) = expandedBounds(previousViewportSize)
-                val (currentMaxX, currentMaxY) = expandedBounds(viewportSize)
-                val expandedOffset = clampExpandedOffset(fabOffset)
-                val relativeX =
-                    if (previousMaxX > fabMarginPx) {
-                        ((expandedOffset.x - fabMarginPx) / (previousMaxX - fabMarginPx)).coerceIn(0f, 1f)
-                    } else {
-                        1f
-                    }
-                val relativeY =
-                    if (previousMaxY > fabMarginPx) {
-                        ((expandedOffset.y - fabMarginPx) / (previousMaxY - fabMarginPx)).coerceIn(0f, 1f)
-                    } else {
-                        0f
-                    }
-                fabOffset =
-                    Offset(
-                        x = fabMarginPx + ((currentMaxX - fabMarginPx) * relativeX),
-                        y = fabMarginPx + ((currentMaxY - fabMarginPx) * relativeY),
-                    )
-            }
-            if (controlState.isControlPanelCollapsed) {
-                dockFab(collapsed = true)
-            } else {
-                fabOffset = clampExpandedOffset(fabOffset)
-            }
-            previousViewportSize = viewportSize
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            modifier =
-                Modifier
-                    .offset { IntOffset(fabOffset.x.roundToInt(), fabOffset.y.roundToInt()) }
-                    .size(fabSize)
-                    .pointerInput(viewportSize, controlState.isControlPanelCollapsed) {
-                        detectDragGestures(
-                            onDragStart = {
-                                if (controlState.isControlPanelCollapsed) {
-                                    dockFab(collapsed = false)
-                                }
-                            },
-                            onDragEnd = {
-                                isFabDockedRight = fabOffset.x + fabSizePx / 2f >= viewportSize.width / 2f
-                                dockFab(collapsed = true)
-                            },
-                        ) { change, dragAmount ->
-                            change.consume()
-                            fabOffset =
-                                clampExpandedOffset(
-                                    Offset(
-                                        x = fabOffset.x + dragAmount.x,
-                                        y = fabOffset.y + dragAmount.y,
-                                    ),
-                                )
-                            onToggleControlPanelCollapsed(false)
-                        }
-                    },
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = fabAlpha),
-            tonalElevation = 8.dp,
-            shadowElevation = 8.dp,
-            onClick = {
-                if (controlState.isControlPanelCollapsed) {
-                    dockFab(collapsed = false)
-                } else {
-                    onToggleControlDialog(true)
-                }
-            },
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Icon(
-                    imageVector =
-                        if (controlState.isControlPanelCollapsed) {
-                            if (isFabDockedRight) {
-                                Icons.AutoMirrored.Filled.KeyboardArrowLeft
-                            } else {
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight
-                            }
-                        } else {
-                            Icons.Default.Settings
-                        },
-                    contentDescription = "Controls",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-    }
-
-    RemoteControlSheet(
-        device = device,
-        controlState = controlState,
-        sheetState = sheetState,
-        onDismiss = {
-            onToggleControlDialog(false)
-            dockFab(collapsed = true)
-        },
-        dismissControlDialog = dismissControlDialog,
-        runControlAction = runControlAction,
-        onSendKey = onSendKey,
-        onSetFillMode = onSetFillMode,
-        onReconnectToDevice = onReconnectToDevice,
-        onOpenAppPicker = onOpenAppPicker,
-        onToggleDebugOverlay = onToggleDebugOverlay,
-        onDisconnect = onDisconnect,
-    )
-
-    AppPickerSheet(
-        appPickerState = appPickerState,
-        onDismissAppPicker = onDismissAppPicker,
-        onReconnectToApp = onReconnectToApp,
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
-@Composable
-private fun RemoteControlSheet(
-    device: Device,
-    controlState: RemoteControlUiState,
-    sheetState: SheetState,
-    onDismiss: () -> Unit,
-    dismissControlDialog: () -> Unit,
-    runControlAction: (Boolean, () -> Unit) -> Unit,
-    onSendKey: (String) -> Unit,
-    onSetFillMode: (Boolean) -> Unit,
-    onReconnectToDevice: () -> Unit,
-    onOpenAppPicker: () -> Unit,
-    onToggleDebugOverlay: () -> Unit,
-    onDisconnect: () -> Unit,
-) {
-    if (!controlState.isControlDialogOpen) return
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-    ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-            contentPadding = PaddingValues(bottom = 24.dp),
-        ) {
-            item {
-                Text("当前设备: ${device.name}", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "连接状态: ${controlState.status}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-
-            item {
-                Text("屏幕控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenon") } }) { Text("亮屏") }
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("screenoff") } }) { Text("息屏") }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            item {
-                Text("导航控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("back") } }) { Text("返回") }
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("home") } }) { Text("主页") }
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("recent") } }) { Text("任务") }
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("menu") } }) { Text("菜单") }
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("power") } }) { Text("电源") }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            item {
-                Text("音量控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumeup") } }) { Text("音量+") }
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("volumedown") } }) { Text("音量-") }
-                    OutlinedButton(onClick = { runControlAction(false) { onSendKey("mute") } }) { Text("静音") }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            item {
-                Text("画面显示", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (controlState.isFlexDisplayEnabled) {
-                            "自适应显示器已启用，默认保持等比显示"
-                        } else {
-                            "强制拉伸填充全屏"
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = controlState.fillMode,
-                        onCheckedChange = { runControlAction(false) { onSetFillMode(it) } },
-                        enabled = true,
-                    )
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            if (controlState.isDebugModeEnabled) {
-                item {
-                    Text("诊断", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(onClick = { runControlAction(false) { onToggleDebugOverlay() } }) {
-                        Text(if (controlState.isDebugOverlayVisible) "隐藏调试信息" else "调试模式")
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-            }
-
-            item {
-                Text("投屏模式", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = { runControlAction(true, onReconnectToDevice) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("整机投屏") }
-
-                    OutlinedButton(
-                        onClick = {
-                            dismissControlDialog()
-                            onOpenAppPicker()
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("应用投屏") }
-                }
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-
-            item {
-                Button(
-                    onClick = {
-                        dismissControlDialog()
-                        onDisconnect()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("断开连接并返回")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AppPickerSheet(
-    appPickerState: RemoteAppPickerUiState,
-    onDismissAppPicker: () -> Unit,
-    onReconnectToApp: (DeviceApp) -> Unit,
-) {
-    if (!appPickerState.isAppSelectDialogOpen) return
-
-    AyDialog(
-        title = "选择应用",
-        onDismissRequest = onDismissAppPicker,
-        content = {
-            if (appPickerState.isLoadingApps) {
-                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (appPickerState.appError != null) {
-                Text(appPickerState.appError, color = MaterialTheme.colorScheme.error)
-            } else if (appPickerState.availableApps.isEmpty()) {
-                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("未找到应用", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(appPickerState.availableApps) { app ->
-                        OutlinedButton(
-                            onClick = { onReconnectToApp(app) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(app.name)
-                        }
-                    }
-                }
-            }
-        },
-        footer = {
-            Button(onClick = onDismissAppPicker, modifier = Modifier.fillMaxWidth()) {
-                Text("取消")
-            }
-        },
     )
 }
 

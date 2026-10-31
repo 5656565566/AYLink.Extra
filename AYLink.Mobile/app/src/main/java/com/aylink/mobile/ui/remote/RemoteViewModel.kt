@@ -43,9 +43,8 @@ data class RemoteUiState(
     val appError: String? = null,
     val videoSize: IntSize = IntSize.Zero,
     val isAppSelectDialogOpen: Boolean = false,
-    val isControlDialogOpen: Boolean = false,
+    val isControlMenuOpen: Boolean = false,
     val fillMode: Boolean = false,
-    val isControlPanelCollapsed: Boolean = false,
     val isFlexDisplayEnabled: Boolean = false,
     val isAppProjectionMode: Boolean = false,
     val isNewDisplayMode: Boolean = false,
@@ -65,8 +64,7 @@ data class RemoteViewportUiState(
 
 data class RemoteControlUiState(
     val status: String = "未连接",
-    val isControlDialogOpen: Boolean = false,
-    val isControlPanelCollapsed: Boolean = false,
+    val isControlMenuOpen: Boolean = false,
     val fillMode: Boolean = false,
     val isFlexDisplayEnabled: Boolean = false,
     val isDebugModeEnabled: Boolean = false,
@@ -108,7 +106,7 @@ sealed interface RemoteIntent {
         val height: Int,
     ) : RemoteIntent
 
-    data class SetControlDialogOpen(
+    data class SetControlMenuOpen(
         val isOpen: Boolean,
     ) : RemoteIntent
 
@@ -119,12 +117,6 @@ sealed interface RemoteIntent {
     data class SetFillMode(
         val fillMode: Boolean,
     ) : RemoteIntent
-
-    data class SetControlPanelCollapsed(
-        val isCollapsed: Boolean,
-    ) : RemoteIntent
-
-    data object ToggleControlPanelCollapsed : RemoteIntent
 
     data object ToggleDebugOverlay : RemoteIntent
 
@@ -188,8 +180,7 @@ class RemoteViewModel(
             .map {
                 RemoteControlUiState(
                     it.status,
-                    it.isControlDialogOpen,
-                    it.isControlPanelCollapsed,
+                    it.isControlMenuOpen,
                     it.fillMode,
                     it.isFlexDisplayEnabled,
                     it.isDebugModeEnabled,
@@ -398,15 +389,9 @@ class RemoteViewModel(
             is RemoteIntent.SendPointer -> handlePointer(intent.payload)
             is RemoteIntent.SendKey -> webRtcManager.sendKeyMessage(intent.action)
             is RemoteIntent.SendDisplayResize -> webRtcManager.sendDisplayResize(intent.width, intent.height)
-            is RemoteIntent.SetControlDialogOpen -> mutableUiState.update { it.copy(isControlDialogOpen = intent.isOpen) }
+            is RemoteIntent.SetControlMenuOpen -> mutableUiState.update { it.copy(isControlMenuOpen = intent.isOpen) }
             is RemoteIntent.SetAppSelectDialogOpen -> mutableUiState.update { it.copy(isAppSelectDialogOpen = intent.isOpen) }
             is RemoteIntent.SetFillMode -> mutableUiState.update { it.copy(fillMode = intent.fillMode) }
-            is RemoteIntent.SetControlPanelCollapsed -> mutableUiState.update { it.copy(isControlPanelCollapsed = intent.isCollapsed) }
-            RemoteIntent.ToggleControlPanelCollapsed -> {
-                mutableUiState.update {
-                    it.copy(isControlPanelCollapsed = !it.isControlPanelCollapsed)
-                }
-            }
             RemoteIntent.ToggleDebugOverlay -> toggleDebugOverlay()
             RemoteIntent.DisconnectAndNavigateBack -> disconnectAndNavigateBack()
             RemoteIntent.DismissAppError -> mutableUiState.update { it.copy(appError = null) }
@@ -426,13 +411,13 @@ class RemoteViewModel(
     private fun reconnectToApp(app: DeviceApp) {
         sessionStore.updateLastRemoteDevice(device)
         connect(app.packageName, app.name, newDisplay = true)
-        mutableUiState.update { it.copy(isAppSelectDialogOpen = false, isControlDialogOpen = false) }
+        mutableUiState.update { it.copy(isAppSelectDialogOpen = false, isControlMenuOpen = false) }
     }
 
     private fun reconnectToDevice() {
         sessionStore.updateLastRemoteDevice(device)
         connect(appPackage = null, appName = null, newDisplay = false)
-        mutableUiState.update { it.copy(isControlDialogOpen = false) }
+        mutableUiState.update { it.copy(isControlMenuOpen = false) }
     }
 
     private fun connect(

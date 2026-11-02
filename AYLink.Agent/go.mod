@@ -7,7 +7,7 @@ require (
 	github.com/jj11hh/opus v1.0.1
 	github.com/pion/ice/v4 v4.4.7
 	github.com/pion/interceptor v0.1.49
-	github.com/pion/rtcp v1.2.19
+	github.com/pion/rtcp v1.2.20
 	github.com/pion/rtp v1.10.5
 	github.com/pion/webrtc/v4 v4.2.24
 	golang.org/x/crypto v0.58.0

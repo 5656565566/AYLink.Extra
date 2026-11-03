@@ -26,7 +26,7 @@
     "@vitejs/plugin-vue": "^6.0.10",
     "@vue/test-utils": "^2.4.10",
     "@vue/tsconfig": "^0.9.1",
-    "eslint": "^9.39.1",
+    "eslint": "^10.13.0",
     "eslint-plugin-vue": "^10.11.1",
     "globals": "^16.4.0",
     "happy-dom": "^20.0.8",

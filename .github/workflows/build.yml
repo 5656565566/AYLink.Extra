@@ -266,7 +266,7 @@ jobs:
       uses: actions/checkout@v7
 
     - name: Download Docker build context
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v8
       with:
         name: aylink-docker-context
         path: docker-context
@@ -391,7 +391,7 @@ jobs:
       shell: bash
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v8
       with:
         path: artifacts
         merge-multiple: true

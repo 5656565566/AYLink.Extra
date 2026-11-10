@@ -21,6 +21,9 @@ export function bindBackgroundRemoteTrack(persisted: PersistedCastConnection, ev
     replacePersistedTrack(persisted.remoteVideoStream, event.track);
   } else {
     replacePersistedTrack(persisted.remoteAudioStream, event.track);
+    if (persisted.audioElement.srcObject !== persisted.remoteAudioStream) {
+      persisted.audioElement.srcObject = persisted.remoteAudioStream;
+    }
   }
 
   event.track.onended = () => {
@@ -33,6 +36,7 @@ export function bindBackgroundRemoteTrack(persisted: PersistedCastConnection, ev
       persisted.remoteVideoStream = new MediaStream();
     } else {
       persisted.remoteAudioStream = new MediaStream();
+      persisted.audioElement.srcObject = null;
     }
   };
 }
@@ -50,6 +54,7 @@ export function wireBackgroundPersistedConnectionHandlers(
       disconnectedDisposeTimer = null;
     }
   };
+  persisted.stopBackgroundHandlers = clearDisconnectedDisposeTimer;
 
   persisted.peerConnection.ontrack = (event) => {
     bindBackgroundRemoteTrack(persisted, event);

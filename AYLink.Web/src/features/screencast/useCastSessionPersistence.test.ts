@@ -8,6 +8,7 @@ vi.mock('../../utils/api', () => ({
 
 import { useCastSessionPersistence } from './useCastSessionPersistence';
 import type { PersistedCastConnection } from '../../types/screencast';
+import { useAppSettings } from '../../services/appSettings';
 
 function createPersistedConnection(overrides: Partial<PersistedCastConnection> = {}) {
   const dataChannelClose = vi.fn();
@@ -48,8 +49,9 @@ function createPersistedConnection(overrides: Partial<PersistedCastConnection> =
       close: pointerChannelClose,
     } as unknown as RTCDataChannel,
     remoteTracks: new Map(),
-    remoteVideoStream: new MediaStream(),
-    remoteAudioStream: new MediaStream(),
+    remoteVideoStream: { getTracks: () => [] } as unknown as MediaStream,
+    remoteAudioStream: { getTracks: () => [] } as unknown as MediaStream,
+    audioElement: document.createElement('audio'),
     pendingCandidates: [],
     ...overrides
   };
@@ -67,17 +69,22 @@ function createPersistedConnection(overrides: Partial<PersistedCastConnection> =
 describe('useCastSessionPersistence', () => {
   beforeEach(() => {
     apiFetchMock.mockReset();
+    useAppSettings().setActiveCastSessionCount(1);
     window.__aylinkPersistedCastConnections = undefined;
     vi.useRealTimers();
   });
 
-  it('persists the latest connection and disposes older ones', () => {
+  it('keeps only the most recently viewed background session when no viewer is active', () => {
     const service = useCastSessionPersistence();
     const first = createPersistedConnection({ tabKey: 'tab-1' });
     const second = createPersistedConnection({ tabKey: 'tab-2' });
 
+    service.setViewingTab('tab-1');
     service.persistCurrentConnection('tab-1', first.connection);
     service.persistCurrentConnection('tab-2', second.connection);
+    service.setViewingTab('tab-2');
+    service.setViewingTab('');
+    service.enforceActiveSessionLimit();
 
     expect(service.getPersistedConnection('tab-1')).toBeNull();
     expect(service.getPersistedConnection('tab-2')).toBe(second.connection);
@@ -91,7 +98,8 @@ describe('useCastSessionPersistence', () => {
     const second = createPersistedConnection({ tabKey: 'tab-2' });
 
     service.persistCurrentConnection('tab-1', first.connection);
-    service.persistCurrentConnection('tab-2', second.connection, { disposeOtherConnections: false });
+    service.setViewingTab('tab-2');
+    service.persistCurrentConnection('tab-2', second.connection);
 
     expect(service.getPersistedConnection('tab-1')).toBe(first.connection);
     expect(service.getPersistedConnection('tab-2')).toBe(second.connection);
@@ -110,37 +118,25 @@ describe('useCastSessionPersistence', () => {
     expect(window.__aylinkPersistedCastConnections).toBeUndefined();
   });
 
-  it('starts and stops heartbeat polling', async () => {
-    vi.useFakeTimers();
-    apiFetchMock.mockResolvedValue(new Response(null, { status: 200 }));
-
+  it('evicts the least recently viewed stream and protects the viewer when the limit becomes zero', () => {
     const service = useCastSessionPersistence();
-    service.startScrcpySessionHeartbeat('device-1', 'session-1');
-
-    expect(apiFetchMock).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(15000);
-    expect(apiFetchMock).toHaveBeenCalledTimes(2);
-
-    service.stopScrcpySessionHeartbeat();
-    await vi.advanceTimersByTimeAsync(30000);
-    expect(apiFetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps heartbeats for multiple virtual tabs independent', async () => {
-    vi.useFakeTimers();
-    apiFetchMock.mockResolvedValue(new Response(null, { status: 200 }));
-
-    const service = useCastSessionPersistence();
-    service.startScrcpySessionHeartbeat('device-1', 'session-1');
-    service.startScrcpySessionHeartbeat('device-1', 'session-2');
-
-    await vi.advanceTimersByTimeAsync(15000);
-    expect(apiFetchMock).toHaveBeenCalledTimes(4);
-
-    service.stopScrcpySessionHeartbeat('device-1', 'session-1');
-    await vi.advanceTimersByTimeAsync(15000);
-    expect(apiFetchMock).toHaveBeenCalledTimes(5);
+    const first = createPersistedConnection({ tabKey: 'a' });
+    const second = createPersistedConnection({ tabKey: 'b' });
+    const third = createPersistedConnection({ tabKey: 'c' });
+    service.setViewingTab('a');
+    service.persistCurrentConnection('a', first.connection);
+    service.setViewingTab('b');
+    service.persistCurrentConnection('b', second.connection);
+    service.setViewingTab('c');
+    service.persistCurrentConnection('c', third.connection);
+    expect(first.peerClose).toHaveBeenCalledOnce();
+    expect(second.peerClose).not.toHaveBeenCalled();
+    useAppSettings().setActiveCastSessionCount(0);
+    service.enforceActiveSessionLimit();
+    expect(second.peerClose).toHaveBeenCalledOnce();
+    expect(third.peerClose).not.toHaveBeenCalled();
+    expect(apiFetchMock).not.toHaveBeenCalled();
+    service.disposeAllPersistedConnections();
   });
 
   it('disposes all persisted connections', () => {
@@ -158,5 +154,21 @@ describe('useCastSessionPersistence', () => {
     expect(window.__aylinkPersistedCastConnections).toBeUndefined();
     expect(first.wsClose).toHaveBeenCalled();
     expect(second.wsClose).toHaveBeenCalled();
+  });
+
+  it('allows only the viewed tab to sound and mutes every player when leaving the viewer', () => {
+    const service = useCastSessionPersistence();
+    service.setViewingTab('a');
+    const first = service.getPersistentAudioElement('a');
+    const second = service.getPersistentAudioElement('b');
+    expect([first.muted, second.muted]).toEqual([false, true]);
+    service.setViewingTab('b');
+    expect([first.muted, second.muted]).toEqual([true, false]);
+    service.setAudioMuted(true);
+    expect([first.muted, second.muted]).toEqual([true, true]);
+    service.setAudioMuted(false);
+    expect([first.muted, second.muted]).toEqual([true, false]);
+    service.setViewingTab('');
+    expect([first.muted, second.muted]).toEqual([true, true]);
   });
 });

@@ -3,6 +3,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsView from './SettingsView.vue';
 import { apiFetch } from '../utils/api';
+import { useAppSettings } from '../services/appSettings';
 import { loadLocalWebRtcFileTransferPreferred, loadLocalWebRtcOverrideEnabled, setLocalWebRtcFileTransferPreferred } from '../services/webrtcSettings';
 
 enableAutoUnmount(afterEach);
@@ -107,5 +108,23 @@ describe('local WebRTC file transfer preference', () => {
     vm.resetLocalWebRtcSettings();
     expect(loadLocalWebRtcFileTransferPreferred('1')).toBe(true);
     expect(loadLocalWebRtcFileTransferPreferred('2')).toBe(false);
+  });
+});
+
+describe('active cast session count', () => {
+  it('saves the background connection limit and allows zero', async () => {
+    useAppSettings().setActiveCastSessionCount(1);
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const input = wrapper.get<HTMLInputElement>('input[aria-label="活跃会话数"]');
+    expect(input.element.value).toBe('1');
+    await input.setValue('3');
+    expect(useAppSettings().activeCastSessionCount.value).toBe(3);
+    await input.setValue('0');
+    expect(useAppSettings().activeCastSessionCount.value).toBe(0);
+    wrapper.unmount();
+    const reopened = mount(SettingsView);
+    expect(reopened.get<HTMLInputElement>('input[aria-label="活跃会话数"]').element.value).toBe('0');
+    useAppSettings().setActiveCastSessionCount(1);
   });
 });

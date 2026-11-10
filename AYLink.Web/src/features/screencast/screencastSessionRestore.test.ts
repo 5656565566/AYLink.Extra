@@ -22,6 +22,7 @@ function createPersistedConnection(overrides: Partial<PersistedCastConnection> =
     remoteTracks: new Map(),
     remoteVideoStream: new MediaStream(),
     remoteAudioStream: new MediaStream(),
+    audioElement: document.createElement('audio'),
     pendingCandidates: [],
     ...overrides
   };

@@ -3,6 +3,9 @@ package webrtc
 import "time"
 
 type Ticket struct {
+	UserID            int
+	LoginSessionID    string
+	WebPageID         string
 	Value             string
 	SessionID         string
 	DeviceID          string
@@ -17,8 +20,11 @@ type Ticket struct {
 }
 
 type SessionLease struct {
-	SessionID string
-	DeviceID  string
-	ExpiresAt time.Time
-	UpdatedAt time.Time
+	UserID         int
+	LoginSessionID string
+	WebPageID      string
+	SessionID      string
+	DeviceID       string
+	ExpiresAt      time.Time
+	UpdatedAt      time.Time
 }

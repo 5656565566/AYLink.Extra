@@ -15,18 +15,13 @@ export interface ScreencastSessionState {
   audioStream: ScreencastSessionValue<MediaStream>;
 }
 
-export interface ScreencastSessionStopOptions {
-  disposeOtherPersistedConnections?: boolean;
-}
-
 export interface ScreencastSessionPersistOptions {
-  disposeOtherConnections?: boolean;
   wireBackgroundHandlers?: boolean;
 }
 
 export interface ScreencastSessionLifecycle {
   start: (bypassStartGuard?: boolean) => Promise<void>;
-  stop: (preserveForBackground?: boolean, preserveTabKey?: string, options?: ScreencastSessionStopOptions) => void;
+  stop: (preserveForBackground?: boolean, preserveTabKey?: string) => void;
   restore: (tabKey?: string) => boolean;
   persist: (tabKey?: string, options?: ScreencastSessionPersistOptions) => void;
   detachFromView: () => void;
@@ -97,13 +92,12 @@ export interface UseScreencastSessionOptions {
   getSessionReleaseTarget: (tabKey?: string) => { deviceId: string; sessionId: string };
   getRestorableSessionId: (tabKey: string) => string;
   setRestorableSessionId: (tabKey: string, sessionId: string) => void;
-  postScrcpySessionAction: (action: 'heartbeat' | 'release', deviceId: string, sessionId: string) => void;
-  stopScrcpySessionHeartbeat: (deviceId?: string, sessionId?: string) => void;
-  startScrcpySessionHeartbeat: (deviceId: string, sessionId: string) => void;
+  releaseCastSession: (deviceId: string, sessionId: string) => void;
+  refreshCastPage: () => void;
   disposeAllPersistedConnections: () => void;
   getPersistedConnection: (tabKey: string) => PersistedCastConnection | null;
   disposePersistedConnection: (tabKey: string) => void;
-  persistCastConnectionSnapshot: (tabKey: string, snapshot: PersistedCastConnection, options?: { disposeOtherConnections?: boolean }) => void;
+  persistCastConnectionSnapshot: (tabKey: string, snapshot: PersistedCastConnection) => void;
   clearPersistedConnection: (tabKey?: string) => void;
   wireBackgroundPersistedConnectionHandlers: (snapshot: PersistedCastConnection) => void;
   staleDisconnectedGraceMs: number;
@@ -141,7 +135,7 @@ export interface UseScreencastSessionOptions {
   showLastFrameOverlayForTab: (tabKey?: string) => void;
   releaseHidDevices: () => void;
   cleanupMediaStream: () => void;
-  getPersistentAudioElement: () => HTMLAudioElement;
+  getPersistentAudioElement: (tabKey?: string) => HTMLAudioElement;
   scheduleResumeMediaPlayback: (delayMs: number) => void;
   startVideoFrameMonitor: (connectionId: number) => void;
 }
@@ -175,13 +169,14 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
       remoteTracks: new Map(runtime.remoteTracks),
       remoteVideoStream: runtime.remoteVideoStream,
       remoteAudioStream: runtime.remoteAudioStream,
+      audioElement: options.getPersistentAudioElement(tabKey),
       pendingCandidates: [...runtime.pendingCandidates]
     };
     if (persistOptions.wireBackgroundHandlers) {
       options.wireBackgroundPersistedConnectionHandlers(snapshot);
     }
 
-    options.persistCastConnectionSnapshot(tabKey, snapshot, persistOptions);
+    options.persistCastConnectionSnapshot(tabKey, snapshot);
   };
 
   const restore = (tabKey = options.getActiveTabKey()) => {
@@ -191,6 +186,7 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
     }
 
     const persistedPeerConnectionState = persisted.peerConnection.connectionState;
+    persisted.stopBackgroundHandlers?.();
     if (isPersistedConnectionStale(persisted, options.staleDisconnectedGraceMs)) {
       console.warn('[WebRTC] Discarding stale persisted connection snapshot.', {
         tabKey,
@@ -240,10 +236,6 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
     if (videoElement) {
       videoElement.srcObject = runtime.remoteVideoStream;
     }
-    const audioElement = options.refs.getAudioElement();
-    if (audioElement) {
-      audioElement.srcObject = runtime.remoteAudioStream;
-    }
     const backgroundAudioElement = options.getPersistentAudioElement();
     if (backgroundAudioElement.srcObject !== runtime.remoteAudioStream) {
       backgroundAudioElement.srcObject = runtime.remoteAudioStream;
@@ -256,10 +248,10 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
       : state.isConnecting.value
         ? options.getCurrentStatusText('reconnecting')
         : options.getCurrentStatusText('webRtcState', restored.peerConnection.connectionState);
-    options.startScrcpySessionHeartbeat(persisted.deviceId, runtime.currentScrcpySessionId);
+    options.refreshCastPage();
     options.scheduleResumeMediaPlayback(0);
     options.startVideoFrameMonitor(connectionId);
-    persist(tabKey, { disposeOtherConnections: false });
+    persist(tabKey);
     return true;
   };
 
@@ -316,14 +308,9 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
 
   const stop = (
     preserveForBackground = false,
-    preserveTabKey = options.getActiveTabKey(),
-    stopOptions: ScreencastSessionStopOptions = {}
+    preserveTabKey = options.getActiveTabKey()
   ) => {
     const shouldPreserveLiveConnection = preserveForBackground && options.hasLiveConnection();
-    if (!shouldPreserveLiveConnection) {
-      const sessionTarget = options.getSessionReleaseTarget(preserveTabKey);
-      options.stopScrcpySessionHeartbeat(sessionTarget.deviceId, sessionTarget.sessionId);
-    }
     options.stopFlexDisplayHeartbeat();
     options.stopVideoStreamWatchdog();
     options.clearPendingDisplayResize();
@@ -343,7 +330,6 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
     if (shouldPreserveLiveConnection) {
       options.captureCurrentVideoFrame(preserveTabKey);
       persist(preserveTabKey, {
-        disposeOtherConnections: stopOptions.disposeOtherPersistedConnections,
         wireBackgroundHandlers: true
       });
       detachActiveConnectionFromView();
@@ -412,11 +398,10 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
 
     const restorableSessionId = options.getRestorableSessionId(targetTabKey);
     const previousSession = options.getSessionReleaseTarget(targetTabKey);
-    options.stopScrcpySessionHeartbeat(previousSession.deviceId, previousSession.sessionId);
     if (previousSession.sessionId && previousSession.sessionId !== restorableSessionId) {
-      options.postScrcpySessionAction('release', previousSession.deviceId, previousSession.sessionId);
+      options.releaseCastSession(previousSession.deviceId, previousSession.sessionId);
     }
-    options.disposeAllPersistedConnections();
+    options.disposePersistedConnection(targetTabKey);
     stop();
     options.enableAutoReconnect();
     options.resetSignalingDetachState();
@@ -431,10 +416,12 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
     try {
       let wsUrl = options.buildSignalWebSocketBaseUrl();
       let { ticketResponse } = await options.requestSignalTicket(restorableSessionId, { newPeerConnection: true });
+      if (connectionId !== runtime.activeConnectionId) return;
 
       if (!ticketResponse.ok && ticketResponse.status === 400 && restorableSessionId) {
         options.setRestorableSessionId(targetTabKey, '');
         ({ ticketResponse } = await options.requestSignalTicket('', { newPeerConnection: true }));
+        if (connectionId !== runtime.activeConnectionId) return;
       }
 
       if (!ticketResponse.ok) {
@@ -445,6 +432,7 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
         return;
       }
       const ticketPayload = await ticketResponse.json();
+      if (connectionId !== runtime.activeConnectionId) return;
       runtime.currentScrcpySessionId = String(ticketPayload.sessionId ?? '');
       options.setRestorableSessionId(targetTabKey, runtime.currentScrcpySessionId);
       wsUrl = buildSignalWebSocketUrl(wsUrl, ticketPayload.ticket);
@@ -458,12 +446,17 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
         }
         options.clearStartConnectionState();
         state.status.value = options.getCurrentStatusText('creatingSession');
-        options.startScrcpySessionHeartbeat(options.getDeviceId(), runtime.currentScrcpySessionId);
+        options.refreshCastPage();
 
         try {
           const rtcConfiguration = await options.loadRtcConfiguration();
+          if (connectionId !== runtime.activeConnectionId || runtime.ws !== socket) return;
           const offerSession = await options.createPeerOfferSession(rtcConfiguration, {
             beforeSetLocalDescription: ({ peerConnection, channels }) => {
+              if (connectionId !== runtime.activeConnectionId || runtime.ws !== socket) {
+                peerConnection.close();
+                throw new DOMException('Cast tab changed', 'AbortError');
+              }
               runtime.peerConnection = peerConnection;
               options.setupControlChannel(channels.controlChannel);
               options.setupMetaControlChannel(channels.metaControlChannel);
@@ -471,10 +464,15 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
               options.wirePeerConnectionEventHandlers(connectionId, peerConnection);
             }
           });
+          if (connectionId !== runtime.activeConnectionId || runtime.ws !== socket) {
+            offerSession.peerConnection.close();
+            return;
+          }
           runtime.peerConnection = offerSession.peerConnection;
 
           runtime.ws?.send(JSON.stringify(offerSession.localDescription));
         } catch (error) {
+          if (connectionId !== runtime.activeConnectionId || runtime.ws !== socket) return;
           console.error('Failed to create WebRTC offer:', error);
           state.status.value = options.getCurrentStatusText('createOfferFailed');
           state.isConnecting.value = false;
@@ -488,6 +486,7 @@ export function useScreencastSession(options: UseScreencastSessionOptions): Scre
 
       persist();
     } catch (error) {
+      if (connectionId !== runtime.activeConnectionId) return;
       console.error('Failed to start WebRTC connection:', error);
       state.status.value = options.getCurrentStatusText('initRetry');
       state.isConnecting.value = false;

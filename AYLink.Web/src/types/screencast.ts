@@ -27,5 +27,7 @@ export interface PersistedCastConnection {
   remoteTracks: Map<TrackKind, MediaStreamTrack>;
   remoteVideoStream: MediaStream;
   remoteAudioStream: MediaStream;
+  audioElement: HTMLAudioElement;
+  stopBackgroundHandlers?: () => void;
   pendingCandidates: RTCIceCandidateInit[];
 }

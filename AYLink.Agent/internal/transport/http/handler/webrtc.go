@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	domainauth "aylink-agent/internal/domain/auth"
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
+	authservice "aylink-agent/internal/service/auth"
 	deviceservice "aylink-agent/internal/service/device"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
 	webrtcservice "aylink-agent/internal/service/webrtc"
@@ -21,11 +23,12 @@ import (
 const runtimeJanitorInterval = 5 * time.Second
 
 type WebRTCHandler struct {
-	service  WebRTCService
-	settings SettingsService
-	scrcpy   ScrcpyService
-	access   DeviceAccessService
-	upgrader websocket.Upgrader
+	loginSessions LoginSessionValidator
+	service       WebRTCService
+	settings      SettingsService
+	scrcpy        ScrcpyService
+	access        DeviceAccessService
+	upgrader      websocket.Upgrader
 
 	runtimeMu sync.Mutex
 	runtimes  map[string]*managedRuntime
@@ -54,13 +57,14 @@ type SignalErrorPayload struct {
 	Retryable  bool   `json:"retryable,omitempty"`
 }
 
-func NewWebRTCHandler(service WebRTCService, settings SettingsService, scrcpy ScrcpyService, access DeviceAccessService) *WebRTCHandler {
+func NewWebRTCHandler(service WebRTCService, settings SettingsService, scrcpy ScrcpyService, access DeviceAccessService, loginSessions LoginSessionValidator) *WebRTCHandler {
 	handler := &WebRTCHandler{
-		service:  service,
-		settings: settings,
-		scrcpy:   scrcpy,
-		access:   access,
-		runtimes: make(map[string]*managedRuntime),
+		loginSessions: loginSessions,
+		service:       service,
+		settings:      settings,
+		scrcpy:        scrcpy,
+		access:        access,
+		runtimes:      make(map[string]*managedRuntime),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -110,8 +114,24 @@ func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := h.service.CreateTicket(r.Context(), payload)
+	var result webrtcservice.CreateTicketResult
+	var err error
+	if payload.PageID == "" {
+		WriteError(w, http.StatusBadRequest, "CAST_PAGE_REQUIRED", "WebRTC.SessionIdRequired", "必须先登记投屏客户端")
+		return
+	}
+	err = h.withWebIdentity(r, func(identity *domainauth.Identity) error {
+		if err := h.checkWebDevice(r.Context(), identity, payload.DeviceID); err != nil {
+			return err
+		}
+		payload.UserID, payload.LoginSessionID = identity.UserID, identity.LoginSessionID
+		result, err = h.service.CreateTicket(r.Context(), payload)
+		return err
+	})
 	if err != nil {
+		if h.writeWebSessionError(w, err) {
+			return
+		}
 		if errors.Is(err, webrtcservice.ErrDeviceIDRequired) {
 			WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
 			return
@@ -129,7 +149,7 @@ func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 
 // Heartbeat 刷新投屏会话
 // @Summary 刷新投屏会话
-// @Description 刷新投屏会话租约，保持当前 scrcpy/WebRTC 会话存活。
+// @Description 使用客户端标记、递增序号和完整位图续租；空位图释放客户端的全部投屏会话。
 // @Tags 投屏
 // @Accept json
 // @Produce json
@@ -141,24 +161,30 @@ func (h *WebRTCHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 // @Failure 403 {object} ErrorResponse
 // @Router /api/scrcpy-sessions/heartbeat [post]
 func (h *WebRTCHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
-	h.handleSessionAction(w, r, true)
-}
-
-// Release 释放投屏会话
-// @Summary 释放投屏会话
-// @Description 释放投屏会话租约，并在没有活动引用时关闭运行时。
-// @Tags 投屏
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param body body SessionActionRequest true "会话参数"
-// @Success 200 {object} SessionActionResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Router /api/scrcpy-sessions/release [post]
-func (h *WebRTCHandler) Release(w http.ResponseWriter, r *http.Request) {
-	h.handleSessionAction(w, r, false)
+	if r.Method != http.MethodPost {
+		WriteMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+	var payload SessionActionRequest
+	if err := decodeJSONBody(r, &payload); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
+		return
+	}
+	if payload.PageID == "" || payload.Sequence == 0 || payload.Bitmap == nil {
+		WriteError(w, http.StatusBadRequest, "CAST_HEARTBEAT_REQUIRED", "Errors.InvalidJson", "投屏心跳必须包含 p、v 和 b")
+		return
+	}
+	err := h.withWebIdentity(r, func(identity *domainauth.Identity) error {
+		return h.service.HeartbeatWebPage(webrtcservice.WebOwner{UserID: identity.UserID, LoginSessionID: identity.LoginSessionID}, payload.PageID, payload.Sequence, *payload.Bitmap)
+	})
+	if err != nil {
+		if !h.writeWebSessionError(w, err) {
+			WriteError(w, http.StatusInternalServerError, "CAST_HEARTBEAT_FAILED", "WebRTC.TicketFailed", "投屏心跳处理失败")
+		}
+		return
+	}
+	h.cleanupIdleRuntimes()
+	WriteJSON(w, http.StatusOK, SessionActionResponse{Success: true})
 }
 
 // VideoHealth 获取视频流健康状态
@@ -221,49 +247,6 @@ func (h *WebRTCHandler) VideoHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, snapshot)
-}
-
-func (h *WebRTCHandler) handleSessionAction(w http.ResponseWriter, r *http.Request, heartbeat bool) {
-	if r.Method != http.MethodPost {
-		WriteMethodNotAllowed(w, http.MethodPost)
-		return
-	}
-
-	var payload SessionActionRequest
-	if err := decodeJSONBody(r, &payload); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", "Errors.InvalidJson", "请求 JSON 无效")
-		return
-	}
-
-	payload.DeviceID = strings.TrimSpace(payload.DeviceID)
-	payload.SessionID = strings.TrimSpace(payload.SessionID)
-	if heartbeat {
-		success, err := h.service.TouchSession(r.Context(), payload.DeviceID, payload.SessionID)
-		if err != nil {
-			if errors.Is(err, webrtcservice.ErrSessionIDRequired) {
-				WriteError(w, http.StatusBadRequest, "SESSION_ID_REQUIRED", "WebRTC.SessionIdRequired", "sessionId 不能为空")
-				return
-			}
-			WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
-			return
-		}
-		WriteJSON(w, http.StatusOK, SessionActionResponse{Success: success})
-		return
-	}
-
-	if err := h.service.ReleaseSession(r.Context(), payload.DeviceID, payload.SessionID); err != nil {
-		if errors.Is(err, webrtcservice.ErrSessionIDRequired) {
-			WriteError(w, http.StatusBadRequest, "SESSION_ID_REQUIRED", "WebRTC.SessionIdRequired", "sessionId 不能为空")
-			return
-		}
-		WriteError(w, http.StatusBadRequest, "DEVICE_ID_REQUIRED", "WebRTC.DeviceIdRequired", "deviceId 不能为空")
-		return
-	}
-	if !h.service.HasActiveSessionLease(payload.DeviceID) && !h.hasRuntimeRefs(payload.DeviceID) {
-		h.forceCloseRuntime(payload.DeviceID)
-	}
-	h.cleanupIdleRuntimes()
-	WriteJSON(w, http.StatusOK, SessionActionResponse{Success: true})
 }
 
 // GetClipboard 读取远端剪贴板
@@ -422,13 +405,29 @@ func (h *WebRTCHandler) ServeSignalWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.loginSessions == nil {
+		h.writeWebSessionError(w, authservice.ErrUnauthorized)
+		return
+	}
+	err = h.loginSessions.WithLoginSession(r.Context(), ticket.UserID, ticket.LoginSessionID, func(identity *domainauth.Identity) error {
+		if err := h.checkWebDevice(r.Context(), identity, ticket.DeviceID); err != nil {
+			return err
+		}
+		if !h.service.StartTicket(ticket) {
+			return webrtcservice.ErrSessionNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		WriteError(w, http.StatusUnauthorized, "WEBRTC_TICKET_INVALID", "WebRTC.InvalidTicket", "投屏凭据已失效")
+		return
+	}
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
-	h.service.MarkSessionStarted(ticket.DeviceID, ticket.SessionID)
 	if ticket.NewPeerConnection {
 		h.service.ReplaceSignalingSession(ticket.SessionID)
 	}
@@ -544,6 +543,10 @@ func (h *WebRTCHandler) acquireRuntime(
 			}
 
 			if entry.refCount == 0 {
+				if h.runtimeHasLease(entry) {
+					h.runtimeMu.Unlock()
+					return nil, false, fmt.Errorf("runtime for device %s is busy", deviceKey)
+				}
 				delete(h.runtimes, deviceKey)
 				runtime := entry.runtime
 				h.runtimeMu.Unlock()
@@ -630,6 +633,7 @@ func (h *WebRTCHandler) runtimeJanitor() {
 	defer ticker.Stop()
 
 	for range ticker.C {
+		h.CleanupWebSessions(context.Background())
 		h.cleanupIdleRuntimes()
 	}
 }
@@ -691,7 +695,7 @@ func (h *WebRTCHandler) cleanupIdleRuntimes() {
 		if entry == nil || entry.starting || entry.refCount > 0 || entry.runtime == nil {
 			continue
 		}
-		if h.service.HasActiveSessionLease(key) {
+		if h.runtimeHasLease(entry) {
 			entry.lastUsedAt = time.Now().UTC()
 			continue
 		}
@@ -701,35 +705,6 @@ func (h *WebRTCHandler) cleanupIdleRuntimes() {
 	h.runtimeMu.Unlock()
 
 	for _, entry := range stale {
-		_ = entry.runtime.Close()
-	}
-}
-
-func (h *WebRTCHandler) hasRuntimeRefs(deviceID string) bool {
-	if deviceID == "" {
-		return false
-	}
-
-	h.runtimeMu.Lock()
-	defer h.runtimeMu.Unlock()
-
-	entry := h.runtimes[deviceID]
-	return entry != nil && entry.refCount > 0
-}
-
-func (h *WebRTCHandler) forceCloseRuntime(deviceID string) {
-	if deviceID == "" {
-		return
-	}
-
-	h.runtimeMu.Lock()
-	entry := h.runtimes[deviceID]
-	if entry != nil {
-		delete(h.runtimes, deviceID)
-	}
-	h.runtimeMu.Unlock()
-
-	if entry != nil && entry.runtime != nil {
 		_ = entry.runtime.Close()
 	}
 }

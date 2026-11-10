@@ -10,6 +10,7 @@ const POINTER_SAMPLING_RATE_KEY = storageKeys.app.pointerSamplingRateHz;
 const PREVIEW_REFRESH_INTERVAL_KEY = storageKeys.app.previewRefreshInterval;
 const WEAK_NETWORK_MODE_KEY = storageKeys.app.weakNetworkMode;
 const DEBUG_MODE_KEY = storageKeys.app.debugMode;
+const ACTIVE_CAST_SESSION_COUNT_KEY = storageKeys.app.activeCastSessionCount;
 
 export type NewDisplayDpiMode = 'disabled' | 'auto' | 'custom';
 export type PointerSamplingRateHz = 120 | 60 | 30;
@@ -22,9 +23,11 @@ const pointerSamplingRateHz = ref<PointerSamplingRateHz>(loadPointerSamplingRate
 const previewRefreshInterval = ref(loadPreviewRefreshInterval());
 const weakNetworkMode = ref(loadWeakNetworkMode());
 const debugMode = ref(loadDebugMode());
+const activeCastSessionCount = ref(normalizeActiveCastSessionCount(Number(readLocalString(ACTIVE_CAST_SESSION_COUNT_KEY) ?? 1)));
 
 export function useAppSettings() {
   return {
+    activeCastSessionCount: readonly(activeCastSessionCount),
     adaptivePointerSampling: readonly(adaptivePointerSampling),
     backgroundMute: readonly(backgroundMute),
     newDisplayDpiMode: readonly(newDisplayDpiMode),
@@ -34,6 +37,7 @@ export function useAppSettings() {
     weakNetworkMode: readonly(weakNetworkMode),
     debugMode: readonly(debugMode),
     setAdaptivePointerSampling,
+    setActiveCastSessionCount,
     setBackgroundMute,
     setNewDisplayDpiMode,
     setNewDisplayDpiValue,
@@ -42,6 +46,19 @@ export function useAppSettings() {
     setWeakNetworkMode,
     setDebugMode,
   };
+}
+
+function setActiveCastSessionCount(value: number) {
+  activeCastSessionCount.value = normalizeActiveCastSessionCount(value);
+  writeLocalString(ACTIVE_CAST_SESSION_COUNT_KEY, String(activeCastSessionCount.value));
+}
+
+function normalizeActiveCastSessionCount(value: number) {
+  if (!Number.isFinite(value) || value > Number.MAX_SAFE_INTEGER) {
+    return 1;
+  }
+
+  return Math.max(0, Math.round(value));
 }
 
 function setAdaptivePointerSampling(enabled: boolean) {

@@ -31,8 +31,9 @@ type Service struct {
 	signaling     map[string]*signalingSession
 	udpMuxes      map[int]ice.UDPMux
 	ticketTTL     time.Duration
-	leaseTTL      time.Duration
 	now           func() time.Time
+	webPages      map[string]*webPage
+	registrations map[int]registrationWindow
 }
 
 type controlLease struct {
@@ -44,6 +45,9 @@ type controlLease struct {
 const controlLeaseTTL = 1500 * time.Millisecond
 
 type CreateTicketInput struct {
+	PageID            string `json:"pageId,omitempty"`
+	UserID            int    `json:"-"`
+	LoginSessionID    string `json:"-"`
 	DeviceID          string `json:"deviceId"`
 	SessionID         string `json:"sessionId"`
 	AppPackage        string `json:"appPackage"`
@@ -56,6 +60,7 @@ type CreateTicketInput struct {
 }
 
 type CreateTicketResult struct {
+	Slot             *int   `json:"slot,omitempty"`
 	Ticket           string `json:"ticket"`
 	SessionID        string `json:"sessionId"`
 	ExpiresInSeconds int    `json:"expiresInSeconds"`
@@ -71,7 +76,8 @@ func NewService(logger logging.Logger) *Service {
 		signaling:     make(map[string]*signalingSession),
 		udpMuxes:      make(map[int]ice.UDPMux),
 		ticketTTL:     60 * time.Second,
-		leaseTTL:      45 * time.Second,
+		webPages:      make(map[string]*webPage),
+		registrations: make(map[int]registrationWindow),
 		now:           func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -96,10 +102,20 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 		if !ok || lease.DeviceID != input.DeviceID || !lease.ExpiresAt.After(s.now()) {
 			return CreateTicketResult{}, ErrSessionNotFound
 		}
+		if lease.UserID != input.UserID || lease.LoginSessionID != input.LoginSessionID || lease.WebPageID != input.PageID {
+			return CreateTicketResult{}, ErrSessionNotFound
+		}
 		sessionID = input.SessionID
+	}
+	slot, err := s.reserveSessionLocked(input, sessionID)
+	if err != nil {
+		return CreateTicketResult{}, err
 	}
 
 	ticket := domainwebrtc.Ticket{
+		UserID:            input.UserID,
+		LoginSessionID:    input.LoginSessionID,
+		WebPageID:         input.PageID,
 		Value:             value,
 		SessionID:         sessionID,
 		DeviceID:          input.DeviceID,
@@ -115,6 +131,7 @@ func (s *Service) CreateTicket(_ context.Context, input CreateTicketInput) (Crea
 	s.tickets[value] = ticket
 
 	return CreateTicketResult{
+		Slot:             slot,
 		Ticket:           value,
 		SessionID:        sessionID,
 		ExpiresInSeconds: int(s.ticketTTL.Seconds()),
@@ -146,85 +163,6 @@ func (s *Service) ConsumeTicket(_ context.Context, value string) (domainwebrtc.T
 	}
 	delete(s.tickets, value)
 	return ticket, nil
-}
-
-func (s *Service) TouchSession(_ context.Context, deviceID string, sessionID string) (bool, error) {
-	if deviceID == "" {
-		return false, ErrDeviceIDRequired
-	}
-	if sessionID == "" {
-		return false, ErrSessionIDRequired
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.cleanupLocked()
-	now := s.now()
-	lease, ok := s.sessionLeases[sessionID]
-	if !ok || lease.DeviceID != deviceID {
-		return false, nil
-	}
-	lease.UpdatedAt = now
-	lease.ExpiresAt = now.Add(s.leaseTTL)
-	s.sessionLeases[sessionID] = lease
-	return true, nil
-}
-
-func (s *Service) ReleaseSession(_ context.Context, deviceID string, sessionID string) error {
-	if deviceID == "" {
-		return ErrDeviceIDRequired
-	}
-	if sessionID == "" {
-		return ErrSessionIDRequired
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	lease, ok := s.sessionLeases[sessionID]
-	if ok && lease.DeviceID == deviceID {
-		delete(s.sessionLeases, sessionID)
-	}
-	if controlLease, ok := s.controlLeases[deviceID]; ok && controlLease.SessionID == sessionID {
-		delete(s.controlLeases, deviceID)
-	}
-	signalingSession := s.signaling[sessionID]
-	delete(s.signaling, sessionID)
-	go closeSignalingSession(signalingSession)
-	return nil
-}
-
-func (s *Service) MarkSessionStarted(deviceID string, sessionID string) {
-	if deviceID == "" || sessionID == "" {
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	s.sessionLeases[sessionID] = domainwebrtc.SessionLease{
-		SessionID: sessionID,
-		DeviceID:  deviceID,
-		UpdatedAt: now,
-		ExpiresAt: now.Add(s.leaseTTL),
-	}
-}
-
-func (s *Service) HasActiveSessionLease(deviceID string) bool {
-	if deviceID == "" {
-		return false
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.cleanupLocked()
-	for _, lease := range s.sessionLeases {
-		if lease.DeviceID == deviceID && lease.ExpiresAt.After(s.now()) {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Service) HasSessionLease(deviceID string, sessionID string) bool {
@@ -265,6 +203,11 @@ func (s *Service) TryAcquireControl(deviceID string, sessionID string) bool {
 
 func (s *Service) cleanupLocked() {
 	now := s.now()
+	for id, page := range s.webPages {
+		if !page.ExpiresAt.After(now) {
+			s.releasePageLocked(id)
+		}
+	}
 	for key, ticket := range s.tickets {
 		if !ticket.ExpiresAt.After(now) {
 			delete(s.tickets, key)
@@ -272,12 +215,17 @@ func (s *Service) cleanupLocked() {
 	}
 	for key, lease := range s.sessionLeases {
 		if !lease.ExpiresAt.After(now) {
-			delete(s.sessionLeases, key)
+			s.releaseSessionLocked(key)
 		}
 	}
 	for key, lease := range s.controlLeases {
 		if !lease.ExpiresAt.After(now) {
 			delete(s.controlLeases, key)
+		}
+	}
+	for userID, window := range s.registrations {
+		if now.Sub(window.StartedAt) >= time.Minute {
+			delete(s.registrations, userID)
 		}
 	}
 }

@@ -527,6 +527,8 @@
     "BackgroundImages": "管理背景图",
     "BackgroundImagesDescription": "多张图片随机展示，一张固定展示",
     "BackgroundMute": "后台静音",
+    "ActiveCastSessionCount": "活跃会话数",
+    "ActiveCastSessionCountDescription": "最多保留多少个非观看投屏的音视频连接，不含正在观看的会话；0 表示不保留，标签页的远端会话仍会保活",
     "BackgroundMuteDescription": "窗口失去焦点或切到后台时自动静音网页音频",
     "ChangePassword": "修改密码",
     "ChangePasswordDescription": "修改当前登录账号的密码，修改后需要重新登录",

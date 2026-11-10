@@ -85,6 +85,7 @@ export default defineComponent({
     const { t, currentLocale, languages, setLocale } = useI18n();
 
     const {
+      activeCastSessionCount,
       adaptivePointerSampling,
       backgroundMute,
       newDisplayDpiMode,
@@ -94,6 +95,7 @@ export default defineComponent({
       weakNetworkMode,
       debugMode,
       setAdaptivePointerSampling,
+      setActiveCastSessionCount,
       setBackgroundMute,
       setNewDisplayDpiMode,
       setNewDisplayDpiValue,
@@ -362,6 +364,12 @@ export default defineComponent({
 
     function onBackgroundMuteChange(event: Event) {
       setBackgroundMute((event.target as HTMLInputElement).checked);
+    }
+
+    function onActiveCastSessionCountChange(event: Event) {
+      const input = event.target as HTMLInputElement;
+      setActiveCastSessionCount(input.valueAsNumber);
+      input.value = String(activeCastSessionCount.value);
     }
 
     function onAdaptivePointerSamplingChange(event: Event) {
@@ -1388,6 +1396,7 @@ export default defineComponent({
       newDisplayDpiValue,
       pointerSamplingRateHz,
       previewRefreshInterval,
+      activeCastSessionCount,
       weakNetworkMode,
       debugMode,
       inputMappingMouseCaptureKey,
@@ -1478,6 +1487,7 @@ export default defineComponent({
       onLocaleChange,
       onAdaptivePointerSamplingChange,
       onBackgroundMuteChange,
+      onActiveCastSessionCountChange,
       onBackgroundEnabledChange,
       onUseLocalWebRtcOverrideChange,
       onPreferWebRtcFileTransferChange,

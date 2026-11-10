@@ -48,6 +48,7 @@ type LoginResult struct {
 }
 
 type Identity struct {
+	LoginSessionID       string
 	UserID               int
 	Username             string
 	Permissions          []string
@@ -57,10 +58,11 @@ type Identity struct {
 }
 
 type TokenRecord struct {
-	ID        int
-	UserID    int
-	ExpiresAt time.Time
-	RevokedAt *time.Time
+	LoginSessionID string
+	ID             int
+	UserID         int
+	ExpiresAt      time.Time
+	RevokedAt      *time.Time
 }
 
 type UserRecord struct {
@@ -75,10 +77,12 @@ type UserRecord struct {
 }
 
 type TokenPair struct {
-	AccessToken           string
-	AccessTokenExpiresAt  time.Time
-	RefreshToken          string
-	RefreshTokenExpiresAt time.Time
+	LoginSessionID         string
+	PreviousRefreshTokenID int
+	AccessToken            string
+	AccessTokenExpiresAt   time.Time
+	RefreshToken           string
+	RefreshTokenExpiresAt  time.Time
 }
 
 type PermissionDescriptor struct {
@@ -105,6 +109,8 @@ type Repository interface {
 
 	GetRefreshToken(ctx context.Context, tokenHash string) (*TokenRecord, *UserRecord, error)
 	GetAccessTokenIdentity(ctx context.Context, tokenHash string) (*UserRecord, time.Time, error)
+	GetAccessTokenSessionID(ctx context.Context, tokenHash string) (string, error)
+	GetLoginSession(ctx context.Context, sessionID string) (*UserRecord, time.Time, error)
 	GetRoleSummariesForUser(ctx context.Context, userID int) ([]RoleSummary, error)
 	GetPermissionsForUser(ctx context.Context, userID int) ([]string, error)
 	IsUserAdministrator(ctx context.Context, userID int) (bool, error)

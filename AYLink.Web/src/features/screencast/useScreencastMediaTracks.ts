@@ -71,10 +71,7 @@ export function useScreencastMediaTracks(options: ScreencastMediaTracksOptions) 
     const audioStream = options.getAudioStream();
     replaceSingleTrack(audioStream, event.track);
 
-    const audioElement = options.getAudioElement();
-    if (audioElement && audioElement.srcObject !== audioStream) {
-      audioElement.srcObject = audioStream;
-    }
+    // 每个投屏只有一个播放器 切换标签时继续使用同一个音频元素
     if (backgroundAudioElement.srcObject !== audioStream) {
       backgroundAudioElement.srcObject = audioStream;
     }

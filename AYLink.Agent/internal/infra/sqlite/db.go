@@ -146,6 +146,14 @@ func initialize(db *sql.DB) error {
 	if err := ensureColumn(db, "DeviceGroups", "IsInternal", `ALTER TABLE DeviceGroups ADD COLUMN IsInternal INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	for _, table := range []string{"AccessTokens", "RefreshTokens"} {
+		if err := ensureColumn(db, table, "SessionId", "ALTER TABLE "+table+" ADD COLUMN SessionId TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		if _, err := db.Exec("CREATE INDEX IF NOT EXISTS IX_" + table + "_SessionId ON " + table + "(SessionId)"); err != nil {
+			return err
+		}
+	}
 
 	return seedDefaults(db)
 }

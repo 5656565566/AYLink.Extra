@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	domainauth "aylink-agent/internal/domain/auth"
@@ -60,8 +61,10 @@ var AllPermissions = []string{
 }
 
 type Service struct {
-	repo   domainauth.Repository
-	logger logging.Logger
+	sessionMu         sync.Mutex
+	onSessionsChanged func(context.Context)
+	repo              domainauth.Repository
+	logger            logging.Logger
 }
 
 func NewService(repo domainauth.Repository, logger logging.Logger) *Service {
@@ -120,10 +123,12 @@ func (s *Service) Login(ctx context.Context, username, password string) (*domain
 	if user == nil || !user.IsActive || !verifyPassword(password, user.PasswordSalt, user.PasswordHash) {
 		return nil, ErrInvalidCredentials
 	}
-	return s.createLoginResult(ctx, *user)
+	return s.createLoginResult(ctx, *user, nil)
 }
 
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (*domainauth.LoginResult, error) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, ErrInvalidRefresh
 	}
@@ -135,10 +140,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*domainauth
 	if tokenRecord == nil || user == nil || tokenRecord.RevokedAt != nil || !tokenRecord.ExpiresAt.After(time.Now().UTC()) || !user.IsActive {
 		return nil, ErrInvalidRefresh
 	}
-	if err := s.repo.RevokeRefreshToken(ctx, tokenRecord.ID, time.Now().UTC()); err != nil {
-		return nil, err
-	}
-	return s.createLoginResult(ctx, *user)
+	return s.createLoginResult(ctx, *user, tokenRecord)
 }
 
 func (s *Service) CurrentUser(ctx context.Context, accessToken string) (*domainauth.User, error) {
@@ -168,6 +170,19 @@ func (s *Service) ValidateAccessToken(ctx context.Context, accessToken string) (
 	if user == nil || !expiresAt.After(time.Now().UTC()) || !user.IsActive {
 		return nil, ErrUnauthorized
 	}
+	loginSessionID, err := s.repo.GetAccessTokenSessionID(ctx, hashToken(accessToken))
+	if err != nil {
+		return nil, err
+	}
+	if loginSessionID != "" {
+		parent, _, err := s.repo.GetLoginSession(ctx, loginSessionID)
+		if err != nil {
+			return nil, err
+		}
+		if parent == nil || parent.ID != user.ID {
+			return nil, ErrUnauthorized
+		}
+	}
 
 	permissions, err := s.repo.GetPermissionsForUser(ctx, user.ID)
 	if err != nil {
@@ -183,6 +198,7 @@ func (s *Service) ValidateAccessToken(ctx context.Context, accessToken string) (
 		}
 	}
 	return &domainauth.Identity{
+		LoginSessionID:       loginSessionID,
 		UserID:               user.ID,
 		Username:             user.Username,
 		Permissions:          permissions,
@@ -193,6 +209,9 @@ func (s *Service) ValidateAccessToken(ctx context.Context, accessToken string) (
 }
 
 func (s *Service) Logout(ctx context.Context, accessToken, refreshToken string) error {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	if token := strings.TrimSpace(accessToken); token != "" {
 		if err := s.repo.DeleteAccessTokenByHash(ctx, hashToken(token)); err != nil {
 			return err
@@ -207,6 +226,9 @@ func (s *Service) Logout(ctx context.Context, accessToken, refreshToken string) 
 }
 
 func (s *Service) LogoutAll(ctx context.Context, userID int) error {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	if err := s.repo.RevokeAllRefreshTokensForUser(ctx, userID); err != nil {
 		return err
 	}
@@ -243,6 +265,9 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, rol
 }
 
 func (s *Service) UpdateUser(ctx context.Context, userID int, username string, isActive bool, roleIds []int, deviceGroupIDs []int, actingUserID *int) (*domainauth.User, error) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	if actingUserID != nil && *actingUserID == userID && !isActive {
 		return nil, ErrCurrentUserLocked
 	}
@@ -281,6 +306,9 @@ func (s *Service) UpdateUser(ctx context.Context, userID int, username string, i
 }
 
 func (s *Service) DeleteUser(ctx context.Context, userID int, actingUserID *int) error {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	if actingUserID != nil && *actingUserID == userID {
 		return ErrCurrentUserDelete
 	}
@@ -300,6 +328,9 @@ func (s *Service) DeleteUser(ctx context.Context, userID int, actingUserID *int)
 }
 
 func (s *Service) ResetPassword(ctx context.Context, userID int, newPassword string) (string, error) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	password := strings.TrimSpace(newPassword)
 	var err error
 	if password == "" {
@@ -321,6 +352,9 @@ func (s *Service) ResetPassword(ctx context.Context, userID int, newPassword str
 }
 
 func (s *Service) ChangeOwnPassword(ctx context.Context, userID int, currentPassword, newPassword string) error {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	user, err := s.repo.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
@@ -348,6 +382,9 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID int, currentPass
 }
 
 func (s *Service) SetUserActiveState(ctx context.Context, userID int, isActive bool, actingUserID *int) error {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	if actingUserID != nil && *actingUserID == userID && !isActive {
 		return ErrCurrentUserLocked
 	}
@@ -425,6 +462,9 @@ func (s *Service) CreateRole(ctx context.Context, name, description string, perm
 }
 
 func (s *Service) UpdateRole(ctx context.Context, roleID int, name, description string, permissions []string, deviceGroupIDs []int) (*domainauth.Role, error) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	defer s.notifySessionsChanged(ctx)
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
 		return nil, ErrRoleNameRequired
@@ -593,7 +633,7 @@ func (s *Service) GetAvailablePermissions() []domainauth.PermissionDescriptor {
 	return result
 }
 
-func (s *Service) createLoginResult(ctx context.Context, user domainauth.UserRecord) (*domainauth.LoginResult, error) {
+func (s *Service) createLoginResult(ctx context.Context, user domainauth.UserRecord, previous *domainauth.TokenRecord) (*domainauth.LoginResult, error) {
 	now := time.Now().UTC()
 	accessToken, err := generateToken(32)
 	if err != nil {
@@ -608,6 +648,16 @@ func (s *Service) createLoginResult(ctx context.Context, user domainauth.UserRec
 		AccessTokenExpiresAt:  now.Add(accessTokenTTL),
 		RefreshToken:          refreshToken,
 		RefreshTokenExpiresAt: now.Add(refreshTokenTTL),
+	}
+	if previous != nil {
+		pair.LoginSessionID = previous.LoginSessionID
+		pair.PreviousRefreshTokenID = previous.ID
+	}
+	if pair.LoginSessionID == "" {
+		pair.LoginSessionID, err = generateToken(16)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := s.repo.CreateSession(ctx, user, pair); err != nil {
 		return nil, err

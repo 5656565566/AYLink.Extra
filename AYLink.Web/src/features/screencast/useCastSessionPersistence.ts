@@ -1,5 +1,6 @@
-import { apiFetch } from '../../utils/api';
 import type { PersistedCastConnection } from '../../types/screencast';
+import { useAppSettings } from '../../services/appSettings';
+import { createCastPageHeartbeat } from './castPageHeartbeat';
 
 declare global {
   interface Window {
@@ -7,62 +8,56 @@ declare global {
   }
 }
 
-export function useCastSessionPersistence() {
-  const scrcpySessionHeartbeatTimers = new Map<string, number>();
+export function useCastSessionPersistence(onPageExpired: () => void = () => {}) {
+  const { activeCastSessionCount } = useAppSettings();
+  const audioElements = new Map<string, HTMLAudioElement>();
+  const lastViewed = new Map<string, number>();
+  let viewSequence = 0;
+  let viewingTabKey = '';
+  let audioMuted = false;
+  const pageHeartbeat = createCastPageHeartbeat(() => { disposeAllPersistedConnections(); onPageExpired(); });
 
-  const heartbeatKey = (targetDeviceId: string, sessionId: string) => `${targetDeviceId}::${sessionId}`;
-
-  const postScrcpySessionAction = async (action: 'heartbeat' | 'release', targetDeviceId: string, sessionId: string) => {
-    if (!targetDeviceId || !sessionId) {
-      return;
-    }
-
+  const releaseCastSession = async (deviceId: string, sessionId: string) => {
     try {
-      console.debug('[WebRTC] Session action ->', action, { deviceId: targetDeviceId, sessionId });
-      await apiFetch(`/api/scrcpy-sessions/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId: targetDeviceId, sessionId })
-      });
+      await pageHeartbeat.releaseSession(deviceId, sessionId);
     } catch (error) {
-      console.warn(`Failed to ${action} scrcpy session:`, error);
+      console.warn('Failed to release cast session:', error);
     }
   };
 
-  const stopScrcpySessionHeartbeat = (targetDeviceId?: string, sessionId?: string) => {
-    if (targetDeviceId && sessionId) {
-      const key = heartbeatKey(targetDeviceId, sessionId);
-      const timer = scrcpySessionHeartbeatTimers.get(key);
-      if (timer !== undefined) {
-        window.clearInterval(timer);
-        scrcpySessionHeartbeatTimers.delete(key);
-      }
-      return;
+  const getPersistentAudioElement = (tabKey: string) => {
+    let element = audioElements.get(tabKey);
+    if (!element) {
+      element = new Audio();
+      element.autoplay = true;
+      element.muted = audioMuted || tabKey !== viewingTabKey;
+      element.setAttribute('playsinline', '');
+      audioElements.set(tabKey, element);
     }
-
-    for (const timer of scrcpySessionHeartbeatTimers.values()) {
-      window.clearInterval(timer);
-    }
-    scrcpySessionHeartbeatTimers.clear();
+    return element;
   };
 
-  const startScrcpySessionHeartbeat = (targetDeviceId: string, sessionId: string) => {
-    if (!targetDeviceId || !sessionId) {
-      return;
-    }
+  const setAudioMuted = (muted: boolean) => {
+    audioMuted = muted;
+    for (const [tabKey, element] of audioElements) element.muted = muted || tabKey !== viewingTabKey;
+  };
 
-    stopScrcpySessionHeartbeat(targetDeviceId, sessionId);
-    const key = heartbeatKey(targetDeviceId, sessionId);
+  const setViewingTab = (tabKey: string) => {
+    viewingTabKey = tabKey;
+    setAudioMuted(audioMuted);
+    if (tabKey) lastViewed.set(tabKey, ++viewSequence);
+  };
 
-    const tick = () => {
-      void postScrcpySessionAction('heartbeat', targetDeviceId, sessionId);
-    };
-
-    tick();
-    scrcpySessionHeartbeatTimers.set(key, window.setInterval(tick, 15000));
+  const enforceActiveSessionLimit = () => {
+    const background = Object.keys(window.__aylinkPersistedCastConnections ?? {})
+      .filter((key) => key !== viewingTabKey)
+      .sort((a, b) => (lastViewed.get(b) ?? 0) - (lastViewed.get(a) ?? 0));
+    for (const key of background.slice(activeCastSessionCount.value)) disposePersistedConnection(key);
   };
 
   const clearPersistedConnection = (tabKey: string) => {
+    const audio = audioElements.get(tabKey) ?? window.__aylinkPersistedCastConnections?.[tabKey]?.audioElement;
+    if (audio) { audio.pause(); audio.srcObject = null; audioElements.delete(tabKey); }
     if (!tabKey || !window.__aylinkPersistedCastConnections) {
       return;
     }
@@ -86,6 +81,8 @@ export function useCastSessionPersistence() {
     if (!persisted) {
       return;
     }
+    clearPersistedConnection(tabKey);
+    persisted.stopBackgroundHandlers?.();
 
     try {
       persisted.dataChannel?.close();
@@ -109,6 +106,7 @@ export function useCastSessionPersistence() {
       persisted.peerConnection.ontrack = null;
       persisted.peerConnection.onicecandidate = null;
       persisted.peerConnection.onconnectionstatechange = null;
+      persisted.peerConnection.oniceconnectionstatechange = null;
       persisted.peerConnection.ondatachannel = null;
       persisted.peerConnection.close();
     } catch {
@@ -127,7 +125,10 @@ export function useCastSessionPersistence() {
       // 关闭缓存的 WebSocket 连接失败时 仍需移除本地连接记录
     }
 
-    clearPersistedConnection(tabKey);
+    for (const track of new Set([...persisted.remoteVideoStream.getTracks(), ...persisted.remoteAudioStream.getTracks()])) {
+      track.onended = null;
+      track.stop();
+    }
   };
 
   const disposeOtherPersistedConnections = (keepTabKey: string) => {
@@ -159,7 +160,6 @@ export function useCastSessionPersistence() {
   const persistCurrentConnection = (
     tabKey: string,
     connection: PersistedCastConnection | null,
-    options: { disposeOtherConnections?: boolean } = {}
   ) => {
     if (!connection || !tabKey) {
       return;
@@ -167,15 +167,22 @@ export function useCastSessionPersistence() {
 
     window.__aylinkPersistedCastConnections ??= {};
     window.__aylinkPersistedCastConnections[tabKey] = connection;
-    if (options.disposeOtherConnections !== false) {
-      disposeOtherPersistedConnections(tabKey);
-    }
+    enforceActiveSessionLimit();
   };
 
   return {
-    postScrcpySessionAction,
-    stopScrcpySessionHeartbeat,
-    startScrcpySessionHeartbeat,
+    releaseCastTab: (tabKey: string) => {
+      void pageHeartbeat.releaseTab(tabKey).catch((error: unknown) => console.warn('Cast tab release failed:', error));
+    },
+    requestWebTicket: pageHeartbeat.requestTicket,
+    releaseWebPage: pageHeartbeat.releasePage,
+    getPersistentAudioElement,
+    getPersistentAudioElements: () => [...audioElements.values()],
+    setAudioMuted,
+    setViewingTab,
+    enforceActiveSessionLimit,
+    releaseCastSession,
+    refreshCastPage: pageHeartbeat.start,
     persistCurrentConnection,
     clearPersistedConnection,
     getPersistedConnection,

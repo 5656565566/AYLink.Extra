@@ -12,7 +12,8 @@ import com.aylink.mobile.data.model.FileRenameRequest
 import com.aylink.mobile.data.model.LoginRequest
 import com.aylink.mobile.data.model.LoginResponse
 import com.aylink.mobile.data.model.RefreshTokenRequest
-import com.aylink.mobile.data.model.ScrcpySessionActionRequest
+import com.aylink.mobile.data.model.ScrcpySessionHeartbeatRequest
+import com.aylink.mobile.data.model.ScrcpySessionPageResponse
 import com.aylink.mobile.data.model.VideoStreamHealthSnapshot
 import com.aylink.mobile.data.model.WebRtcTicketRequest
 import com.aylink.mobile.data.model.WebRtcTicketResponse
@@ -311,6 +312,7 @@ class AgentApi(
         baseUrl: String,
         token: String,
         deviceId: Int,
+        pageId: String,
         sessionId: String? = null,
         appPackage: String? = null,
         appName: String? = null,
@@ -324,6 +326,7 @@ class AgentApi(
                 WebRtcTicketRequest.serializer(),
                 WebRtcTicketRequest(
                     deviceId = deviceId.toString(),
+                    pageId = pageId,
                     sessionId = sessionId.orEmpty(),
                     appPackage = appPackage.orEmpty(),
                     appName = appName.orEmpty(),
@@ -341,21 +344,29 @@ class AgentApi(
         return client.executeJson(request, json, WebRtcTicketResponse.serializer())
     }
 
-    suspend fun postScrcpySessionAction(
+    suspend fun registerScrcpySessionPage(
         baseUrl: String,
         token: String,
-        action: String,
-        deviceId: Int,
-        sessionId: String = "",
+    ): ScrcpySessionPageResponse {
+        val request = authorized("$baseUrl/api/scrcpy-sessions/page", token).post("".toRequestBody()).build()
+        return client.executeJson(request, json, ScrcpySessionPageResponse.serializer())
+    }
+
+    suspend fun heartbeatScrcpySessions(
+        baseUrl: String,
+        token: String,
+        pageId: String,
+        sequence: Long,
+        bitmap: String,
     ) {
         val body =
             jsonBody(
-                ScrcpySessionActionRequest.serializer(),
-                ScrcpySessionActionRequest(deviceId = deviceId.toString(), sessionId = sessionId),
+                ScrcpySessionHeartbeatRequest.serializer(),
+                ScrcpySessionHeartbeatRequest(pageId, sequence, bitmap),
             )
 
         val request =
-            authorized("$baseUrl/api/scrcpy-sessions/$action", token)
+            authorized("$baseUrl/api/scrcpy-sessions/heartbeat", token)
                 .post(body)
                 .build()
         client.executeEmpty(request, json)

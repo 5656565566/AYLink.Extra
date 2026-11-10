@@ -27,6 +27,20 @@
           </label>
         </SettingItem>
         <SettingItem
+          :title="t('Settings.ActiveCastSessionCount', '活跃会话数')"
+          :description="t('Settings.ActiveCastSessionCountDescription', '最多保留多少个非观看投屏的音视频连接，不含正在观看的会话；0 表示不保留，标签页的远端会话仍会保活')"
+        >
+          <input
+            type="number"
+            min="0"
+            step="1"
+            class="fluent-input cast-session-count-input"
+            :aria-label="t('Settings.ActiveCastSessionCount', '活跃会话数')"
+            :value="activeCastSessionCount"
+            @change="onActiveCastSessionCountChange"
+          />
+        </SettingItem>
+        <SettingItem
           :title="t('Settings.NewDisplayDpiMode', 'DPI 跟随')"
           :description="t('Settings.NewDisplayDpiModeDescription', '用于新建显示器和应用投屏时的默认像素密度')"
         >

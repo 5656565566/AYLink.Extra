@@ -159,6 +159,12 @@ func (f *fakeRepository) GetRefreshToken(context.Context, string) (*domainauth.T
 func (f *fakeRepository) GetAccessTokenIdentity(context.Context, string) (*domainauth.UserRecord, time.Time, error) {
 	return f.accessTokenUser, f.accessTokenExpiresAt, nil
 }
+func (f *fakeRepository) GetAccessTokenSessionID(context.Context, string) (string, error) {
+	return "", nil
+}
+func (f *fakeRepository) GetLoginSession(context.Context, string) (*domainauth.UserRecord, time.Time, error) {
+	return f.userRecord, time.Now().Add(time.Hour), nil
+}
 func (f *fakeRepository) GetRoleSummariesForUser(context.Context, int) ([]domainauth.RoleSummary, error) {
 	return f.roleSummaries, nil
 }
@@ -199,6 +205,7 @@ func (f *fakeRepository) CreateSession(_ context.Context, user domainauth.UserRe
 	f.createSessionCalled = true
 	f.lastSessionUser = user
 	f.lastSessionPair = pair
+	f.revokedTokenID = pair.PreviousRefreshTokenID
 	return nil
 }
 func (f *fakeRepository) RevokeRefreshToken(_ context.Context, tokenID int, _ time.Time) error {

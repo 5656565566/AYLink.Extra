@@ -140,7 +140,7 @@ describe('useScreencastMediaTracks', () => {
     expect(harness.onTrackChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('binds an audio track to the visible and persistent audio elements', async () => {
+  it('binds audio only to the persistent player to prevent duplicate playback', async () => {
     const harness = createHarness();
     const track = createTrack('audio');
 
@@ -148,7 +148,7 @@ describe('useScreencastMediaTracks', () => {
 
     expect(harness.remoteTracks.get('audio')).toBe(track);
     expect(harness.getAudioStream().getTracks()).toEqual([track]);
-    expect(harness.audioElement.srcObject).toBe(harness.getAudioStream());
+    expect(harness.audioElement.srcObject).toBeNull();
     expect(harness.backgroundAudioElement.srcObject).toBe(harness.getAudioStream());
     expect(harness.onAudioTrackBound).toHaveBeenCalledTimes(1);
     expect(harness.onTrackChanged).toHaveBeenCalledTimes(1);

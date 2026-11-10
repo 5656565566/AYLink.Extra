@@ -190,6 +190,13 @@ func (s *Service) getOrCreateSignalingSession(ctx context.Context, deviceID stri
 		_ = peerConnection.Close()
 		return current, nil
 	}
+
+	lease, valid := s.sessionLeases[sessionID]
+	if !valid || lease.DeviceID != deviceID || !lease.ExpiresAt.After(s.now()) {
+		s.mu.Unlock()
+		_ = peerConnection.Close()
+		return nil, ErrSessionNotFound
+	}
 	s.signaling[sessionID] = session
 	s.mu.Unlock()
 	return session, nil

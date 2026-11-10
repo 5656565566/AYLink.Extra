@@ -10,6 +10,7 @@ export const storageKeys = {
     permissions: 'aylink.auth.permissions',
   },
   app: {
+    activeCastSessionCount: 'aylink.settings.activeCastSessionCount',
     adaptivePointerSampling: 'aylink.settings.adaptivePointerSampling',
     backgroundEnabled: 'aylink.settings.backgroundEnabled',
     backgroundMute: 'aylink.settings.backgroundMute',

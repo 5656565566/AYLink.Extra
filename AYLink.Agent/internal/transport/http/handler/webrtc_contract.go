@@ -12,8 +12,9 @@ type CreateTicketResponse = webrtcservice.CreateTicketResult
 type VideoStreamHealthResponse = domainwebrtc.VideoStreamHealthSnapshot
 
 type SessionActionRequest struct {
-	DeviceID  string `json:"deviceId"`
-	SessionID string `json:"sessionId"`
+	PageID   string  `json:"p,omitempty"`
+	Sequence uint64  `json:"v,omitempty"`
+	Bitmap   *string `json:"b"`
 }
 
 type SessionActionResponse struct {

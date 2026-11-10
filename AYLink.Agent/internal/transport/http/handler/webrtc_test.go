@@ -9,22 +9,22 @@ import (
 	"testing"
 	"time"
 
+	domainauth "aylink-agent/internal/domain/auth"
 	domainscrcpy "aylink-agent/internal/domain/scrcpy"
 	domainwebrtc "aylink-agent/internal/domain/webrtc"
 	deviceservice "aylink-agent/internal/service/device"
 	scrcpyservice "aylink-agent/internal/service/scrcpy"
 	webrtcservice "aylink-agent/internal/service/webrtc"
+	"aylink-agent/internal/transport/http/middleware"
 
 	"github.com/gorilla/websocket"
 )
 
 type fakeWebRTCService struct {
+	WebRTCService
 	createTicketResult webrtcservice.CreateTicketResult
 	createTicketErr    error
 	createTicketInput  webrtcservice.CreateTicketInput
-	touchResult        bool
-	touchErr           error
-	releaseErr         error
 	activeLease        bool
 	healthSnapshot     domainwebrtc.VideoStreamHealthSnapshot
 	healthErr          error
@@ -35,16 +35,19 @@ func (f *fakeWebRTCService) CreateTicket(_ context.Context, input webrtcservice.
 	return f.createTicketResult, f.createTicketErr
 }
 
-func (f *fakeWebRTCService) TouchSession(context.Context, string, string) (bool, error) {
-	return f.touchResult, f.touchErr
+func (f *fakeWebRTCService) WebPageOwners() []webrtcservice.WebPageOwner { return nil }
+func (f *fakeWebRTCService) HeartbeatWebPage(webrtcservice.WebOwner, string, uint64, string) error {
+	return nil
 }
 
-func (f *fakeWebRTCService) ReleaseSession(context.Context, string, string) error {
-	return f.releaseErr
-}
+type validLoginSessionValidator struct{}
 
-func (f *fakeWebRTCService) HasActiveSessionLease(string) bool {
-	return f.activeLease
+func (validLoginSessionValidator) ValidateLoginSession(context.Context, string) (*domainauth.Identity, error) {
+	return &domainauth.Identity{UserID: 1, LoginSessionID: "login", Permissions: []string{"devices.control"}}, nil
+}
+func (v validLoginSessionValidator) WithLoginSession(ctx context.Context, _ int, id string, action func(*domainauth.Identity) error) error {
+	identity, _ := v.ValidateLoginSession(ctx, id)
+	return action(identity)
 }
 
 func (f *fakeWebRTCService) HasSessionLease(string, string) bool {
@@ -59,8 +62,6 @@ func (f *fakeWebRTCService) ConsumeTicket(context.Context, string) (domainwebrtc
 	panic("unexpected call")
 }
 
-func (f *fakeWebRTCService) MarkSessionStarted(string, string) {}
-
 func (f *fakeWebRTCService) ReplaceSignalingSession(string) {}
 
 func (f *fakeWebRTCService) HandleSignalWebSocket(context.Context, string, string, *websocket.Conn, webrtcservice.SettingsProvider, domainscrcpy.Runtime) error {
@@ -68,6 +69,17 @@ func (f *fakeWebRTCService) HandleSignalWebSocket(context.Context, string, strin
 }
 
 type fakeScrcpyRuntimeService struct{}
+
+func TestWebRTCHandlerRejectsLegacyRequests(t *testing.T) {
+	h := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, nil)
+	for _, handle := range []http.HandlerFunc{h.CreateTicket, h.Heartbeat} {
+		w := httptest.NewRecorder()
+		handle(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"deviceId":"1","sessionId":"old"}`)))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("legacy request accepted: status=%d", w.Code)
+		}
+	}
+}
 
 func (fakeScrcpyRuntimeService) ListEncoders(context.Context, int) ([]string, error) { return nil, nil }
 func (fakeScrcpyRuntimeService) ListApps(context.Context, int) ([]domainscrcpy.AppInfo, error) {
@@ -143,7 +155,7 @@ func (c *countingScrcpyRuntimeService) StartRuntimeForWebRTC(context.Context, in
 }
 
 func TestWebRTCHandlerCreateTicketRejectsInvalidJSON(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{`))
 	recorder := httptest.NewRecorder()
@@ -158,7 +170,7 @@ func TestWebRTCHandlerCreateTicketRejectsInvalidJSON(t *testing.T) {
 func TestWebRTCHandlerCreateTicketMapsMissingDeviceID(t *testing.T) {
 	handler := NewWebRTCHandler(&fakeWebRTCService{
 		createTicketErr: webrtcservice.ErrDeviceIDRequired,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":" "}`))
 	recorder := httptest.NewRecorder()
@@ -178,9 +190,10 @@ func TestWebRTCHandlerCreateTicketTrimsPayloadAndReturnsResult(t *testing.T) {
 			ExpiresInSeconds: 60,
 		},
 	}
-	handler := NewWebRTCHandler(service, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+	handler := NewWebRTCHandler(service, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, validLoginSessionValidator{})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":" 123 ","appPackage":" com.demo.app ","appName":" Demo ","newPeerConnection":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"pageId":"page","deviceId":" 123 ","appPackage":" com.demo.app ","appName":" Demo ","newPeerConnection":true}`))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.IdentityKey, &domainauth.Identity{UserID: 1, LoginSessionID: "login"}))
 	recorder := httptest.NewRecorder()
 
 	handler.CreateTicket(recorder, req)
@@ -196,93 +209,17 @@ func TestWebRTCHandlerCreateTicketTrimsPayloadAndReturnsResult(t *testing.T) {
 	}
 }
 
-func TestWebRTCHandlerHeartbeatMapsSessionIDRequired(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{
-		touchErr: webrtcservice.ErrSessionIDRequired,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/scrcpy-sessions/heartbeat", strings.NewReader(`{"deviceId":"1","sessionId":" "}`))
-	recorder := httptest.NewRecorder()
-
-	handler.Heartbeat(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", recorder.Code)
-	}
-}
-
-func TestWebRTCHandlerHeartbeatReturnsSuccessFlag(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{
-		touchResult: true,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/scrcpy-sessions/heartbeat", strings.NewReader(`{"deviceId":"1","sessionId":"abc"}`))
-	recorder := httptest.NewRecorder()
-
-	handler.Heartbeat(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", recorder.Code)
-	}
-	if !strings.Contains(recorder.Body.String(), `"success":true`) {
-		t.Fatalf("expected success payload, got %s", recorder.Body.String())
-	}
-}
-
-func TestWebRTCHandlerReleaseMapsDeviceIDRequired(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{
-		releaseErr: webrtcservice.ErrDeviceIDRequired,
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/scrcpy-sessions/release", strings.NewReader(`{"deviceId":" ","sessionId":"abc"}`))
-	recorder := httptest.NewRecorder()
-
-	handler.Release(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", recorder.Code)
-	}
-}
-
-func TestWebRTCHandlerReleaseReturnsSuccess(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
-	handler.runtimes["1"] = &managedRuntime{
-		deviceID:   "1",
-		refCount:   0,
-		runtime:    nil,
-		lastUsedAt: time.Now(),
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/scrcpy-sessions/release", strings.NewReader(`{"deviceId":"1","sessionId":"abc"}`))
-	recorder := httptest.NewRecorder()
-
-	handler.Release(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", recorder.Code)
-	}
-	if !strings.Contains(recorder.Body.String(), `"success":true`) {
-		t.Fatalf("expected success payload, got %s", recorder.Body.String())
-	}
-}
-
-func TestWebRTCHandlerCreateTicketMapsInternalError(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{
-		createTicketErr: errors.New("boom"),
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/webrtc-ticket", strings.NewReader(`{"deviceId":"1"}`))
-	recorder := httptest.NewRecorder()
-
-	handler.CreateTicket(recorder, req)
-
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", recorder.Code)
+func TestWebRTCHandlerHeartbeatRequiresExplicitBitmap(t *testing.T) {
+	h := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, nil)
+	w := httptest.NewRecorder()
+	h.Heartbeat(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"p":"page","v":1}`)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("missing bitmap accepted: %d", w.Code)
 	}
 }
 
 func TestWebRTCHandlerVideoHealthRequiresDeviceID(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/scrcpy-sessions/video-health?sessionId=abc", nil)
 	recorder := httptest.NewRecorder()
@@ -298,7 +235,7 @@ func TestWebRTCHandlerVideoHealthRequiresDeviceID(t *testing.T) {
 }
 
 func TestWebRTCHandlerVideoHealthMapsMissingSession(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: false}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: false}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/scrcpy-sessions/video-health?deviceId=1&sessionId=missing", nil)
 	recorder := httptest.NewRecorder()
@@ -322,7 +259,7 @@ func TestWebRTCHandlerVideoHealthReturnsSnapshot(t *testing.T) {
 			Reason: "ready",
 			Sender: domainwebrtc.VideoSenderDiagnostics{State: "ready", PeerConnected: true},
 		},
-	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil)
+	}, &fakeSettingsService{}, fakeScrcpyRuntimeService{}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/scrcpy-sessions/video-health?deviceId=1&sessionId=abc", nil)
 	recorder := httptest.NewRecorder()
@@ -351,7 +288,7 @@ func TestWebRTCHandlerAcquireRuntimeDoesNotReuseIdleRuntimeForNewSession(t *test
 	oldRuntime := &fakeHandlerScrcpyRuntime{}
 	newRuntime := &fakeHandlerScrcpyRuntime{}
 	scrcpyService := &countingScrcpyRuntimeService{runtime: newRuntime}
-	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, scrcpyService, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, scrcpyService, nil, nil)
 	handler.runtimes["1"] = &managedRuntime{
 		deviceID:    "1",
 		signature:   buildRuntimeSignature("1", options),
@@ -380,12 +317,12 @@ func TestWebRTCHandlerAcquireRuntimeDoesNotReuseIdleRuntimeForNewSession(t *test
 	}
 }
 
-func TestWebRTCHandlerAcquireRuntimeDoesNotReuseIdleRuntimeOwnedByAnotherActiveSession(t *testing.T) {
+func TestWebRTCHandlerAcquireRuntimePreservesIdleRuntimeOwnedByAnotherActiveSession(t *testing.T) {
 	options := scrcpyservice.WebRTCRuntimeOptions{NewDisplay: true}
 	oldRuntime := &fakeHandlerScrcpyRuntime{}
 	newRuntime := &fakeHandlerScrcpyRuntime{}
 	scrcpyService := &countingScrcpyRuntimeService{runtime: newRuntime}
-	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil, nil)
 	handler.runtimes["1"] = &managedRuntime{
 		deviceID:    "1",
 		signature:   buildRuntimeSignature("1", options),
@@ -397,14 +334,8 @@ func TestWebRTCHandlerAcquireRuntimeDoesNotReuseIdleRuntimeOwnedByAnotherActiveS
 	}
 
 	runtime, created, err := handler.acquireRuntime(context.Background(), "1", "new-session", 1, options)
-	if err != nil {
-		t.Fatalf("acquire runtime: %v", err)
-	}
-	if !created || runtime != newRuntime {
-		t.Fatalf("expected a new session to replace a cached runtime owned by another lease")
-	}
-	if !oldRuntime.closed {
-		t.Fatalf("expected the previous session runtime to be closed")
+	if err == nil || created || runtime != nil || oldRuntime.closed || scrcpyService.startCount != 0 {
+		t.Fatalf("another tab must not destroy a leased application projection: err=%v", err)
 	}
 }
 
@@ -412,7 +343,7 @@ func TestWebRTCHandlerAcquireRuntimeReusesIdleRuntimeForSameLeasedSession(t *tes
 	options := scrcpyservice.WebRTCRuntimeOptions{}
 	oldRuntime := &fakeHandlerScrcpyRuntime{}
 	scrcpyService := &countingScrcpyRuntimeService{runtime: &fakeHandlerScrcpyRuntime{}}
-	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil, nil)
 	handler.runtimes["1"] = &managedRuntime{
 		deviceID:    "1",
 		signature:   buildRuntimeSignature("1", options),
@@ -445,7 +376,7 @@ func TestWebRTCHandlerAcquireRuntimeAllowsSameVirtualDisplaySessionToOverlap(t *
 	options := scrcpyservice.WebRTCRuntimeOptions{NewDisplay: true}
 	oldRuntime := &fakeHandlerScrcpyRuntime{}
 	scrcpyService := &countingScrcpyRuntimeService{runtime: &fakeHandlerScrcpyRuntime{}}
-	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil, nil)
 	handler.runtimes["1"] = &managedRuntime{
 		deviceID:    "1",
 		signature:   buildRuntimeSignature("1", options),
@@ -473,7 +404,7 @@ func TestWebRTCHandlerAcquireRuntimeReplacesClosedCachedRuntime(t *testing.T) {
 	closedRuntime := &fakeHandlerScrcpyRuntime{closed: true}
 	newRuntime := &fakeHandlerScrcpyRuntime{}
 	scrcpyService := &countingScrcpyRuntimeService{runtime: newRuntime}
-	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{activeLease: true}, &fakeSettingsService{}, scrcpyService, nil, nil)
 	handler.runtimes["1"] = &managedRuntime{
 		deviceID:    "1",
 		signature:   buildRuntimeSignature("1", options),
@@ -503,7 +434,7 @@ func TestWebRTCHandlerAcquireRuntimeReplacesClosedCachedRuntime(t *testing.T) {
 }
 
 func TestWebRTCHandlerAcquireRuntimeStopsWaitingWhenContextCancels(t *testing.T) {
-	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, &countingScrcpyRuntimeService{}, nil)
+	handler := NewWebRTCHandler(&fakeWebRTCService{}, &fakeSettingsService{}, &countingScrcpyRuntimeService{}, nil, nil)
 	handler.runtimes["1"] = &managedRuntime{
 		deviceID: "1",
 		starting: true,

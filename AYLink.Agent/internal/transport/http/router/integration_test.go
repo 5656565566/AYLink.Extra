@@ -762,6 +762,14 @@ func TestHTTPUnknownAPIRouteReturnsJSON(t *testing.T) {
 	}
 }
 
+func TestHTTPRemovedSessionReleaseRoute(t *testing.T) {
+	env := newIntegrationEnv(t)
+	status, body := env.doJSON(t, http.MethodPost, "/api/scrcpy-sessions/release", "", map[string]string{"deviceId": "1", "sessionId": "old"})
+	if status != http.StatusNotFound {
+		t.Fatalf("removed release route returned %d: %s", status, body)
+	}
+}
+
 func TestHTTPDeviceSettingsRoundTrip(t *testing.T) {
 	env := newIntegrationEnv(t)
 	env.createUserWithPermissionsAndGroups(t, "devices-settings-manager", "secret", []string{"devices.control", "devices.manage"}, []int{env.internalAllDevicesGroupID(t)})

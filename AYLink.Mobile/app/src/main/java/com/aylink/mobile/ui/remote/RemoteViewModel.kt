@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aylink.mobile.data.api.ApiException
 import com.aylink.mobile.data.model.Device
 import com.aylink.mobile.data.model.DeviceApp
 import com.aylink.mobile.data.model.PointerControlMessage
@@ -16,6 +17,7 @@ import com.aylink.mobile.data.repo.SessionStore
 import com.aylink.mobile.logging.AppLogger
 import com.aylink.mobile.webrtc.SignalClient
 import com.aylink.mobile.webrtc.WebRtcManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +35,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
@@ -205,6 +209,16 @@ class RemoteViewModel(
     private val localSettings = localSettingsStore.settings
     private var connectJob: Job? = null
     private var heartbeatJob: Job? = null
+    private val castSessionMutex = Mutex()
+    private val castAccountGeneration = sessionStore.transportGeneration.value
+    private val castBaseUrl = sessionStore.baseUrl.value
+    private var castPageId: String? = null
+    private var castPageToken: String? = null
+    private var castHeartbeatSequence = 0L
+    private var castSlotCount = 0
+    private val castSessionSlots = linkedMapOf<String, Int>()
+    private var castPageClosed = false
+    private var castSessionToRelease: String? = null
     private var reconnectJob: Job? = null
     private var pointerSamplingJob: Job? = null
     private var pointerReleaseRetryJob: Job? = null
@@ -239,7 +253,6 @@ class RemoteViewModel(
     private var suppressReconnect = false
     private var currentSessionId: String? = null
     private var autoReconnectEnabled = true
-    private var hasReleasedSession = false
     private var activeWebRtcGeneration = 0
     private var connectionRequestSequence = 0
     private var activeConnectionRequestId = 0
@@ -272,7 +285,6 @@ class RemoteViewModel(
                                 startVideoRecoveryWatchdog("signal_failed_after_connect")
                             } else {
                                 mutableUiState.update { it.copy(status = event.message) }
-                                stopHeartbeat()
                                 if (event.retryable) {
                                     scheduleReconnect()
                                 } else {
@@ -294,11 +306,9 @@ class RemoteViewModel(
                                 }
                                 startVideoRecoveryWatchdog("signal_closed_after_connect")
                             } else if (autoReconnectEnabled) {
-                                stopHeartbeat()
                                 mutableUiState.update { it.copy(status = "信令断开", videoSize = IntSize.Zero) }
                                 scheduleReconnect()
                             } else {
-                                stopHeartbeat()
                                 mutableUiState.update { it.copy(videoSize = IntSize.Zero) }
                             }
                         }
@@ -444,8 +454,7 @@ class RemoteViewModel(
         preferredDisplayAspectSize = IntSize.Zero
         manualDisconnect = false
         autoReconnectEnabled = true
-        releaseRemoteSessionAsync()
-        hasReleasedSession = false
+        releaseRemoteSession()
         reconnectAttempt = 0
         stopReconnect()
         stopPeerDisconnectedRecovery()
@@ -497,7 +506,6 @@ class RemoteViewModel(
         appName: String?,
         newDisplay: Boolean,
     ) {
-        stopHeartbeat()
         resetPointerControlState()
         webRtcManager.disconnect()
         activeWebRtcGeneration = 0
@@ -526,8 +534,8 @@ class RemoteViewModel(
                     "Reusable WebRTC session rejected, sessionId=$reusableSessionId, deviceId=${device.id}: ${error.message}",
                     error,
                 )
+                releaseTicketSession(reusableSessionId)
                 currentSessionId = null
-                hasReleasedSession = false
                 createWebRtcTicketForConnection(
                     sessionId = null,
                     appPackage = appPackage,
@@ -559,16 +567,72 @@ class RemoteViewModel(
         appName: String?,
         newDisplay: Boolean,
         initialDisplaySize: IntSize,
-    ) = deviceRepository.createWebRtcTicket(
-        deviceId = device.id,
-        sessionId = sessionId,
-        appPackage = appPackage,
-        appName = appName,
-        newDisplay = newDisplay,
-        newDisplayWidth = if (newDisplay) initialDisplaySize.width.takeIf { it > 0 } else null,
-        newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
-        newDisplayDpi = if (newDisplay) localDisplayDpi else null,
-    )
+    ) = castSessionMutex.withLock {
+        ensureCastSessionOwner()
+        castSessionToRelease?.let { previous ->
+            castSessionSlots.remove(previous)
+            sendCastHeartbeat()
+            if (castSessionToRelease == previous) castSessionToRelease = null
+        }
+        if (castPageId == null) castPageToken = sessionStore.token.value
+        val pageId =
+            castPageId ?: deviceRepository
+                .registerScrcpySessionPage()
+                .also {
+                    castPageId = it
+                    if (castAccountGeneration == sessionStore.transportGeneration.value) castPageToken = sessionStore.token.value
+                    castHeartbeatSequence = 0
+                    castSlotCount = 0
+                    castSessionSlots.clear()
+                    startHeartbeat()
+                }
+        ensureCastSessionOwner()
+        try {
+            deviceRepository
+                .createWebRtcTicket(
+                    deviceId = device.id,
+                    pageId = pageId,
+                    sessionId = sessionId,
+                    appPackage = appPackage,
+                    appName = appName,
+                    newDisplay = newDisplay,
+                    newDisplayWidth = if (newDisplay) initialDisplaySize.width.takeIf { it > 0 } else null,
+                    newDisplayHeight = if (newDisplay) initialDisplaySize.height.takeIf { it > 0 } else null,
+                    newDisplayDpi = if (newDisplay) localDisplayDpi else null,
+                ).also { ticket ->
+                    require(ticket.slot in 0 until 4096) { "Invalid cast slot" }
+                    castSlotCount = maxOf(castSlotCount, ticket.slot + 1)
+                    castSessionSlots[ticket.sessionId] = ticket.slot
+                }
+        } catch (error: ApiException) {
+            if (error.statusCode == 404) clearCastPage()
+            throw error
+        }
+    }
+
+    private fun ensureCastSessionOwner() {
+        if (castPageClosed || manualDisconnect || castAccountGeneration != sessionStore.transportGeneration.value) {
+            throw CancellationException("Projection owner changed")
+        }
+    }
+
+    private fun clearCastPage() {
+        castPageId = null
+        castPageToken = null
+        castSessionSlots.clear()
+        castSlotCount = 0
+    }
+
+    private suspend fun sendCastHeartbeat(bitmap: String = encodeCastSessionBitmap(castSlotCount, castSessionSlots.values)) {
+        val pageId = castPageId ?: return
+        try {
+            deviceRepository.heartbeatScrcpySessions(pageId, ++castHeartbeatSequence, bitmap)
+            if (castAccountGeneration == sessionStore.transportGeneration.value) castPageToken = sessionStore.token.value
+        } catch (error: ApiException) {
+            if (error.statusCode == 404) clearCastPage()
+            throw error
+        }
+    }
 
     private fun scheduleReconnect() {
         if (manualDisconnect || suppressReconnect || !autoReconnectEnabled || reconnectJob?.isActive == true) return
@@ -749,17 +813,24 @@ class RemoteViewModel(
     }
 
     private fun startHeartbeat() {
-        heartbeatJob?.cancel()
+        if (heartbeatJob?.isActive == true) return
         heartbeatJob =
             viewModelScope.launch {
                 while (isActive) {
-                    val sessionId = currentSessionId
-                    if (!sessionId.isNullOrBlank()) {
-                        runCatching { deviceRepository.heartbeatScrcpySession(device.id, sessionId) }
-                            .onFailure { error ->
-                                Log.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
-                                appLogger?.w(LOG_TAG, "Scrcpy session heartbeat failed, sessionId=$sessionId", error)
-                            }
+                    try {
+                        castSessionMutex.withLock {
+                            ensureCastSessionOwner()
+                            sendCastHeartbeat()
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        Log.w(LOG_TAG, "Scrcpy page heartbeat failed", error)
+                        appLogger?.w(LOG_TAG, "Scrcpy page heartbeat failed", error)
+                        if (error is ApiException && error.statusCode == 404) {
+                            currentSessionId = null
+                            scheduleReconnect()
+                        }
                     }
                     delay(15_000)
                 }
@@ -1132,7 +1203,7 @@ class RemoteViewModel(
         viewModelScope.launch {
             manualDisconnect = true
             releaseRuntimeResources()
-            releaseRemoteSessionAsync()
+            releaseCastPageAsync()
             webRtcManager.disconnect()
             signalClient.disconnect()
             sessionStore.clearLastRemoteDevice()
@@ -1143,7 +1214,7 @@ class RemoteViewModel(
     override fun onCleared() {
         manualDisconnect = true
         releaseRuntimeResources()
-        releaseRemoteSessionAsync()
+        releaseCastPageAsync()
         webRtcManager.release()
         signalClient.disconnect()
         super.onCleared()
@@ -1164,24 +1235,52 @@ class RemoteViewModel(
         resetPointerControlState()
     }
 
-    private fun releaseRemoteSessionAsync() {
+    private fun releaseRemoteSession() {
         val sessionId = currentSessionId?.takeIf { it.isNotBlank() } ?: return
-        if (hasReleasedSession) {
-            currentSessionId = null
-            return
-        }
-        hasReleasedSession = true
         currentSessionId = null
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            releaseTicketSession(sessionId)
-        }
+        castSessionToRelease = sessionId
     }
 
     private fun isActiveConnectionRequest(requestId: Int): Boolean = requestId == activeConnectionRequestId && !manualDisconnect
 
     private suspend fun releaseTicketSession(sessionId: String?) {
-        val releasedSessionId = sessionId?.takeIf { it.isNotBlank() } ?: return
-        runCatching { deviceRepository.releaseScrcpySession(device.id, releasedSessionId) }
+        if (sessionId.isNullOrBlank()) return
+        try {
+            castSessionMutex.withLock {
+                if (castSessionSlots.remove(sessionId) == null) return@withLock
+                ensureCastSessionOwner()
+                sendCastHeartbeat()
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            appLogger?.w(LOG_TAG, "Failed to release cast session", error)
+        }
+    }
+
+    private fun releaseCastPageAsync() {
+        currentSessionId = null
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            castSessionMutex.withLock {
+                castPageClosed = true
+                try {
+                    if (castAccountGeneration == sessionStore.transportGeneration.value) {
+                        sendCastHeartbeat("")
+                    } else {
+                        // 注销会先清空凭据，清理原页面时不能使用新账号的登录会话。
+                        val pageId = castPageId
+                        val ownerToken = castPageToken
+                        if (pageId != null && ownerToken != null) {
+                            deviceRepository.releaseScrcpySessionPage(castBaseUrl, ownerToken, pageId, ++castHeartbeatSequence)
+                        }
+                    }
+                } catch (error: Exception) {
+                    appLogger?.w(LOG_TAG, "Failed to release cast page", error)
+                } finally {
+                    clearCastPage()
+                }
+            }
+        }
     }
 
     private fun requestAdaptiveDisplayResize() {

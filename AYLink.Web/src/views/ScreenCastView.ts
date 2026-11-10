@@ -147,7 +147,6 @@ import { isAbortError } from '../lib/async/abort';
 declare global {
   interface Window {
     __aylinkPersistedCastFrameImages?: Record<string, string>;
-    __aylinkPersistentAudioElement?: HTMLAudioElement;
   }
 }
 
@@ -270,6 +269,7 @@ export default defineComponent({
     const notifications = useNotification();
 
     const {
+      activeCastSessionCount,
       adaptivePointerSampling,
       backgroundMute,
       newDisplayDpiMode,
@@ -798,16 +798,23 @@ export default defineComponent({
     };
 
     const {
-      postScrcpySessionAction,
-      stopScrcpySessionHeartbeat,
-      startScrcpySessionHeartbeat,
+      requestWebTicket,
+      releaseCastTab,
+      releaseWebPage,
+      getPersistentAudioElement: getCastAudioElement,
+      getPersistentAudioElements,
+      setAudioMuted: setCastAudioMuted,
+      setViewingTab,
+      enforceActiveSessionLimit,
+      releaseCastSession,
+      refreshCastPage,
       persistCurrentConnection: persistCastConnectionSnapshot,
       clearPersistedConnection: clearPersistedCastConnection,
       getPersistedConnection: getPersistedCastConnection,
       disposePersistedConnection: disposePersistedCastConnection,
       disposeOtherPersistedConnections,
       disposeAllPersistedConnections
-    } = useCastSessionPersistence();
+    } = useCastSessionPersistence(() => { disableAutoReconnect(); stopConnection(); });
 
     const clearPersistedConnection = (tabKey = activeTabKey.value) => {
       clearPersistedCastConnection(tabKey);
@@ -823,9 +830,10 @@ export default defineComponent({
 
     const getSessionReleaseTarget = (tabKey = activeTabKey.value) => {
       const persisted = getPersistedConnection(tabKey);
+      const tab = castTabs.value.find((item) => item.key === tabKey);
       return {
-        deviceId: deviceId.value || persisted?.deviceId || '',
-        sessionId: currentScrcpySessionId || persisted?.sessionId || ''
+        deviceId: tab?.deviceId || persisted?.deviceId || deviceId.value,
+        sessionId: (tabKey === activeTabKey.value ? currentScrcpySessionId : '') || tab?.sessionId || persisted?.sessionId || ''
       };
     };
 
@@ -865,16 +873,8 @@ export default defineComponent({
       connected: isConnected.value
     }));
 
-    const getPersistentAudioElement = () => {
-      if (!window.__aylinkPersistentAudioElement) {
-        const element = new Audio();
-        element.autoplay = true;
-        element.muted = false;
-        element.setAttribute('playsinline', '');
-        window.__aylinkPersistentAudioElement = element;
-      }
-
-      return window.__aylinkPersistentAudioElement;
+    const getPersistentAudioElement = (tabKey = activeTabKey.value) => {
+      return getCastAudioElement(tabKey);
     };
 
     const getDefaultRtcConfiguration = (): RTCConfiguration => ({
@@ -923,10 +923,7 @@ export default defineComponent({
         audioElement.value.muted = muted;
       }
 
-      const persistentAudioElement = getPersistentAudioElement();
-      if (persistentAudioElement.muted !== muted) {
-        persistentAudioElement.muted = muted;
-      }
+      setCastAudioMuted(muted);
     };
 
     const syncBackgroundMuteState = () => {
@@ -1147,10 +1144,7 @@ export default defineComponent({
         throw new Error('invalid device id for screencast connection');
       }
 
-      const ticketResponse = await apiFetch('/api/webrtc-ticket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSignalTicketRequestBody({
+      const ticketResponse = await requestWebTicket({ ...buildSignalTicketRequestBody({
           deviceId: normalizedDeviceId,
           sessionId: existingSessionId,
           newPeerConnection: requestOptions.newPeerConnection,
@@ -1160,8 +1154,7 @@ export default defineComponent({
           newDisplayWidth: initialNewDisplaySize?.width,
           newDisplayHeight: initialNewDisplaySize?.height,
           newDisplayDpi: resolvedNewDisplayDpi.value ?? undefined
-        }))
-      });
+        }) }, activeTabKey.value);
 
       return {
         normalizedDeviceId,
@@ -1171,7 +1164,7 @@ export default defineComponent({
 
     const persistCurrentConnection = (
       tabKey = activeTabKey.value,
-      options: { disposeOtherConnections?: boolean; wireBackgroundHandlers?: boolean } = {}
+      options: { wireBackgroundHandlers?: boolean } = {}
     ) => {
       screencastSession.lifecycle.persist(tabKey, options);
     };
@@ -1205,6 +1198,14 @@ export default defineComponent({
     };
 
     const syncRefsFromActiveTab = () => {
+      const previous = castTabs.value.find((item) => currentScrcpySessionId
+        ? item.sessionId === currentScrcpySessionId
+        : item.deviceId === deviceId.value && item.appPackageName === appPackageName.value && item.newDisplay === isNewDisplayMode.value);
+      setViewingTab(activeTabKey.value);
+      if (previous && previous.key !== activeTabKey.value && (peerConnection || ws || connectionSchedulerState.isStartConnectionInFlight)) {
+        disableAutoReconnect();
+        screencastSession.lifecycle.stop(true, previous.key);
+      }
       const tab = activeTab.value;
       deviceId.value = tab?.deviceId ?? '';
       appPackageName.value = tab?.appPackageName ?? '';
@@ -1232,7 +1233,8 @@ export default defineComponent({
 
     const handleTabOpened = async () => {
       await refreshDeviceContext();
-      scheduleStartConnection();
+      if (!screencastSession.lifecycle.restore()) scheduleStartConnection();
+      enforceActiveSessionLimit();
     };
 
     const setupControlChannel = (channel: RTCDataChannel) => {
@@ -1547,7 +1549,7 @@ export default defineComponent({
             return;
           }
           status.value = t('Screencast.StatusConnected', '已连接');
-          startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
+          refreshCastPage();
           persistCurrentConnection();
           console.info('[WebRTC] Signaling websocket reattached to the active peer connection.', {
             deviceId: deviceId.value,
@@ -2055,7 +2057,7 @@ export default defineComponent({
     };
 
     const resumeMediaPlayback = async () => {
-      const playTargets = [videoElement.value, audioElement.value, getPersistentAudioElement()].filter(
+      const playTargets = [videoElement.value, ...getPersistentAudioElements()].filter(
         (element): element is HTMLMediaElement => element != null
       );
       if (playTargets.length === 0) return;
@@ -2171,7 +2173,7 @@ export default defineComponent({
           clearPendingIceRestartFallback();
           isIceRestartInFlight = false;
           connectionSchedulerState.reconnectAttempt = 0;
-          startScrcpySessionHeartbeat(deviceId.value, currentScrcpySessionId);
+          refreshCastPage();
           startVideoFrameMonitor(connectionId);
           scheduleDisplayResize(150);
           scheduleSignalingDetach(connectionId);
@@ -2311,9 +2313,8 @@ export default defineComponent({
     const stopConnection = (
       preserveForBackground = false,
       preserveTabKey = activeTabKey.value,
-      options: { disposeOtherPersistedConnections?: boolean } = {}
     ) => {
-      screencastSession.lifecycle.stop(preserveForBackground, preserveTabKey, options);
+      screencastSession.lifecycle.stop(preserveForBackground, preserveTabKey);
     };
 
     const screencastSession = useScreencastSession({
@@ -2403,11 +2404,10 @@ export default defineComponent({
       getSessionReleaseTarget,
       getRestorableSessionId,
       setRestorableSessionId,
-      postScrcpySessionAction: (action, targetDeviceId, sessionId) => {
-        void postScrcpySessionAction(action, targetDeviceId, sessionId);
+      releaseCastSession: (targetDeviceId, sessionId) => {
+        void releaseCastSession(targetDeviceId, sessionId);
       },
-      stopScrcpySessionHeartbeat,
-      startScrcpySessionHeartbeat,
+      refreshCastPage,
       disposeAllPersistedConnections,
       getPersistedConnection,
       disposePersistedConnection,
@@ -2467,13 +2467,15 @@ export default defineComponent({
       }
 
       const previousTabKey = activeTabKey.value;
+      setViewingTab(tab.key);
       if (previousTabKey && previousTabKey !== tab.key) {
         captureCurrentVideoFrame(previousTabKey);
         disableAutoReconnect();
-        screencastSession.lifecycle.stop(true, previousTabKey, { disposeOtherPersistedConnections: false });
+        screencastSession.lifecycle.stop(true, previousTabKey);
       }
 
       activeTabKey.value = tab.key;
+      enforceActiveSessionLimit();
       enableAutoReconnect();
       syncRefsFromActiveTab();
       showLastFrameOverlayForTab(tab.key);
@@ -2496,27 +2498,21 @@ export default defineComponent({
         return;
       }
 
-      const closingTab = castTabs.value[closingIndex];
-      const closingPersistedConnection = getPersistedConnection(tabKey);
-      const closingSessionId = closingActive
-        ? currentScrcpySessionId
-        : (closingPersistedConnection?.sessionId ?? '');
+      releaseCastTab(tabKey);
       castTabs.value.splice(closingIndex, 1);
 
       if (!closingActive) {
         disposePersistedConnection(tabKey);
-        void postScrcpySessionAction('release', closingTab?.deviceId ?? '', closingSessionId);
         persistTabs();
         return;
       }
 
       disableAutoReconnect();
-      const activeSessionId = currentScrcpySessionId;
       screencastSession.lifecycle.stop();
       clearPersistedConnection(tabKey);
-      void postScrcpySessionAction('release', deviceId.value, activeSessionId);
 
       const nextTab = castTabs.value[closingIndex] ?? castTabs.value[closingIndex - 1] ?? null;
+      setViewingTab(nextTab?.key ?? '');
       activeTabKey.value = nextTab?.key ?? '';
       enableAutoReconnect();
       syncRefsFromActiveTab();
@@ -2525,7 +2521,7 @@ export default defineComponent({
       await loadActiveInputMappingProfile();
       if (nextTab) {
         await refreshDeviceContext();
-        scheduleStartConnection();
+        if (!screencastSession.lifecycle.restore(nextTab.key)) scheduleStartConnection();
       }
     };
 
@@ -3674,11 +3670,17 @@ export default defineComponent({
 
     const handlePageHide = () => {
       isPageUnloading = true;
+      disableAutoReconnect();
+      stopConnection();
       syncBackgroundMuteState();
     };
 
     const handlePageShow = () => {
       isPageUnloading = false;
+      if (isScreencastRouteActive.value && activeTab.value) {
+        enableAutoReconnect();
+        scheduleStartConnection();
+      }
       syncBackgroundMuteState();
     };
 
@@ -3878,11 +3880,9 @@ export default defineComponent({
       window.addEventListener('mousemove', handleWindowMouseMove);
       window.addEventListener('mouseup', handleWindowMouseUp);
       window.addEventListener('blur', handleWindowBlur);
-      window.addEventListener('focus', handleWindowFocus);
       window.addEventListener('keydown', handleWindowKeyDown);
       window.addEventListener('keyup', handleWindowKeyUp);
       window.addEventListener('wheel', handleMouseWheel, { passive: false });
-      document.addEventListener('visibilitychange', handleVisibilityChange);
       window.addEventListener('pagehide', handlePageHide);
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('pointerlockchange', handlePointerLockChange);
@@ -3906,11 +3906,9 @@ export default defineComponent({
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
       window.removeEventListener('blur', handleWindowBlur);
-      window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('keydown', handleWindowKeyDown);
       window.removeEventListener('keyup', handleWindowKeyUp);
       window.removeEventListener('wheel', handleMouseWheel);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('pageshow', handlePageShow);
       document.removeEventListener('pointerlockchange', handlePointerLockChange);
@@ -4000,6 +3998,7 @@ export default defineComponent({
     watch(backgroundMute, () => {
       syncBackgroundMuteState();
     });
+    watch(activeCastSessionCount, enforceActiveSessionLimit);
 
     watch(debugMode, (enabled) => {
       if (!enabled) {
@@ -4008,7 +4007,7 @@ export default defineComponent({
     });
 
     const cleanupCastViewResources = (preserveForBackground: boolean) => {
-      const preserveBackendSession = preserveForBackground || isPageUnloading;
+      const preserveBackendSession = preserveForBackground && !isPageUnloading;
       rtcConfigRequest.dispose();
       remoteClipboard.dispose();
       cancelDeviceContextRequests();
@@ -4027,21 +4026,25 @@ export default defineComponent({
       cancelMenuDrag();
 
       if (!preserveBackendSession) {
-        const releaseTarget = getSessionReleaseTarget();
-        stopScrcpySessionHeartbeat(releaseTarget.deviceId, releaseTarget.sessionId);
-        void postScrcpySessionAction('release', releaseTarget.deviceId, releaseTarget.sessionId);
+        releaseWebPage(isPageUnloading);
         disposeAllPersistedConnections();
       }
 
+      setViewingTab('');
       screencastSession.lifecycle.stop(preserveBackendSession);
+      enforceActiveSessionLimit();
       if (preserveBackendSession) {
         showLastFrameOverlayForTab();
       }
     };
 
     onMounted(async () => {
+      window.addEventListener('blur', syncBackgroundMuteState);
+      window.addEventListener('focus', handleWindowFocus);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
       enableAutoReconnect();
       loadPersistedTabs(syncRefsFromActiveTab, t('Screencast.DefaultTabTitle', '设备投屏'));
+      setViewingTab(activeTabKey.value);
       await loadActiveInputMappingProfile();
       initializeFloatingMenuPlacement();
       attachPageEventListeners();
@@ -4076,6 +4079,7 @@ export default defineComponent({
     });
 
     onActivated(async () => {
+      setViewingTab(activeTabKey.value);
       if (!hasHandledInitialActivation) {
         hasHandledInitialActivation = true;
         return;
@@ -4108,6 +4112,9 @@ export default defineComponent({
     });
 
     onUnmounted(() => {
+      window.removeEventListener('blur', syncBackgroundMuteState);
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       cleanupCastViewResources(false);
     });
 
@@ -4312,8 +4319,7 @@ export default defineComponent({
       shouldMonitorVideoStream,
       handleVideoStreamWatchdog,
       startVideoFrameMonitor,
-      stopScrcpySessionHeartbeat,
-      startScrcpySessionHeartbeat,
+      refreshCastPage,
       stopPointerMoveFlushLoop,
       getHighFrequencyControlChannel,
       stopPointerControlFlushLoop,
@@ -4324,7 +4330,7 @@ export default defineComponent({
       enqueuePointerPayloadBuffers,
       flushPersistTabs,
       schedulePersistTabs,
-      postScrcpySessionAction,
+      releaseCastSession,
       normalizeNewDisplayDpiValue,
       detectAutomaticNewDisplayDpi,
       roundDisplayDimension,

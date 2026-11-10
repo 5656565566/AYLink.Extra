@@ -229,6 +229,7 @@ class DeviceRepository(
 
     suspend fun createWebRtcTicket(
         deviceId: Int,
+        pageId: String,
         sessionId: String? = null,
         appPackage: String? = null,
         appName: String? = null,
@@ -242,6 +243,7 @@ class DeviceRepository(
                 baseUrl = baseUrl,
                 token = token,
                 deviceId = deviceId,
+                pageId = pageId,
                 sessionId = sessionId,
                 appPackage = appPackage,
                 appName = appName,
@@ -252,22 +254,28 @@ class DeviceRepository(
             )
         }
 
-    suspend fun heartbeatScrcpySession(
-        deviceId: Int,
-        sessionId: String = "",
+    suspend fun registerScrcpySessionPage(): String =
+        authRepository.withAuthorizedRequest { baseUrl, token ->
+            agentApi.registerScrcpySessionPage(baseUrl, token).pageId
+        }
+
+    suspend fun heartbeatScrcpySessions(
+        pageId: String,
+        sequence: Long,
+        bitmap: String,
     ) {
         authRepository.withAuthorizedRequest { baseUrl, token ->
-            agentApi.postScrcpySessionAction(baseUrl, token, "heartbeat", deviceId, sessionId)
+            agentApi.heartbeatScrcpySessions(baseUrl, token, pageId, sequence, bitmap)
         }
     }
 
-    suspend fun releaseScrcpySession(
-        deviceId: Int,
-        sessionId: String = "",
+    suspend fun releaseScrcpySessionPage(
+        baseUrl: String,
+        token: String,
+        pageId: String,
+        sequence: Long,
     ) {
-        authRepository.withAuthorizedRequest { baseUrl, token ->
-            agentApi.postScrcpySessionAction(baseUrl, token, "release", deviceId, sessionId)
-        }
+        agentApi.heartbeatScrcpySessions(baseUrl, token, pageId, sequence, "")
     }
 
     suspend fun getVideoStreamHealth(

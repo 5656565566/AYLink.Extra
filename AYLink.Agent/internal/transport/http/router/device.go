@@ -37,7 +37,7 @@ const (
 func registerDeviceRoutes(mux *http.ServeMux, handlers routeHandlers, guards routeGuards) {
 	mux.Handle("/api/webrtc-ticket", guards.authMiddleware(guards.requireDevicesControl(http.HandlerFunc(handlers.webrtc.CreateTicket))))
 	mux.Handle("/api/scrcpy-sessions/heartbeat", guards.authMiddleware(guards.requireDevicesControl(http.HandlerFunc(handlers.webrtc.Heartbeat))))
-	mux.Handle("/api/scrcpy-sessions/release", guards.authMiddleware(guards.requireDevicesControl(http.HandlerFunc(handlers.webrtc.Release))))
+	mux.Handle("/api/scrcpy-sessions/page", guards.authMiddleware(guards.requireDevicesControl(http.HandlerFunc(handlers.webrtc.RegisterWebPage))))
 	mux.Handle("/api/scrcpy-sessions/video-health", guards.authMiddleware(guards.requireDevicesControl(http.HandlerFunc(handlers.webrtc.VideoHealth))))
 	mux.HandleFunc("/webrtc", handlers.webrtc.ServeSignalWS)
 	mux.HandleFunc("/api/file-downloads/", handlers.device.DownloadFileByTicket)

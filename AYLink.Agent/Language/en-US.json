@@ -527,6 +527,8 @@
     "BackgroundImages": "Manage background images",
     "BackgroundImagesDescription": "Show multiple images randomly or pin one image",
     "BackgroundMute": "Mute in background",
+    "ActiveCastSessionCount": "Active sessions",
+    "ActiveCastSessionCountDescription": "Maximum audio and video connections kept for unwatched casts, excluding the cast being viewed. Set to 0 to keep none; remote sessions for open tabs stay alive.",
     "BackgroundMuteDescription": "Automatically mute webpage audio when the window loses focus or goes to the background",
     "ChangePassword": "Change Password",
     "ChangePasswordDescription": "Change the current account password. You will need to sign in again afterwards.",

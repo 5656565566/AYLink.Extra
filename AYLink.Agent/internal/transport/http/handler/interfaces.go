@@ -138,14 +138,15 @@ type TerminalService interface {
 }
 
 type WebRTCService interface {
+	RegisterWebPage(owner webrtcservice.WebOwner) (string, error)
+	HeartbeatWebPage(owner webrtcservice.WebOwner, pageID string, sequence uint64, bitmap string) error
+	WebPageOwners() []webrtcservice.WebPageOwner
+	ReleaseWebPage(pageID string)
+	StartTicket(ticket domainwebrtc.Ticket) bool
 	CreateTicket(ctx context.Context, input webrtcservice.CreateTicketInput) (webrtcservice.CreateTicketResult, error)
-	TouchSession(ctx context.Context, deviceID string, sessionID string) (bool, error)
-	ReleaseSession(ctx context.Context, deviceID string, sessionID string) error
-	HasActiveSessionLease(deviceID string) bool
 	HasSessionLease(deviceID string, sessionID string) bool
 	GetVideoStreamHealthSnapshot(sessionID string) (domainwebrtc.VideoStreamHealthSnapshot, error)
 	ConsumeTicket(ctx context.Context, value string) (domainwebrtc.Ticket, error)
-	MarkSessionStarted(deviceID string, sessionID string)
 	ReplaceSignalingSession(sessionID string)
 	HandleSignalWebSocket(ctx context.Context, deviceID string, sessionID string, conn *websocket.Conn, settings webrtcservice.SettingsProvider, runtime domainscrcpy.Runtime) error
 }

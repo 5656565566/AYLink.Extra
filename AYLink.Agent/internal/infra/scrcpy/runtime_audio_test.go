@@ -64,7 +64,7 @@ func TestRuntimeOpusPacketsRemainImmutableUntilReleased(t *testing.T) {
 	}
 	send("AAAA")
 	first := []domainscrcpy.AudioPacket{receive(subscribers[0]), receive(subscribers[1])}
-	// 一个订阅者释放后，另一个仍持有的包也不能被后续读取覆盖。
+	// 一个订阅者释放后 另一个仍持有的包也不能被后续读取覆盖
 	first[0].Release()
 	send("BBBB")
 	second := []domainscrcpy.AudioPacket{receive(subscribers[0]), receive(subscribers[1])}

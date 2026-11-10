@@ -30,6 +30,7 @@ data class LoginResponse(
 @Serializable
 data class WebRtcTicketRequest(
     val deviceId: String,
+    val pageId: String,
     val sessionId: String = "",
     val appPackage: String = "",
     val appName: String = "",
@@ -42,14 +43,21 @@ data class WebRtcTicketRequest(
 @Serializable
 data class WebRtcTicketResponse(
     val ticket: String,
+    val slot: Int,
     val sessionId: String = "",
     val expiresInSeconds: Int,
 )
 
 @Serializable
-data class ScrcpySessionActionRequest(
-    val deviceId: String,
-    val sessionId: String = "",
+data class ScrcpySessionPageResponse(
+    @SerialName("p") val pageId: String,
+)
+
+@Serializable
+data class ScrcpySessionHeartbeatRequest(
+    @SerialName("p") val pageId: String,
+    @SerialName("v") val sequence: Long,
+    @SerialName("b") val bitmap: String,
 )
 
 @Serializable

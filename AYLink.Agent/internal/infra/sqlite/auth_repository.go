@@ -414,7 +414,7 @@ func (r *AuthRepository) getPermissionsForRole(ctx context.Context, roleID int) 
 
 func (r *AuthRepository) GetRefreshToken(ctx context.Context, tokenHash string) (*domainauth.TokenRecord, *domainauth.UserRecord, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT rt.Id, rt.UserId, rt.ExpiresAt, rt.RevokedAt,
+		SELECT rt.Id, rt.UserId, rt.ExpiresAt, rt.RevokedAt, rt.SessionId,
 		       u.Id, u.Username, u.PasswordHash, u.PasswordSalt, u.IsActive, u.CreatedAt, u.UpdatedAt, u.LastLoginAt
 		FROM RefreshTokens rt
 		INNER JOIN Users u ON u.Id = rt.UserId
@@ -428,7 +428,7 @@ func (r *AuthRepository) GetRefreshToken(ctx context.Context, tokenHash string) 
 	var lastLogin sql.NullString
 
 	err := row.Scan(
-		&token.ID, &token.UserID, &tokenExpires, &revoked,
+		&token.ID, &token.UserID, &tokenExpires, &revoked, &token.LoginSessionID,
 		&user.ID, &user.Username, &user.PasswordHash, &user.PasswordSalt, &user.IsActive, &created, &updated, &lastLogin,
 	)
 	if err != nil {
@@ -698,18 +698,31 @@ func (r *AuthRepository) CreateSession(ctx context.Context, user domainauth.User
 		return err
 	}
 	defer tx.Rollback()
+	if pair.PreviousRefreshTokenID != 0 {
+		// 轮换必须和新令牌一起提交 重复刷新或注销不能留下另一组有效凭据
+		result, err := tx.ExecContext(ctx, `UPDATE RefreshTokens SET RevokedAt = ?
+			WHERE Id = ? AND UserId = ? AND RevokedAt IS NULL AND ExpiresAt > ?
+			AND (SessionId = ? OR SessionId = '')`, now.Format(time.RFC3339Nano), pair.PreviousRefreshTokenID, user.ID,
+			now.Format(time.RFC3339Nano), pair.LoginSessionID)
+		if err != nil {
+			return err
+		}
+		if count, err := result.RowsAffected(); err != nil || count != 1 {
+			return errors.New("refresh token is no longer valid")
+		}
+	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO AccessTokens (UserId, TokenHash, ExpiresAt, CreatedAt, LastSeenAt)
-		VALUES (?, ?, ?, ?, ?)`,
-		user.ID, hashToken(pair.AccessToken), pair.AccessTokenExpiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		INSERT INTO AccessTokens (UserId, TokenHash, ExpiresAt, CreatedAt, LastSeenAt, SessionId)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		user.ID, hashToken(pair.AccessToken), pair.AccessTokenExpiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), pair.LoginSessionID); err != nil {
 		return err
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO RefreshTokens (UserId, TokenHash, ExpiresAt, CreatedAt, LastUsedAt)
-		VALUES (?, ?, ?, ?, ?)`,
-		user.ID, hashToken(pair.RefreshToken), pair.RefreshTokenExpiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		INSERT INTO RefreshTokens (UserId, TokenHash, ExpiresAt, CreatedAt, LastUsedAt, SessionId)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		user.ID, hashToken(pair.RefreshToken), pair.RefreshTokenExpiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), pair.LoginSessionID); err != nil {
 		return err
 	}
 
@@ -730,7 +743,9 @@ func (r *AuthRepository) RevokeRefreshToken(ctx context.Context, tokenID int, re
 }
 
 func (r *AuthRepository) RevokeRefreshTokenByHash(ctx context.Context, tokenHash string, revokedAt time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE RefreshTokens SET RevokedAt = ? WHERE TokenHash = ? AND RevokedAt IS NULL`, revokedAt.Format(time.RFC3339Nano), tokenHash)
+	_, err := r.db.ExecContext(ctx, `UPDATE RefreshTokens SET RevokedAt = ? WHERE
+		(TokenHash = ? OR (SessionId <> '' AND SessionId = (SELECT SessionId FROM RefreshTokens WHERE TokenHash = ?)))
+		AND RevokedAt IS NULL`, revokedAt.Format(time.RFC3339Nano), tokenHash, tokenHash)
 	return err
 }
 
@@ -741,8 +756,21 @@ func (r *AuthRepository) RevokeAllRefreshTokensForUser(ctx context.Context, user
 }
 
 func (r *AuthRepository) DeleteAccessTokenByHash(ctx context.Context, tokenHash string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM AccessTokens WHERE TokenHash = ?`, tokenHash)
-	return err
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE RefreshTokens SET RevokedAt = ? WHERE SessionId <> ''
+		AND SessionId = (SELECT SessionId FROM AccessTokens WHERE TokenHash = ?) AND RevokedAt IS NULL`,
+		time.Now().UTC().Format(time.RFC3339Nano), tokenHash); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM AccessTokens WHERE TokenHash = ? OR
+		(SessionId <> '' AND SessionId = (SELECT SessionId FROM AccessTokens WHERE TokenHash = ?))`, tokenHash, tokenHash); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *AuthRepository) DeleteAllAccessTokensForUser(ctx context.Context, userID int) error {

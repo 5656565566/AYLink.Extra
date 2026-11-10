@@ -43,6 +43,7 @@ function createPersistedConnection(overrides: Partial<PersistedCastConnection> =
     remoteTracks: new Map(),
     remoteVideoStream: new MediaStream(),
     remoteAudioStream: new MediaStream(),
+    audioElement: document.createElement('audio'),
     pendingCandidates: [],
     ...overrides
   };
@@ -110,9 +111,8 @@ function createHarness(overrides: Partial<UseScreencastSessionOptions> = {}) {
     getSessionReleaseTarget: () => ({ deviceId: 'device-1', sessionId: '' }),
     getRestorableSessionId: () => '',
     setRestorableSessionId: vi.fn(),
-    postScrcpySessionAction: vi.fn(),
-    stopScrcpySessionHeartbeat: vi.fn(),
-    startScrcpySessionHeartbeat: vi.fn(),
+    releaseCastSession: vi.fn(),
+    refreshCastPage: vi.fn(),
     disposeAllPersistedConnections: vi.fn(() => persistedConnections.clear()),
     getPersistedConnection: (tabKey) => persistedConnections.get(tabKey) ?? null,
     disposePersistedConnection: vi.fn((tabKey) => persistedConnections.delete(tabKey)),
@@ -214,19 +214,19 @@ describe('useScreencastSession', () => {
       ticketResponse: createResponse({ sessionId: 'restored-session', ticket: 'ticket 1' })
     }));
     const setRestorableSessionId = vi.fn();
-    const postScrcpySessionAction = vi.fn();
+    const releaseCastSession = vi.fn();
     const harness = createHarness({
       getRestorableSessionId: () => 'restored-session',
       getSessionReleaseTarget: () => ({ deviceId: 'device-1', sessionId: 'restored-session' }),
       setRestorableSessionId,
-      postScrcpySessionAction,
+      releaseCastSession,
       requestSignalTicket
     });
 
     await harness.session.lifecycle.start();
 
     expect(requestSignalTicket).toHaveBeenCalledWith('restored-session', { newPeerConnection: true });
-    expect(postScrcpySessionAction).not.toHaveBeenCalledWith('release', 'device-1', 'restored-session');
+    expect(releaseCastSession).not.toHaveBeenCalledWith('device-1', 'restored-session');
     expect(setRestorableSessionId).toHaveBeenCalledWith('tab-1', 'restored-session');
     harness.restoreWebSocket();
   });
@@ -260,7 +260,7 @@ describe('useScreencastSession', () => {
 
     expect(harness.runtime.peerConnection).toBe(persisted.peerConnection);
     expect(harness.videoElement.srcObject).toBe(persisted.remoteVideoStream);
-    expect(harness.audioElement.srcObject).toBe(persisted.remoteAudioStream);
+    expect(harness.audioElement.srcObject).toBeNull();
     expect(harness.backgroundAudioElement.srcObject).toBe(persisted.remoteAudioStream);
     expect(harness.options.wirePeerConnectionEventHandlers).toHaveBeenCalled();
     expect(harness.options.startVideoFrameMonitor).toHaveBeenCalledWith(1);
@@ -283,7 +283,7 @@ describe('useScreencastSession', () => {
     harness.runtime.peerConnection = createPeerConnection('connected');
     harness.runtime.dataChannel = createChannel('control');
 
-    harness.session.lifecycle.stop(true, 'tab-1', { disposeOtherPersistedConnections: false });
+    harness.session.lifecycle.stop(true, 'tab-1');
 
     expect(harness.options.captureCurrentVideoFrame).toHaveBeenCalledWith('tab-1');
     expect(harness.options.persistCastConnectionSnapshot).toHaveBeenCalled();
